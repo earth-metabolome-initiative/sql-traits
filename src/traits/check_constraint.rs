@@ -28,11 +28,11 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
         Expr::IsNotNull(col_expr) => {
             // Check if the column is declared NOT NULL in the table schema
             if let Expr::Identifier(ident) = col_expr.as_ref() {
-                for column in columns.iter() {
+                for column in columns {
                     if column.column_name() == ident.value {
                         // If column is NOT NULL, IS NOT NULL is TRUE.
                         // If column is NULLABLE, IS NOT NULL is variable (None).
-                        return if !column.is_nullable(database) { Some(true) } else { None };
+                        return if column.is_nullable(database) { None } else { Some(true) };
                     }
                 }
                 None
@@ -44,11 +44,11 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
         Expr::IsNull(col_expr) => {
             // Check if the column is declared NOT NULL in the table schema
             if let Expr::Identifier(ident) = col_expr.as_ref() {
-                for column in columns.iter() {
+                for column in columns {
                     if column.column_name() == ident.value {
                         // If column is NOT NULL, IS NULL is FALSE.
                         // If column is NULLABLE, IS NULL is variable (None).
-                        return if !column.is_nullable(database) { Some(false) } else { None };
+                        return if column.is_nullable(database) { None } else { Some(false) };
                     }
                 }
                 None
@@ -63,30 +63,25 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
         // Binary operations
         Expr::BinaryOp { left, op, right } => {
             // Check for patterns like 1 = 1, 0 = 0, etc.
-            if matches!(op, BinaryOperator::Eq) {
-                if let (Expr::Value(left_val), Expr::Value(right_val)) =
+            if matches!(op, BinaryOperator::Eq)
+                && let (Expr::Value(left_val), Expr::Value(right_val)) =
                     (left.as_ref(), right.as_ref())
                 {
                     return Some(left_val.value == right_val.value);
                 }
-            }
 
             // Check for IS NULL OR IS NOT NULL pattern (always true)
             if matches!(op, BinaryOperator::Or) {
                 if let (Expr::IsNull(null_col), Expr::IsNotNull(not_null_col)) =
                     (left.as_ref(), right.as_ref())
-                {
-                    if null_col == not_null_col {
+                    && null_col == not_null_col {
                         return Some(true);
                     }
-                }
                 if let (Expr::IsNotNull(not_null_col), Expr::IsNull(null_col)) =
                     (left.as_ref(), right.as_ref())
-                {
-                    if null_col == not_null_col {
+                    && null_col == not_null_col {
                         return Some(true);
                     }
-                }
             }
 
             // Recursively check if both sides are tautological for AND

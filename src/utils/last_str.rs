@@ -13,6 +13,7 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 /// # Panics
 ///
 /// * Panics if the `ObjectName` has no parts.
+#[must_use] 
 pub fn last_str(object_name: &ObjectName) -> &str {
     match &object_name.0.last().expect("ObjectName has no parts") {
         ObjectNamePart::Identifier(ident) => ident.value.as_str(),

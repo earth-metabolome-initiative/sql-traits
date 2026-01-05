@@ -1301,7 +1301,7 @@ pub trait TableLike:
         }
 
         let sorted_dag =
-            database.table_dag().into_iter().map(|table| table.borrow()).collect::<Vec<&Self>>();
+            database.table_dag().into_iter().map(std::borrow::Borrow::borrow).collect::<Vec<&Self>>();
 
         ancestral_extended_tables.sort_by_key(|table| {
             sorted_dag
