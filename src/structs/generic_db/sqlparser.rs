@@ -34,24 +34,36 @@ pub type ParserDB = GenericDB<
     TableAttribute<CreateTable, CheckConstraint>,
 >;
 
+/// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s `CreateTable`.
+pub type ParserDBBuilder = GenericDBBuilder<
+    CreateTable,
+    TableAttribute<CreateTable, ColumnDef>,
+    TableAttribute<CreateTable, UniqueConstraint>,
+    TableAttribute<CreateTable, ForeignKeyConstraint>,
+    CreateFunction,
+    TableAttribute<CreateTable, CheckConstraint>,
+>;
+
+/// A type alias for the result of processing check constraints.
+pub type CheckConstraintResult = (
+    Vec<Rc<<ParserDB as DatabaseLike>::Column>>,
+    Vec<Rc<<ParserDB as DatabaseLike>::Function>>,
+);
+
+/// A type alias for the result of processing unique constraints.
+pub type UniqueConstraintResult = (
+    Rc<TableAttribute<CreateTable, UniqueConstraint>>,
+    UniqueIndexMetadata<TableAttribute<CreateTable, UniqueConstraint>>,
+);
+
 impl ParserDB {
     /// Helper function to process check constraints.
     fn process_check_constraint(
         check_expr: &Expr,
         create_table: &Rc<CreateTable>,
         table_metadata: &TableMetadata<CreateTable>,
-        builder: &GenericDBBuilder<
-            CreateTable,
-            TableAttribute<CreateTable, ColumnDef>,
-            TableAttribute<CreateTable, UniqueConstraint>,
-            TableAttribute<CreateTable, ForeignKeyConstraint>,
-            CreateFunction,
-            TableAttribute<CreateTable, CheckConstraint>,
-        >,
-    ) -> Result<
-        (Vec<Rc<<Self as DatabaseLike>::Column>>, Vec<Rc<<Self as DatabaseLike>::Function>>),
-        crate::errors::Error,
-    > {
+        builder: &ParserDBBuilder,
+    ) -> Result<CheckConstraintResult, crate::errors::Error> {
         let columns_in_expression = columns_in_expression::<Self>(
             check_expr,
             &create_table.name.to_string(),
@@ -81,10 +93,7 @@ impl ParserDB {
     fn process_unique_constraint(
         unique_constraint: UniqueConstraint,
         create_table: &Rc<CreateTable>,
-    ) -> (
-        Rc<TableAttribute<CreateTable, UniqueConstraint>>,
-        UniqueIndexMetadata<TableAttribute<CreateTable, UniqueConstraint>>,
-    ) {
+    ) -> UniqueConstraintResult {
         let unique_index = Rc::new(TableAttribute::new(create_table.clone(), unique_constraint));
         let expression = Self::create_unique_expression(&unique_index.attribute().columns);
         let unique_index_metadata = UniqueIndexMetadata::new(expression, create_table.clone());
@@ -96,25 +105,8 @@ impl ParserDB {
         column: &Rc<TableAttribute<CreateTable, ColumnDef>>,
         create_table: &Rc<CreateTable>,
         table_metadata: &mut TableMetadata<CreateTable>,
-        mut builder: GenericDBBuilder<
-            CreateTable,
-            TableAttribute<CreateTable, ColumnDef>,
-            TableAttribute<CreateTable, UniqueConstraint>,
-            TableAttribute<CreateTable, ForeignKeyConstraint>,
-            CreateFunction,
-            TableAttribute<CreateTable, CheckConstraint>,
-        >,
-    ) -> Result<
-        GenericDBBuilder<
-            CreateTable,
-            TableAttribute<CreateTable, ColumnDef>,
-            TableAttribute<CreateTable, UniqueConstraint>,
-            TableAttribute<CreateTable, ForeignKeyConstraint>,
-            CreateFunction,
-            TableAttribute<CreateTable, CheckConstraint>,
-        >,
-        crate::errors::Error,
-    > {
+        mut builder: ParserDBBuilder,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
         for option in &column.attribute().options {
             match option.option.clone() {
                 ColumnOption::Check(check_constraint) => {
@@ -196,30 +188,72 @@ impl ParserDB {
         Ok(builder)
     }
 
+    /// Helper function to process a foreign key table constraint.
+    fn process_foreign_key_table_constraint(
+        fk: &ForeignKeyConstraint,
+        create_table: &Rc<CreateTable>,
+        table_metadata: &mut TableMetadata<CreateTable>,
+        builder: ParserDBBuilder,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        // Validate host columns exist
+        for col_ident in &fk.columns {
+            let column_exists = table_metadata
+                .column_rcs()
+                .any(|col| col.column_name() == col_ident.value.as_str());
+
+            if !column_exists {
+                return Err(crate::errors::Error::HostColumnNotFoundForForeignKey {
+                    host_column: col_ident.value.clone(),
+                    host_table: create_table.name.to_string(),
+                });
+            }
+        }
+
+        // Validate referenced table exists or is current table (self-referential)
+        let referenced_table_name = fk.foreign_table.to_string();
+
+        let Some(referenced_table) = builder
+            .tables()
+            .iter()
+            .map(|(t, _)| t.as_ref())
+            .chain(std::iter::once(create_table.as_ref()))
+            .find(|t| t.name.to_string() == referenced_table_name)
+        else {
+            return Err(crate::errors::Error::ReferencedTableNotFoundForForeignKey {
+                referenced_table: referenced_table_name.clone(),
+                host_table: create_table.name.to_string(),
+            });
+        };
+
+        // Validate referenced columns exist
+        for ref_col_ident in &fk.referred_columns {
+            let column_exists = referenced_table
+                .columns
+                .iter()
+                .any(|col| col.name.value.as_str() == ref_col_ident.value.as_str());
+
+            if !column_exists {
+                return Err(crate::errors::Error::ReferencedColumnNotFoundForForeignKey {
+                    referenced_column: ref_col_ident.value.clone(),
+                    referenced_table: referenced_table_name.clone(),
+                    host_table: create_table.name.to_string(),
+                });
+            }
+        }
+
+        let fk_rc = Rc::new(TableAttribute::new(create_table.clone(), fk.clone()));
+        table_metadata.add_foreign_key(fk_rc.clone());
+        let builder = builder.add_foreign_key(fk_rc, ());
+        Ok(builder)
+    }
+
     /// Helper function to process table constraints.
     fn process_table_constraints(
         constraints: &[TableConstraint],
         create_table: &Rc<CreateTable>,
         table_metadata: &mut TableMetadata<CreateTable>,
-        mut builder: GenericDBBuilder<
-            CreateTable,
-            TableAttribute<CreateTable, ColumnDef>,
-            TableAttribute<CreateTable, UniqueConstraint>,
-            TableAttribute<CreateTable, ForeignKeyConstraint>,
-            CreateFunction,
-            TableAttribute<CreateTable, CheckConstraint>,
-        >,
-    ) -> Result<
-        GenericDBBuilder<
-            CreateTable,
-            TableAttribute<CreateTable, ColumnDef>,
-            TableAttribute<CreateTable, UniqueConstraint>,
-            TableAttribute<CreateTable, ForeignKeyConstraint>,
-            CreateFunction,
-            TableAttribute<CreateTable, CheckConstraint>,
-        >,
-        crate::errors::Error,
-    > {
+        mut builder: ParserDBBuilder,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
         for constraint in constraints {
             match constraint {
                 TableConstraint::Unique(uc) => {
@@ -229,60 +263,7 @@ impl ParserDB {
                     builder = builder.add_unique_index(unique_index, unique_index_metadata);
                 }
                 TableConstraint::ForeignKey(fk) => {
-                    // Validate host columns exist
-                    for col_ident in &fk.columns {
-                        let column_exists = table_metadata
-                            .column_rcs()
-                            .any(|col| col.column_name() == col_ident.value.as_str());
-
-                        if !column_exists {
-                            return Err(crate::errors::Error::HostColumnNotFoundForForeignKey {
-                                host_column: col_ident.value.clone(),
-                                host_table: create_table.name.to_string(),
-                            });
-                        }
-                    }
-
-                    // Validate referenced table exists or is current table (self-referential)
-                    let referenced_table_name = fk.foreign_table.to_string();
-
-                    let referenced_table = builder
-                        .tables()
-                        .iter()
-                        .map(|(t, _)| t.as_ref())
-                        .chain(std::iter::once(create_table.as_ref()))
-                        .find(|t| t.name.to_string() == referenced_table_name);
-
-                    let referenced_table = if let Some(table) = referenced_table {
-                        table
-                    } else {
-                        return Err(crate::errors::Error::ReferencedTableNotFoundForForeignKey {
-                            referenced_table: referenced_table_name.clone(),
-                            host_table: create_table.name.to_string(),
-                        });
-                    };
-
-                    // Validate referenced columns exist
-                    for ref_col_ident in &fk.referred_columns {
-                        let column_exists = referenced_table
-                            .columns
-                            .iter()
-                            .any(|col| col.name.value.as_str() == ref_col_ident.value.as_str());
-
-                        if !column_exists {
-                            return Err(
-                                crate::errors::Error::ReferencedColumnNotFoundForForeignKey {
-                                    referenced_column: ref_col_ident.value.clone(),
-                                    referenced_table: referenced_table_name.clone(),
-                                    host_table: create_table.name.to_string(),
-                                },
-                            );
-                        }
-                    }
-
-                    let fk = Rc::new(TableAttribute::new(create_table.clone(), fk.clone()));
-                    table_metadata.add_foreign_key(fk.clone());
-                    builder = builder.add_foreign_key(fk, ());
+                    builder = Self::process_foreign_key_table_constraint(fk, create_table, table_metadata, builder)?;
                 }
                 TableConstraint::Check(check) => {
                     let check_rc =
@@ -368,7 +349,7 @@ impl ParserDB {
     /// # Errors
     ///
     /// Returns an error if a check constraint references an unknown column.
-    #[must_use]
+    #[must_use = "The result should be checked for errors"]
     #[allow(clippy::too_many_lines)]
     pub fn from_statements(
         statements: Vec<Statement>,
