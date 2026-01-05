@@ -1,5 +1,5 @@
 //! Submodule implementing the [`TableLike`] trait for `sqlparser`'s
-//! [`CreateTable`](sqlparser::ast::CreateTable) struct.
+//! [`CreateTable`] struct.
 
 use ::sqlparser::ast::{CreateTable, Ident};
 

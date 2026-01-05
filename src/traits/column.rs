@@ -682,7 +682,7 @@ pub trait ColumnLike:
     }
 
     /// Iterates over the
-    /// [`CheckConstraintLike`](crate::traits::CheckConstraintLike)s
+    /// [`CheckConstraintLike`]s
     /// that involve this column within the table.
     ///
     /// # Arguments
@@ -754,7 +754,7 @@ pub trait ColumnLike:
 
     #[inline]
     /// Returns an iterator over the non-tautological
-    /// [`CheckConstraintLike`](crate::traits::CheckConstraintLike)s
+    /// [`CheckConstraintLike`]s
     /// that involve this column within the table.
     ///
     /// # Arguments

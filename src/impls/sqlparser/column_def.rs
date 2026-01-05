@@ -1,5 +1,5 @@
 //! Submodule implementing the [`ColumnLike`] trait for `sqlparser`'s
-//! [`ColumnDef`](sqlparser::ast::ColumnDef) struct.
+//! [`ColumnDef`] struct.
 
 use sqlparser::ast::{ColumnDef, CreateTable};
 
