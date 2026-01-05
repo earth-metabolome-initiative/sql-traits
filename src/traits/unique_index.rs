@@ -66,9 +66,8 @@ pub trait UniqueIndexLike: Metadata + Ord + Eq + Debug + Clone {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
-    ///     r#"CREATE TABLE my_table (id INT, name TEXT, UNIQUE (id, name));"#,
-    /// )?;
+    /// let db =
+    ///     ParserDB::try_from(r#"CREATE TABLE my_table (id INT, name TEXT, UNIQUE (id, name));"#)?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let unique_indices: Vec<_> = table.unique_indices(&db).collect();
     /// let ui = unique_indices[0];

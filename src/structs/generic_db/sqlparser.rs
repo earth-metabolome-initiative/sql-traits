@@ -34,7 +34,8 @@ pub type ParserDB = GenericDB<
     TableAttribute<CreateTable, CheckConstraint>,
 >;
 
-/// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s `CreateTable`.
+/// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
+/// `CreateTable`.
 pub type ParserDBBuilder = GenericDBBuilder<
     CreateTable,
     TableAttribute<CreateTable, ColumnDef>,
@@ -45,10 +46,8 @@ pub type ParserDBBuilder = GenericDBBuilder<
 >;
 
 /// A type alias for the result of processing check constraints.
-pub type CheckConstraintResult = (
-    Vec<Rc<<ParserDB as DatabaseLike>::Column>>,
-    Vec<Rc<<ParserDB as DatabaseLike>::Function>>,
-);
+pub type CheckConstraintResult =
+    (Vec<Rc<<ParserDB as DatabaseLike>::Column>>, Vec<Rc<<ParserDB as DatabaseLike>::Function>>);
 
 /// A type alias for the result of processing unique constraints.
 pub type UniqueConstraintResult = (
@@ -263,7 +262,12 @@ impl ParserDB {
                     builder = builder.add_unique_index(unique_index, unique_index_metadata);
                 }
                 TableConstraint::ForeignKey(fk) => {
-                    builder = Self::process_foreign_key_table_constraint(fk, create_table, table_metadata, builder)?;
+                    builder = Self::process_foreign_key_table_constraint(
+                        fk,
+                        create_table,
+                        table_metadata,
+                        builder,
+                    )?;
                 }
                 TableConstraint::Check(check) => {
                     let check_rc =

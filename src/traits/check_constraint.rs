@@ -66,22 +66,24 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
             if matches!(op, BinaryOperator::Eq)
                 && let (Expr::Value(left_val), Expr::Value(right_val)) =
                     (left.as_ref(), right.as_ref())
-                {
-                    return Some(left_val.value == right_val.value);
-                }
+            {
+                return Some(left_val.value == right_val.value);
+            }
 
             // Check for IS NULL OR IS NOT NULL pattern (always true)
             if matches!(op, BinaryOperator::Or) {
                 if let (Expr::IsNull(null_col), Expr::IsNotNull(not_null_col)) =
                     (left.as_ref(), right.as_ref())
-                    && null_col == not_null_col {
-                        return Some(true);
-                    }
+                    && null_col == not_null_col
+                {
+                    return Some(true);
+                }
                 if let (Expr::IsNotNull(not_null_col), Expr::IsNull(null_col)) =
                     (left.as_ref(), right.as_ref())
-                    && null_col == not_null_col {
-                        return Some(true);
-                    }
+                    && null_col == not_null_col
+                {
+                    return Some(true);
+                }
             }
 
             // Recursively check if both sides are tautological for AND
@@ -204,9 +206,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
-    ///     r#"CREATE TABLE my_table (id INT, CHECK (id > 0));"#,
-    /// )?;
+    /// let db = ParserDB::try_from(r#"CREATE TABLE my_table (id INT, CHECK (id > 0));"#)?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
     /// let cc = check_constraints[0];

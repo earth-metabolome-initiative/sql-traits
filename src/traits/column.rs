@@ -802,14 +802,19 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
-    ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
-    /// )?;
+    /// let db =
+    ///     ParserDB::try_from("CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
     /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
-    /// assert!(age_column.has_non_tautological_check_constraints(&db), "age column should have non-tautological check constraints");
-    /// assert!(!score_column.has_non_tautological_check_constraints(&db), "score column should not have non-tautological check constraints");
+    /// assert!(
+    ///     age_column.has_non_tautological_check_constraints(&db),
+    ///     "age column should have non-tautological check constraints"
+    /// );
+    /// assert!(
+    ///     !score_column.has_non_tautological_check_constraints(&db),
+    ///     "score column should not have non-tautological check constraints"
+    /// );
     /// # Ok(())
     /// # }
     /// ```

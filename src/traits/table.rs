@@ -77,6 +77,7 @@ pub trait TableLike:
     /// let db = ParserDB::try_from("CREATE TABLE my_table (id INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert_eq!(table.table_doc(&db), None); // No documentation available
+    /// //
     /// # Ok(())
     /// # }
     /// ```
@@ -1318,8 +1319,11 @@ pub trait TableLike:
             return ancestral_extended_tables;
         }
 
-        let sorted_dag =
-            database.table_dag().into_iter().map(std::borrow::Borrow::borrow).collect::<Vec<&Self>>();
+        let sorted_dag = database
+            .table_dag()
+            .into_iter()
+            .map(std::borrow::Borrow::borrow)
+            .collect::<Vec<&Self>>();
 
         ancestral_extended_tables.sort_by_key(|table| {
             sorted_dag

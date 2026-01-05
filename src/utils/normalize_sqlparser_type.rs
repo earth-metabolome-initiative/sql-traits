@@ -17,19 +17,19 @@ use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 /// // Custom types
 /// let custom = DataType::Custom(
 ///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("GEOGRAPHY"))]),
-///     vec!["Point".to_string(), "4326".to_string()]
+///     vec!["Point".to_string(), "4326".to_string()],
 /// );
 /// assert_eq!(normalize_sqlparser_type(&custom), "GEOGRAPHY(Point, 4326)");
 ///
 /// let custom_geom = DataType::Custom(
 ///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("GEOMETRY"))]),
-///     vec!["Point".to_string(), "4326".to_string()]
+///     vec!["Point".to_string(), "4326".to_string()],
 /// );
 /// assert_eq!(normalize_sqlparser_type(&custom_geom), "GEOMETRY(Point, 4326)");
 ///
 /// let custom_other = DataType::Custom(
 ///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("OTHER"))]),
-///     vec![]
+///     vec![],
 /// );
 /// assert_eq!(normalize_sqlparser_type(&custom_other), "OTHER");
 /// ```
