@@ -197,6 +197,24 @@ pub trait CheckConstraintLike:
     ///
     /// * `database` - A reference to the database instance to query the table
     ///   from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"CREATE TABLE my_table (id INT, CHECK (id > 0));"#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let cc = check_constraints[0];
+    /// let table_ref = CheckConstraintLike::table(cc, &db);
+    /// assert_eq!(table_ref, table);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table;
 
     /// Iterates over the columns involved in the check constraint.
@@ -213,7 +231,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::try_from(
-    ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
+    ///     r#"CREATE TABLE my_table (id INT, name TEXT, CHECK ((id, name) = (1, 'test')), CHECK (length(name) > 0), CHECK (id BETWEEN 1 AND 10), CHECK (id IS NOT NULL));"#,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let columns = table.columns(&db).collect::<Vec<_>>();
@@ -221,11 +239,13 @@ pub trait CheckConstraintLike:
     ///     panic!("Expected two columns");
     /// };
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
-    /// let [cc1, cc2] = &check_constraints.as_slice() else {
-    ///     panic!("Expected two check constraints");
+    /// let [cc1, cc2, cc3, cc4] = &check_constraints.as_slice() else {
+    ///     panic!("Expected four check constraints");
     /// };
-    /// assert_eq!(cc1.columns(&db).collect::<Vec<_>>(), vec![*id]);
+    /// assert_eq!(cc1.columns(&db).collect::<Vec<_>>(), vec![*id, *name]);
     /// assert_eq!(cc2.columns(&db).collect::<Vec<_>>(), vec![*name]);
+    /// assert_eq!(cc3.columns(&db).collect::<Vec<_>>(), vec![*id]);
+    /// assert_eq!(cc4.columns(&db).collect::<Vec<_>>(), vec![*id]);
     /// # Ok(())
     /// # }
     /// ```

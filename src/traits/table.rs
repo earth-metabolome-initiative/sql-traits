@@ -62,6 +62,24 @@ pub trait TableLike:
     }
 
     /// Returns the documentation of the table, if any.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the table
+    ///   documentation from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE my_table (id INT);")?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// assert_eq!(table.table_doc(&db), None); // No documentation available
+    /// # Ok(())
+    /// # }
+    /// ```
     fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db;

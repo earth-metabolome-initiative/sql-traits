@@ -104,6 +104,11 @@ pub fn columns_in_expression<DB: DatabaseLike>(
             // Note: We don't traverse into subqueries as they have their own
             // column scope
         }
+        Expr::Tuple(exprs) => {
+            for expr in exprs {
+                result.extend(columns_in_expression::<DB>(expr, table_name, columns)?);
+            }
+        }
         _ => {}
     }
 

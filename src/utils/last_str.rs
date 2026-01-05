@@ -13,6 +13,24 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 /// # Panics
 ///
 /// * Panics if the `ObjectName` has no parts.
+///
+/// # Examples
+///
+/// ```
+/// use sqlparser::ast::{ObjectName, Ident, ObjectNamePart, ObjectNamePartFunction};
+/// use sql_traits::utils::last_str;
+///
+/// let object_name = ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(Ident::new("table"))]);
+/// assert_eq!(last_str(&object_name), "table");
+///
+/// // Test with function part
+/// let func_part = ObjectNamePartFunction {
+///     name: Ident::new("func"),
+///     args: vec![],
+/// };
+/// let object_name_func = ObjectName(vec![ObjectNamePart::Function(func_part)]);
+/// assert_eq!(last_str(&object_name_func), "func");
+/// ```
 #[must_use] 
 pub fn last_str(object_name: &ObjectName) -> &str {
     match &object_name.0.last().expect("ObjectName has no parts") {

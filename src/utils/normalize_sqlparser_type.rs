@@ -3,6 +3,48 @@
 use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 
 /// Normalizes `SQLParser` data types to a standard representation.
+///
+/// # Examples
+///
+/// ```
+/// use sql_traits::utils::normalize_sqlparser_type;
+/// use sqlparser::ast::{DataType, ObjectName, ObjectNamePart};
+///
+/// assert_eq!(normalize_sqlparser_type(&DataType::Text), "TEXT");
+/// assert_eq!(normalize_sqlparser_type(&DataType::Int(None)), "INT");
+/// assert_eq!(normalize_sqlparser_type(&DataType::Uuid), "UUID");
+///
+/// // Custom types
+/// let custom = DataType::Custom(
+///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("GEOGRAPHY"))]),
+///     vec!["Point".to_string(), "4326".to_string()]
+/// );
+/// assert_eq!(normalize_sqlparser_type(&custom), "GEOGRAPHY(Point, 4326)");
+///
+/// let custom_geom = DataType::Custom(
+///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("GEOMETRY"))]),
+///     vec!["Point".to_string(), "4326".to_string()]
+/// );
+/// assert_eq!(normalize_sqlparser_type(&custom_geom), "GEOMETRY(Point, 4326)");
+///
+/// let custom_other = DataType::Custom(
+///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("OTHER"))]),
+///     vec![]
+/// );
+/// assert_eq!(normalize_sqlparser_type(&custom_other), "OTHER");
+/// ```
+///
+/// # Panics
+///
+/// Panics on unsupported data types:
+///
+/// ```should_panic
+/// use sql_traits::utils::normalize_sqlparser_type;
+/// use sqlparser::ast::DataType;
+///
+/// // This will panic as BIGINT is not supported
+/// normalize_sqlparser_type(&DataType::BigInt(None));
+/// ```
 #[must_use]
 #[inline]
 pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {

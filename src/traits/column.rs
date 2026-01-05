@@ -43,6 +43,20 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query the column
     ///   documentation from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE my_table (id INT, name TEXT);")?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let column = table.column("id", &db).expect("Column 'id' should exist");
+    /// assert!(column.column_doc(&db).is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
     fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db;
@@ -747,6 +761,26 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query check
     ///   constraints from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
+    /// let age_non_tauto = age_column.non_tautological_check_constraints(&db).collect::<Vec<_>>();
+    /// let score_non_tauto = score_column.non_tautological_check_constraints(&db).collect::<Vec<_>>();
+    /// assert_eq!(age_non_tauto.len(), 1, "age column should have one non-tautological check constraint");
+    /// assert_eq!(score_non_tauto.len(), 1, "score column should have one non-tautological check constraint");
+    /// # Ok(())
+    /// # }
+    /// ```
     fn non_tautological_check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
@@ -761,6 +795,24 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query check
     ///   constraints from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
+    /// assert!(age_column.has_non_tautological_check_constraints(&db), "age column should have non-tautological check constraints");
+    /// assert!(!score_column.has_non_tautological_check_constraints(&db), "score column should not have non-tautological check constraints");
+    /// # Ok(())
+    /// # }
+    /// ```
     fn has_non_tautological_check_constraints(&self, database: &Self::DB) -> bool {
         self.non_tautological_check_constraints(database).next().is_some()
     }

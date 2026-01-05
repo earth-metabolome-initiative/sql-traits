@@ -29,7 +29,7 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
         Self: 'db,
     {
         // TODO(@RPG-Alex): Extract documentation from SQL comments after merging PR <https://github.com/apache/datafusion-sqlparser-rs/pull/2069>
-        Some("Undocumented column")
+        None
     }
 
     #[inline]

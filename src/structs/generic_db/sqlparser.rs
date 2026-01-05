@@ -349,6 +349,111 @@ impl ParserDB {
     /// # Errors
     ///
     /// Returns an error if a check constraint references an unknown column.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let sql = r#"
+    /// CREATE TABLE users (
+    ///     id INTEGER PRIMARY KEY,
+    ///     name VARCHAR(100)
+    /// );
+    /// CREATE TABLE posts (
+    ///     id INTEGER PRIMARY KEY,
+    ///     user_id INTEGER REFERENCES users(id),
+    ///     title VARCHAR(200)
+    /// );
+    /// "#;
+    ///
+    /// let dialect = PostgreSqlDialect {};
+    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
+    /// let db = ParserDB::from_statements(statements, "test".to_string()).unwrap();
+    /// assert_eq!(db.catalog_name(), "test");
+    /// ```
+    ///
+    /// # Error Examples
+    ///
+    /// This will fail if a foreign key references a non-existent column:
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let sql = r#"
+    /// CREATE TABLE users (
+    ///     id INTEGER PRIMARY KEY,
+    ///     name VARCHAR(100)
+    /// );
+    /// CREATE TABLE posts (
+    ///     id INTEGER PRIMARY KEY,
+    ///     user_id INTEGER,
+    ///     title VARCHAR(200),
+    ///     FOREIGN KEY (user_id) REFERENCES users(nonexistent_column)
+    /// );
+    /// "#;
+    ///
+    /// let dialect = PostgreSqlDialect {};
+    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
+    /// // This should fail with HostColumnNotFoundForForeignKey
+    /// assert!(ParserDB::from_statements(statements, "test".to_string()).is_err());
+    /// ```
+    ///
+    /// This will fail if a foreign key references a non-existent table:
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let sql = r#"
+    /// CREATE TABLE posts (
+    ///     id INTEGER PRIMARY KEY,
+    ///     user_id INTEGER,
+    ///     title VARCHAR(200),
+    ///     FOREIGN KEY (user_id) REFERENCES nonexistent_table(id)
+    /// );
+    /// "#;
+    ///
+    /// let dialect = PostgreSqlDialect {};
+    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
+    /// // This should fail with ReferencedTableNotFoundForForeignKey
+    /// assert!(ParserDB::from_statements(statements, "test".to_string()).is_err());
+    /// ```
+    ///
+    /// Supports SET TIME ZONE statements:
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let sql = r#"
+    /// SET TIME ZONE 'UTC';
+    /// CREATE TABLE users (
+    ///     id INTEGER PRIMARY KEY,
+    ///     name VARCHAR(100)
+    /// );
+    /// "#;
+    ///
+    /// let dialect = PostgreSqlDialect {};
+    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
+    /// let db = ParserDB::from_statements(statements, "test".to_string()).unwrap();
+    /// assert_eq!(db.catalog_name(), "test");
+    /// ```
+    ///
+    /// Panics on unsupported statements:
+    ///
+    /// ```should_panic
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let sql = "SELECT 1;";
+    /// let dialect = PostgreSqlDialect {};
+    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
+    /// // This should panic
+    /// let _ = ParserDB::from_statements(statements, "test".to_string());
+    /// ```
     #[must_use = "The result should be checked for errors"]
     #[allow(clippy::too_many_lines)]
     pub fn from_statements(
