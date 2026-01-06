@@ -7,6 +7,61 @@
 
 Rust traits describing SQL-like objects.
 
-At this time, the library traits are implemented for [`sqlparser`](https://github.com/apache/datafusion-sqlparser-rs) AST types, and, in a crate downhill from this one, for [`pg_diesel`](https://github.com/earth-metabolome-initiative/pg_diesel) PostgreSQL Model structs. The former is intended for introspecting a database by parsing SQL documents, while the latter operates directly on an existing PostgreSQL database.
+This library provides a set of traits to abstract over SQL database schemas, allowing generic code to operate on database definitions regardless of the underlying representation (e.g., parsed SQL ASTs or active database connection metadata).
+
+## Features
+
+- **Generic Schema Abstraction**: Traits such as `DatabaseLike`, `TableLike`, `ColumnLike`, `ForeignKeyLike`, and `UniqueIndexLike` define a common interface for schema introspection.
+- **SQL Parser Integration**: The `ParserDB` struct implements these traits using `sqlparser-rs`, enabling the construction of an introspectable database model directly from SQL DDL strings.
+- **Metadata Support**: Comprehensive support for table attributes, indices, and constraints.
+
+## Usage
+
+This crate is currently not published to `crates.io`. You can add it to your project via git:
+
+```toml
+[dependencies]
+sql-traits = { git = "https://github.com/earth-metabolome-initiative/sql-traits" }
+```
+
+## Example: Parsing SQL DDL
+
+The following example demonstrates how to parse SQL `CREATE TABLE` statements and inspect the resulting schema model using `ParserDB`.
+
+```rust
+use sql_traits::prelude::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse SQL DDL into a database model
+    let db = ParserDB::try_from(
+        r#"
+        CREATE TABLE users (
+            id INT PRIMARY KEY,
+            username TEXT NOT NULL
+        );
+        "#
+    )?;
+
+    // Retrieve a table by name
+    let users_table = db.table(None, "users").expect("Table not found");
+
+    assert_eq!(users_table.table_name(), "users");
+
+    // Inspect columns
+    let columns: Vec<_> = users_table.columns(&db).collect();
+    assert_eq!(columns.len(), 2);
+    assert_eq!(columns[0].column_name(), "id");
+    assert_eq!(columns[1].column_name(), "username");
+
+    Ok(())
+}
+```
+
+## Implementations
+
+- **[`sqlparser`](https://github.com/apache/datafusion-sqlparser-rs) AST**: Included in this crate (`ParserDB`), useful for static analysis and schema validation of SQL files.
+- **[`pg_diesel`](https://github.com/earth-metabolome-initiative/pg_diesel)**: An external, downstream crate that implements these traits for inspecting an existing PostgreSQL database.
+
+## Status
 
 This crate is not yet published to `crates.io` because we still need to finalize the upstream crate [`geometric-traits`](https://github.com/earth-metabolome-initiative/geometric-traits).
