@@ -822,3 +822,53 @@ pub trait ColumnLike:
         self.non_tautological_check_constraints(database).next().is_some()
     }
 }
+
+impl<C> ColumnLike for &C
+where
+    C: ColumnLike,
+    Self: Borrow<<<C as ColumnLike>::DB as DatabaseLike>::Column>,
+    for<'a> <<C as ColumnLike>::DB as DatabaseLike>::Column: Borrow<&'a C>,
+{
+    type DB = C::DB;
+
+    #[inline]
+    fn column_name(&self) -> &str {
+        (*self).column_name()
+    }
+
+    #[inline]
+    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    where
+        Self: 'db,
+    {
+        (*self).column_doc(database)
+    }
+
+    #[inline]
+    fn data_type<'db>(&'db self, database: &'db Self::DB) -> &'db str {
+        (*self).data_type(database)
+    }
+
+    #[inline]
+    fn is_generated(&self) -> bool {
+        (*self).is_generated()
+    }
+
+    #[inline]
+    fn is_nullable(&self, database: &Self::DB) -> bool {
+        (*self).is_nullable(database)
+    }
+
+    #[inline]
+    fn default_value(&self) -> Option<String> {
+        (*self).default_value()
+    }
+
+    #[inline]
+    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table
+    where
+        Self: 'db,
+    {
+        (*self).table(database)
+    }
+}
