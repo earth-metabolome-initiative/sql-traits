@@ -33,6 +33,7 @@ pub fn normalize_postgres_type(pg_type: &str) -> &str {
         "char" | "character" => "CHAR",
         "text" => "TEXT",
         "date" => "date",
+        "uuid" => "UUID",
         "timestamp" | "timestamp without time zone" => "timestamp without time zone",
         "timestamptz" | "timestamp with time zone" => "timestamp with time zone",
         "time" | "time without time zone" => "time without time zone",
