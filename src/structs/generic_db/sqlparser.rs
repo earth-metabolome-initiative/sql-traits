@@ -2,6 +2,7 @@
 
 use std::{path::Path, rc::Rc};
 
+use git2::Repository;
 use sqlparser::{
     ast::{
         CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateTable, Expr,
@@ -534,6 +535,27 @@ impl ParserDB {
         }
 
         Ok(builder.into())
+    }
+
+    /// Constructs a `ParserDB` from a git URL.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    ///
+    /// let url = "https://github.com/earth-metabolome-initiative/asset-procedure-schema.git";
+    /// let db = ParserDB::from_git_url(url).unwrap();
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the repository cannot be cloned or
+    /// if the SQL files cannot be parsed.
+    pub fn from_git_url(url: &str) -> Result<Self, crate::errors::Error> {
+        let dir = tempfile::tempdir()?;
+        Repository::clone(url, dir.path())?;
+        Self::try_from(dir.path())
     }
 }
 

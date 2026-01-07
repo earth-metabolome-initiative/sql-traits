@@ -49,4 +49,10 @@ pub enum Error {
     /// Wrapper around SQL parser errors.
     #[error("SQL parser error: {0}")]
     SqlParserError(#[from] ParserError),
+    /// Wrapper around git errors.
+    #[error("Git error: {0}")]
+    GitError(#[from] git2::Error),
+    /// Wrapper around IO errors.
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
 }
