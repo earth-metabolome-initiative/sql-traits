@@ -48,6 +48,14 @@ where
             .map(|index| self.tables[index].0.as_ref())
     }
 
+    fn table_id(&self, table: &Self::Table) -> Option<usize> {
+        self.tables
+            .binary_search_by_key(&(table.table_schema(), table.table_name()), |(t, _)| {
+                (t.table_schema(), t.table_name())
+            })
+            .ok()
+    }
+
     #[inline]
     fn tables(&self) -> impl Iterator<Item = &Self::Table> {
         self.tables.iter().map(|(table, _)| table.as_ref())

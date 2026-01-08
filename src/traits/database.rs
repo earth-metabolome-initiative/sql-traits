@@ -274,6 +274,34 @@ pub trait DatabaseLike: Clone + Debug {
     /// ```
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
 
+    /// Returns the table ID for the given table object according to its
+    /// position in the database's table iterator.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Table object to get the ID for.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE table1 (id INT);
+    /// CREATE TABLE table2 (name TEXT);
+    /// CREATE TABLE table3 (score DECIMAL);
+    /// "#,
+    /// )?;
+    /// let table2 = db.table(None, "table2").expect("Table 'table2' should exist");
+    /// let table2_id = db.table_id(table2).expect("Table ID for 'table2' should exist");
+    /// assert_eq!(table2_id, 1);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn table_id(&self, table: &Self::Table) -> Option<usize>;
+
     /// Returns the function with the given name.
     ///
     /// # Arguments
