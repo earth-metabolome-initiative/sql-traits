@@ -1694,6 +1694,51 @@ pub trait TableLike:
         })
     }
 
+    /// Returns whether the table contains a foreign key referring to
+    /// the provided table.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   and the other table belong.
+    /// * `other` - The other table to check against.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT, ancestor_id INT REFERENCES grandparent_table(id));
+    /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
+    ///     FOREIGN KEY (id) REFERENCES grandparent_table(id));
+    /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
+    ///     FOREIGN KEY (id) REFERENCES parent_table(id));
+    /// "#,
+    /// )?;
+    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// assert!(child_table.refers_to(&db, parent_table));
+    /// assert!(!child_table.refers_to(&db, grandparent_table));
+    /// assert!(!parent_table.refers_to(&db, child_table));
+    /// assert!(!grandparent_table.refers_to(&db, child_table));
+    /// assert!(parent_table.refers_to(&db, grandparent_table));
+    /// assert!(!grandparent_table.refers_to(&db, parent_table));
+    /// assert!(!child_table.refers_to(&db, child_table));
+    /// assert!(!parent_table.refers_to(&db, parent_table));
+    /// assert!(grandparent_table.refers_to(&db, grandparent_table));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn refers_to(&self, database: &Self::DB, other: &Self) -> bool {
+        self.foreign_keys(database).any(|fk| {
+            let referenced_table: &Self = fk.referenced_table(database).borrow();
+            referenced_table == other
+        })
+    }
+
     /// Returns an iterator over all tables that depend directly or indirectly
     /// via foreign keys (including extensions) on the current table, excluding
     /// itself.
