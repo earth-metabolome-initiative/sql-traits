@@ -206,7 +206,6 @@ pub trait ColumnLike:
         matches!(self.normalized_data_type(database), "TEXT" | "VARCHAR" | "CHAR")
     }
 
-
     /// Returns whether the column type is boolean
     ///
     /// # Arguments
@@ -224,8 +223,7 @@ pub trait ColumnLike:
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// let bool_column =
-    ///     table.column("is_bool", &db).expect("Column 'is_bool' should exist");
+    /// let bool_column = table.column("is_bool", &db).expect("Column 'is_bool' should exist");
     /// assert!(!id_column.is_textual(&db), "id column should not be textual");
     /// assert!(name_column.is_textual(&db), "name column should be textual");
     /// assert!(bool_column.is_bool(&db), "bool column should be boolean");
