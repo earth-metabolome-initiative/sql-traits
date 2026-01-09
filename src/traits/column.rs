@@ -206,6 +206,39 @@ pub trait ColumnLike:
         matches!(self.normalized_data_type(database), "TEXT" | "VARCHAR" | "CHAR")
     }
 
+    /// Returns whether the column type is boolean
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the column
+    ///   data type from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (id INT, name TEXT, is_bool BOOL, also_bool BOOLEAN);",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let bool_column = table.column("is_bool", &db).expect("Column 'is_bool' should exist");
+    /// let also_bool_column = table.column("also_bool", &db).expect("Column 'also_bool' should exist");
+    /// assert!(!id_column.is_bool(&db), "id column should not be boolean");
+    /// assert!(!name_column.is_bool(&db), "name column should not be boolean");
+    /// assert!(bool_column.is_bool(&db), "bool column should be boolean");
+    /// assert!(also_bool_column.is_bool(&db), "also_bool column should be boolean");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn is_bool(&self, database: &Self::DB) -> bool {
+        matches!(self.normalized_data_type(database), "boolean")
+    }
+
     /// Returns whether the column is nullable.
     ///
     /// # Example
