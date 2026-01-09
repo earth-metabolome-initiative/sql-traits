@@ -47,12 +47,24 @@ pub enum Error {
         host_table: String,
     },
     /// Wrapper around SQL parser errors.
-    #[error("SQL parser error: {0}")]
-    SqlParserError(#[from] ParserError),
+    #[error("SQL parser error: {error} in {file:?}")]
+    SqlParserError {
+        /// The error from the SQL parser.
+        #[source]
+        error: ParserError,
+        /// The file containing the offending code.
+        file: Option<std::path::PathBuf>,
+    },
     /// Wrapper around git errors.
     #[error("Git error: {0}")]
     GitError(#[from] git2::Error),
     /// Wrapper around IO errors.
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+}
+
+impl From<ParserError> for Error {
+    fn from(error: ParserError) -> Self {
+        Error::SqlParserError { error, file: None }
+    }
 }

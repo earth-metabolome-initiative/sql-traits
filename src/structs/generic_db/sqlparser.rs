@@ -597,15 +597,7 @@ impl TryFrom<&Path> for ParserDB {
     type Error = crate::errors::Error;
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        let mut comulative_sql = String::new();
-        let mut sql_files = search_sql_documents(path);
-        sql_files.sort_unstable();
-        for sql_file in sql_files {
-            let sql_content = std::fs::read_to_string(&sql_file)
-                .map_err(|e| ParserError::TokenizerError(e.to_string()))?;
-            comulative_sql.push_str(&sql_content);
-        }
-        Self::try_from(comulative_sql.as_str())
+        Self::try_from(&[path] as &[&Path])
     }
 }
 
@@ -628,10 +620,24 @@ impl TryFrom<&[&Path]> for ParserDB {
 
             for sql_path in sql_paths {
                 let sql_content = std::fs::read_to_string(&sql_path)
-                    .map_err(|e| ParserError::TokenizerError(e.to_string()))?;
+                    .map_err(|e| ParserError::TokenizerError(e.to_string()))
+                    .map_err(|e| {
+                        crate::errors::Error::SqlParserError {
+                            error: e,
+                            file: Some(sql_path.clone()),
+                        }
+                    })?;
                 let mut parser = sqlparser::parser::Parser::new(&PostgreSqlDialect {})
-                    .try_with_sql(&sql_content)?;
-                statements.extend(parser.parse_statements()?);
+                    .try_with_sql(&sql_content)
+                    .map_err(|e| {
+                        crate::errors::Error::SqlParserError {
+                            error: e,
+                            file: Some(sql_path.clone()),
+                        }
+                    })?;
+                statements.extend(parser.parse_statements().map_err(|e| {
+                    crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
+                })?);
             }
         }
 
