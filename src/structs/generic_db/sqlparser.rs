@@ -472,6 +472,9 @@ impl ParserDB {
                 Statement::CreateFunction(create_function) => {
                     builder = builder.add_function(Rc::new(create_function), ());
                 }
+                Statement::Insert(_) => {
+                    // We currently ignore INSERT statements.
+                }
                 Statement::CreateTable(create_table) => {
                     let create_table = Rc::new(create_table);
                     let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
