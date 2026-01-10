@@ -1,7 +1,7 @@
 //! Implementation of the `FunctionLike` trait for sqlparser's `CreateFunction`
 //! type.
 
-use sqlparser::ast::CreateFunction;
+use sqlparser::ast::{CreateFunction, CreateFunctionBody, Expr, Value, ValueWithSpan};
 
 use crate::{
     structs::ParserDB,
@@ -34,5 +34,22 @@ impl FunctionLike for CreateFunction {
     #[inline]
     fn return_type_name<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db str> {
         self.return_type.as_ref().map(normalize_sqlparser_type)
+    }
+
+    #[inline]
+    fn body(&self) -> Option<&str> {
+        let body_expr = match &self.function_body {
+            Some(CreateFunctionBody::AsBeforeOptions { body, .. }) => body,
+            Some(CreateFunctionBody::Return(expr)) => expr,
+            _ => return None,
+        };
+
+        match body_expr {
+            Expr::Value(ValueWithSpan { value: Value::SingleQuotedString(s), .. }) => Some(s),
+            Expr::Value(ValueWithSpan { value: Value::DollarQuotedString(s), .. }) => {
+                Some(&s.value)
+            }
+            _ => None,
+        }
     }
 }

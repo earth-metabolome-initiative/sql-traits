@@ -110,6 +110,26 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
     /// ```
     fn return_type_name<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>;
 
+    /// Returns the body of the function.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
+    /// "#,
+    /// )?;
+    /// let function = db.functions().next().expect("Function should exist");
+    /// assert_eq!(function.body(), Some("SELECT x + 1;"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn body(&self) -> Option<&str>;
+
     /// Returns the normalized return type name of the function as a string.
     ///
     /// # Example
