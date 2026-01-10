@@ -10,11 +10,12 @@ pub use builder::GenericDBBuilder;
 pub use sqlparser::ParserDB;
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, TriggerLike,
+    UniqueIndexLike,
 };
 
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, U, F, Func, Ch>
+pub struct GenericDB<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -22,6 +23,7 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -37,11 +39,13 @@ where
     foreign_keys: Vec<(Rc<F>, F::Meta)>,
     /// List of functions created in the database.
     functions: Vec<(Rc<Func>, Func::Meta)>,
+    /// List of triggers created in the database.
+    triggers: Vec<(Rc<Tr>, Tr::Meta)>,
     /// Phantom data for check constraints.
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
 }
 
-impl<T, C, U, F, Func, Ch> Debug for GenericDB<T, C, U, F, Func, Ch>
+impl<T, C, U, F, Func, Ch, Tr> Debug for GenericDB<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -49,6 +53,7 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericDB")
@@ -59,12 +64,13 @@ where
             .field("unique_indices", &self.unique_indices.len())
             .field("foreign_keys", &self.foreign_keys.len())
             .field("functions", &self.functions.len())
+            .field("triggers", &self.triggers.len())
             .field("check_constraints", &self.check_constraints.len())
             .finish()
     }
 }
 
-impl<T, C, U, F, Func, Ch> Clone for GenericDB<T, C, U, F, Func, Ch>
+impl<T, C, U, F, Func, Ch, Tr> Clone for GenericDB<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -72,6 +78,7 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
     fn clone(&self) -> Self {
         Self {
@@ -82,12 +89,13 @@ where
             unique_indices: self.unique_indices.clone(),
             foreign_keys: self.foreign_keys.clone(),
             functions: self.functions.clone(),
+            triggers: self.triggers.clone(),
             check_constraints: self.check_constraints.clone(),
         }
     }
 }
 
-impl<T, C, U, F, Func, Ch> GenericDB<T, C, U, F, Func, Ch>
+impl<T, C, U, F, Func, Ch, Tr> GenericDB<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -95,10 +103,11 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
-    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, U, F, Func, Ch> {
+    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, U, F, Func, Ch, Tr> {
         GenericDBBuilder::new(catalog_name)
     }
 
@@ -182,6 +191,32 @@ where
             .binary_search_by(|(f, _)| f.name().cmp(function.name()))
             .ok()
             .map(|index| &self.functions[index].1)
+    }
+
+    /// Returns a reference of the trigger by name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the trigger to retrieve.
+    #[must_use]
+    pub fn trigger(&self, name: &str) -> Option<&Tr> {
+        self.triggers
+            .binary_search_by(|(t, _)| t.name().cmp(name))
+            .ok()
+            .map(|index| self.triggers[index].0.as_ref())
+    }
+
+    /// Returns a reference to the metadata of the specified trigger, if it
+    /// exists in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `trigger` - The trigger to retrieve metadata for.
+    pub fn trigger_metadata(&self, trigger: &Tr) -> Option<&Tr::Meta> {
+        self.triggers
+            .binary_search_by(|(t, _)| t.name().cmp(trigger.name()))
+            .ok()
+            .map(|index| &self.triggers[index].1)
     }
 
     /// Returns a reference to the catalog name.

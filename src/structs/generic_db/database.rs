@@ -4,11 +4,11 @@ use crate::{
     structs::GenericDB,
     traits::{
         CheckConstraintLike, ColumnLike, DatabaseLike, ForeignKeyLike, FunctionLike, TableLike,
-        UniqueIndexLike,
+        TriggerLike, UniqueIndexLike,
     },
 };
 
-impl<T, C, U, F, Func, Ch> DatabaseLike for GenericDB<T, C, U, F, Func, Ch>
+impl<T, C, U, F, Func, Ch, Tr> DatabaseLike for GenericDB<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike<DB = Self>,
     C: ColumnLike<DB = Self>,
@@ -16,6 +16,7 @@ where
     F: ForeignKeyLike<DB = Self>,
     Func: FunctionLike<DB = Self>,
     Ch: CheckConstraintLike<DB = Self>,
+    Tr: TriggerLike<DB = Self>,
 {
     type Table = T;
     type Column = C;
@@ -23,6 +24,7 @@ where
     type Function = Func;
     type UniqueIndex = U;
     type CheckConstraint = Ch;
+    type Trigger = Tr;
 
     #[inline]
     fn catalog_name(&self) -> &str {
@@ -59,6 +61,11 @@ where
     #[inline]
     fn tables(&self) -> impl Iterator<Item = &Self::Table> {
         self.tables.iter().map(|(table, _)| table.as_ref())
+    }
+
+    #[inline]
+    fn triggers(&self) -> impl Iterator<Item = &Self::Trigger> {
+        self.triggers.iter().map(|(trigger, _)| trigger.as_ref())
     }
 
     #[inline]

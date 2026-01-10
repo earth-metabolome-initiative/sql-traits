@@ -5,12 +5,13 @@ use std::rc::Rc;
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, TriggerLike,
+        UniqueIndexLike,
     },
 };
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, U, F, Func, Ch>
+pub struct GenericDBBuilder<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -18,6 +19,7 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -33,11 +35,13 @@ where
     foreign_keys: Vec<(Rc<F>, F::Meta)>,
     /// List of functions created in the database.
     functions: Vec<(Rc<Func>, Func::Meta)>,
+    /// List of triggers created in the database.
+    triggers: Vec<(Rc<Tr>, Tr::Meta)>,
     /// Phantom data for check constraints.
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
 }
 
-impl<T, C, U, F, Func, Ch> GenericDBBuilder<T, C, U, F, Func, Ch>
+impl<T, C, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -45,6 +49,7 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
     #[must_use]
     /// Creates a new `GenericDBBuilder` instance.
@@ -57,12 +62,13 @@ where
             unique_indices: Vec::new(),
             foreign_keys: Vec::new(),
             functions: Vec::new(),
+            triggers: Vec::new(),
             check_constraints: Vec::new(),
         }
     }
 }
 
-impl<T, C, U, F, Func, Ch> GenericDBBuilder<T, C, U, F, Func, Ch>
+impl<T, C, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -70,6 +76,7 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
     /// Sets the timezone for the database.
     #[must_use]
@@ -152,6 +159,14 @@ where
         self
     }
 
+    /// Adds a trigger with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_trigger(mut self, trigger: Rc<Tr>, metadata: Tr::Meta) -> Self {
+        self.triggers.push((trigger, metadata));
+        self
+    }
+
     /// Adds multiple functions with their metadata to the builder.
     #[must_use]
     #[inline]
@@ -183,8 +198,8 @@ where
     }
 }
 
-impl<T, C, U, F, Func, Ch> From<GenericDBBuilder<T, C, U, F, Func, Ch>>
-    for GenericDB<T, C, U, F, Func, Ch>
+impl<T, C, U, F, Func, Ch, Tr> From<GenericDBBuilder<T, C, U, F, Func, Ch, Tr>>
+    for GenericDB<T, C, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
@@ -192,8 +207,9 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    Tr: TriggerLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, U, F, Func, Ch>) -> Self {
+    fn from(mut builder: GenericDBBuilder<T, C, U, F, Func, Ch, Tr>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -207,6 +223,7 @@ where
         builder.unique_indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         builder.foreign_keys.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         builder.functions.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        builder.triggers.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
 
         GenericDB {
@@ -217,6 +234,7 @@ where
             unique_indices: builder.unique_indices,
             foreign_keys: builder.foreign_keys,
             functions: builder.functions,
+            triggers: builder.triggers,
             check_constraints: builder.check_constraints,
         }
     }

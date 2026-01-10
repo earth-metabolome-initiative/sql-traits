@@ -16,6 +16,8 @@ pub mod foreign_key;
 pub use foreign_key::ForeignKeyLike;
 pub mod function_like;
 pub use function_like::FunctionLike;
+pub mod trigger;
+pub use trigger::TriggerLike;
 
 /// Trait for associating a metadata struct to a given type.
 pub trait Metadata {

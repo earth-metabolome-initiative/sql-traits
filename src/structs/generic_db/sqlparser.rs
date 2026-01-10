@@ -5,7 +5,7 @@ use std::{path::Path, rc::Rc};
 use git2::Repository;
 use sqlparser::{
     ast::{
-        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateTable, Expr,
+        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTrigger, Expr,
         ForeignKeyConstraint, IndexColumn, OrderByExpr, OrderByOptions, Statement, TableConstraint,
         UniqueConstraint, Value, ValueWithSpan,
     },
@@ -19,8 +19,8 @@ use crate::{
         generic_db::GenericDBBuilder,
         metadata::{CheckMetadata, UniqueIndexMetadata},
     },
-    traits::{DatabaseLike, column::ColumnLike},
-    utils::columns_in_expression,
+    traits::{DatabaseLike, FunctionLike, column::ColumnLike},
+    utils::{columns_in_expression, last_str},
 };
 
 mod functions_in_expression;
@@ -33,6 +33,7 @@ pub type ParserDB = GenericDB<
     TableAttribute<CreateTable, ForeignKeyConstraint>,
     CreateFunction,
     TableAttribute<CreateTable, CheckConstraint>,
+    CreateTrigger,
 >;
 
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
@@ -44,6 +45,7 @@ pub type ParserDBBuilder = GenericDBBuilder<
     TableAttribute<CreateTable, ForeignKeyConstraint>,
     CreateFunction,
     TableAttribute<CreateTable, CheckConstraint>,
+    CreateTrigger,
 >;
 
 /// A type alias for the result of processing check constraints.
@@ -427,6 +429,45 @@ impl ParserDB {
     /// assert!(ParserDB::from_statements(statements, "test".to_string()).is_err());
     /// ```
     ///
+    /// This will fail if a trigger references a non-existent table:
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let sql = r#"
+    /// CREATE TRIGGER my_trigger
+    /// AFTER INSERT ON nonexistent_table
+    /// FOR EACH ROW
+    /// EXECUTE FUNCTION my_function();
+    /// "#;
+    ///
+    /// let dialect = PostgreSqlDialect {};
+    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
+    /// // This should fail with TableNotFoundForTrigger
+    /// assert!(ParserDB::from_statements(statements, "test".to_string()).is_err());
+    /// ```
+    ///
+    /// This will fail if a trigger references a non-existent function:
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let sql = r#"
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE TRIGGER my_trigger
+    /// AFTER INSERT ON my_table
+    /// FOR EACH ROW
+    /// EXECUTE FUNCTION nonexistent_function();
+    /// "#;
+    ///
+    /// let dialect = PostgreSqlDialect {};
+    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
+    /// // This should fail with FunctionNotFoundForTrigger
+    /// assert!(ParserDB::from_statements(statements, "test".to_string()).is_err());
+    /// ```
+    ///
     /// Supports SET TIME ZONE statements:
     ///
     /// ```
@@ -465,15 +506,39 @@ impl ParserDB {
         statements: Vec<Statement>,
         catalog_name: String,
     ) -> Result<Self, crate::errors::Error> {
-        let mut builder = GenericDBBuilder::new(catalog_name);
+        let mut builder: ParserDBBuilder = GenericDBBuilder::new(catalog_name);
 
         for statement in statements {
             match statement {
                 Statement::CreateFunction(create_function) => {
                     builder = builder.add_function(Rc::new(create_function), ());
                 }
-                Statement::Insert(_) => {
-                    // We currently ignore INSERT statements.
+                Statement::CreateTrigger(create_trigger) => {
+                    let table_name = last_str(&create_trigger.table_name);
+                    let table_exists =
+                        builder.tables().iter().any(|(t, _)| t.name.to_string() == table_name);
+
+                    if !table_exists {
+                        return Err(crate::errors::Error::TableNotFoundForTrigger {
+                            table_name: table_name.to_string(),
+                            trigger_name: last_str(&create_trigger.name).to_string(),
+                        });
+                    }
+
+                    if let Some(exec_body) = &create_trigger.exec_body {
+                        let function_name = last_str(&exec_body.func_desc.name);
+                        let function_exists =
+                            builder.function_rc_vec().iter().any(|f| f.name() == function_name);
+
+                        if !function_exists {
+                            return Err(crate::errors::Error::FunctionNotFoundForTrigger {
+                                function_name: function_name.to_string(),
+                                trigger_name: last_str(&create_trigger.name).to_string(),
+                            });
+                        }
+                    }
+
+                    builder = builder.add_trigger(Rc::new(create_trigger), ());
                 }
                 Statement::CreateTable(create_table) => {
                     let create_table = Rc::new(create_table);
@@ -527,8 +592,8 @@ impl ParserDB {
                 | Statement::CreateOperatorFamily(_)
                 | Statement::CreateType { .. }
                 | Statement::CreateExtension(_)
-                | Statement::CreateIndex(_)
-                | Statement::CreateTrigger(_) => {
+                | Statement::Insert(_)
+                | Statement::CreateIndex(_) => {
                     // At the moment, we ignore these CREATE statements.
                 }
                 _ => {

@@ -9,7 +9,8 @@ use geometric_traits::{
 };
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, TriggerLike,
+    UniqueIndexLike,
 };
 
 /// A trait for types that can be treated as SQL databases.
@@ -22,6 +23,8 @@ pub trait DatabaseLike: Clone + Debug {
     type ForeignKey: ForeignKeyLike<DB = Self>;
     /// Type of the functions in the schema.
     type Function: FunctionLike<DB = Self>;
+    /// Type of the triggers in the schema.
+    type Trigger: TriggerLike<DB = Self>;
     /// Type of the unique indexes in the schema.
     type UniqueIndex: UniqueIndexLike<DB = Self>;
     /// Type of the check constraints in the schema.
@@ -57,6 +60,9 @@ pub trait DatabaseLike: Clone + Debug {
     /// # }
     /// ```
     fn tables(&self) -> impl Iterator<Item = &Self::Table>;
+
+    /// Iterates over the triggers defined in the schema.
+    fn triggers(&self) -> impl Iterator<Item = &Self::Trigger>;
 
     /// Returns whether the database has at least one table.
     ///

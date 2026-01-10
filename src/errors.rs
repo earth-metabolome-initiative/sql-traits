@@ -46,6 +46,23 @@ pub enum Error {
         /// Name of the host table containing the foreign key.
         host_table: String,
     },
+    #[error("Table `{table_name}` not found for trigger `{trigger_name}`.")]
+    /// Error indicating that a trigger references a table that does not exist.
+    TableNotFoundForTrigger {
+        /// Name of the table the trigger belongs to.
+        table_name: String,
+        /// Name of the trigger.
+        trigger_name: String,
+    },
+    #[error("Function `{function_name}` not found for trigger `{trigger_name}`.")]
+    /// Error indicating that a trigger references a function that does not
+    /// exist.
+    FunctionNotFoundForTrigger {
+        /// Name of the function the trigger executes.
+        function_name: String,
+        /// Name of the trigger.
+        trigger_name: String,
+    },
     /// Wrapper around SQL parser errors.
     #[error("SQL parser error: {error} in {file:?}")]
     SqlParserError {

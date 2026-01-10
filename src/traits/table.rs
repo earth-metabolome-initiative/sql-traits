@@ -3,7 +3,8 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::traits::{
-    ColumnLike, DatabaseLike, ForeignKeyLike, Metadata, check_constraint::CheckConstraintLike,
+    ColumnLike, DatabaseLike, ForeignKeyLike, Metadata, TriggerLike,
+    check_constraint::CheckConstraintLike,
 };
 
 /// A trait for types that can be treated as SQL tables.
@@ -59,6 +60,22 @@ pub trait TableLike:
     fn is_snake_case(&self) -> bool {
         let name = self.table_name();
         name.chars().all(|c| c.is_lowercase() || c == '_')
+    }
+
+    /// Returns the triggers associated with the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the
+    ///   triggers from.
+    fn triggers<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Trigger>
+    where
+        Self: 'db,
+    {
+        database.triggers().filter(|t| t.table(database).table_name() == self.table_name())
     }
 
     /// Returns the documentation of the table, if any.
