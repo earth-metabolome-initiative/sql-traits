@@ -3,8 +3,7 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::traits::{
-    ColumnLike, DatabaseLike, ForeignKeyLike, Metadata, TriggerLike,
-    check_constraint::CheckConstraintLike,
+    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, Metadata, TriggerLike, check_constraint::CheckConstraintLike
 };
 
 /// A trait for types that can be treated as SQL tables.
@@ -15,6 +14,7 @@ pub trait TableLike:
     + Ord
     + Eq
     + Metadata
+    + DocumentationMetadata
     + Borrow<<<Self as TableLike>::DB as DatabaseLike>::Table>
 {
     /// The database type the table belongs to.
@@ -91,10 +91,17 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE my_table (id INT);")?;
+    /// let db = ParserDB::try_from(
+    ///     "
+    ///     CREATE TABLE my_table (id INT);
+    ///     -- the next table to create
+    ///     CREATE TABLE my_next_table (id INT);
+    /// ",
+    /// )?;
     /// let table = db.table(None, "my_table").unwrap();
+    /// let table_next = db.table(None, "my_next_table").unwrap();
     /// assert_eq!(table.table_doc(&db), None); // No documentation available
-    /// //
+    /// assert_eq!(table_next.table_doc(&db), Some("the next table to create"));
     /// # Ok(())
     /// # }
     /// ```

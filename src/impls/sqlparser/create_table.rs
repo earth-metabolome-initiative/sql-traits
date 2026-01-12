@@ -2,15 +2,19 @@
 //! [`CreateTable`] struct.
 
 use ::sqlparser::ast::{CreateTable, Ident};
-
+use sql_docs::docs::TableDoc;
 use crate::{
     structs::{TableMetadata, generic_db::ParserDB},
-    traits::{DatabaseLike, Metadata, TableLike},
+    traits::{DatabaseLike, DocumentationMetadata, Metadata, TableLike},
     utils::last_str,
 };
 
 impl Metadata for CreateTable {
     type Meta = TableMetadata<CreateTable>;
+}
+
+impl DocumentationMetadata for CreateTable {
+    type Documentation = TableDoc;
 }
 
 impl TableLike for CreateTable {
@@ -22,12 +26,11 @@ impl TableLike for CreateTable {
     }
 
     #[inline]
-    fn table_doc<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db str>
+    fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db,
     {
-        // TODO(@RPG-Alex): Extract documentation from SQL comments after merging PR <https://github.com/apache/datafusion-sqlparser-rs/pull/2069>
-        None
+        database.table_metadata(self).expect("Table must exist in database").table_doc()
     }
 
     #[inline]

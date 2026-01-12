@@ -225,4 +225,14 @@ where
     pub fn catalog_name(&self) -> &str {
         &self.catalog_name
     }
+
+    /// Iterates over the table and metadata
+    pub fn tables_metadata(&self) -> impl Iterator<Item = (&T, &T::Meta)> {
+        self.tables.iter().map(|(t, m)| (t.as_ref(), m))
+    }
+
+    /// Iterates mutably over the table and metadata
+    pub fn tables_metadata_mut(&mut self) -> impl Iterator<Item = (&T, &mut T::Meta)> {
+        self.tables.iter_mut().map(|(t, m)| ((*t).as_ref(), m))
+    }
 }

@@ -12,14 +12,14 @@ use sqlparser::{
     dialect::PostgreSqlDialect,
     parser::{Parser, ParserError},
 };
-
+use sql_docs::SqlDoc;
 use crate::{
     structs::{
         GenericDB, TableAttribute, TableMetadata,
         generic_db::GenericDBBuilder,
         metadata::{CheckMetadata, UniqueIndexMetadata},
     },
-    traits::{DatabaseLike, FunctionLike, column::ColumnLike},
+    traits::{DatabaseLike, FunctionLike, TableLike, column::ColumnLike},
     utils::{columns_in_expression, last_str},
 };
 
@@ -634,7 +634,15 @@ impl TryFrom<&str> for ParserDB {
         let dialect = sqlparser::dialect::GenericDialect {};
         let mut parser = sqlparser::parser::Parser::new(&dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
-        Self::from_statements(statements, "unknown_catalog".to_string())
+        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+        let documentation = SqlDoc::from_str(sql).build()?;
+        for (table, metadata) in db.tables_metadata_mut() {
+            let table_doc = documentation.table(table.table_name())?; 
+            if let Some(doc) = table_doc.doc() {
+                metadata.set_doc(doc);
+            }
+        }
+        Ok(db)
     }
 }
 
@@ -708,7 +716,7 @@ impl TryFrom<&[&Path]> for ParserDB {
                 })?);
             }
         }
-
+        // TODO! add the sql_docs from paths
         Self::from_statements(statements, "unknown_catalog".to_string())
     }
 }
