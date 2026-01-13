@@ -528,9 +528,9 @@ dependencies = [
 
 [[package]]
 name = "sql_docs"
-version = "1.0.3"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45f1605b2a6d92cd80fbe53020827932531c866ed6f815e634789b91beb65e18"
+checksum = "61a87f9dcf12608034f5af0e20dbff91b5074ddd66b6e40b9fbc60aa7e15d32c"
 dependencies = [
  "sqlparser",
 ]

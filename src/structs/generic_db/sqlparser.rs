@@ -636,7 +636,7 @@ impl TryFrom<&str> for ParserDB {
         let mut parser = sqlparser::parser::Parser::new(&dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
-        let documentation = SqlDoc::from_str(sql).build()?;
+        let documentation = SqlDoc::builder_from_str(sql).build()?;
         for (table, metadata) in db.tables_metadata_mut() {
             let table_doc = documentation.table(table.table_name())?;
             metadata.set_doc(table_doc.to_owned());
