@@ -2,6 +2,8 @@
 //! [`CreateTable`] struct.
 
 use ::sqlparser::ast::{CreateTable, Ident};
+use sql_docs::docs::TableDoc;
+
 use crate::{
     structs::{TableMetadata, generic_db::ParserDB},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, TableLike},
@@ -13,7 +15,7 @@ impl Metadata for CreateTable {
 }
 
 impl DocumentationMetadata for CreateTable {
-    type Documentation = String;
+    type Documentation = TableDoc;
 }
 
 impl TableLike for CreateTable {
@@ -29,7 +31,11 @@ impl TableLike for CreateTable {
     where
         Self: 'db,
     {
-        database.table_metadata(self).expect("Table must exist in database").table_doc().map(|d| d.as_str())
+        database
+            .table_metadata(self)
+            .expect("Table must exist in database")
+            .table_doc()
+            .and_then(|d| d.doc())
     }
 
     #[inline]

@@ -80,7 +80,7 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     /// Wrapper around sql_doc errors
     #[error("Table Doc Error: {0}")]
-    TableDocError(#[from] sql_docs::error::DocError)
+    TableDocError(#[from] sql_docs::error::DocError),
 }
 
 impl From<ParserError> for Error {

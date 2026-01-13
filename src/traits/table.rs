@@ -3,7 +3,8 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::traits::{
-    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, Metadata, TriggerLike, check_constraint::CheckConstraintLike
+    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, Metadata, TriggerLike,
+    check_constraint::CheckConstraintLike,
 };
 
 /// A trait for types that can be treated as SQL tables.

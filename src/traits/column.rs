@@ -50,16 +50,18 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE my_table (
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (
     ///     -- the id of the table_row
-    ///     id INT, 
+    ///     id INT,
     ///     name TEXT
-    /// );")?;
+    /// );",
+    /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let column = table.column("id", &db).expect("Column 'id' should exist");
     /// let column_name = table.column("name", &db).expect("Column 'name' should exist");
-    /// assert_eq!(column.column_doc(&db),Some("the id of the table_row"));
-    /// assert!(column_name.column_doc(&db), None);
+    /// assert_eq!(column.column_doc(&db), Some("the id of the table_row"));
+    /// assert!(column_name.column_doc(&db).is_none());
     /// # Ok(())
     /// # }
     /// ```

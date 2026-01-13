@@ -3,6 +3,7 @@
 use std::{path::Path, rc::Rc};
 
 use git2::Repository;
+use sql_docs::SqlDoc;
 use sqlparser::{
     ast::{
         CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTrigger, Expr,
@@ -12,7 +13,7 @@ use sqlparser::{
     dialect::PostgreSqlDialect,
     parser::{Parser, ParserError},
 };
-use sql_docs::SqlDoc;
+
 use crate::{
     structs::{
         GenericDB, TableAttribute, TableMetadata,
@@ -637,10 +638,8 @@ impl TryFrom<&str> for ParserDB {
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
         let documentation = SqlDoc::from_str(sql).build()?;
         for (table, metadata) in db.tables_metadata_mut() {
-            let table_doc = documentation.table(table.table_name())?; 
-            if let Some(doc) = table_doc.doc() {
-                metadata.set_doc(doc.to_owned());
-            }
+            let table_doc = documentation.table(table.table_name())?;
+            metadata.set_doc(table_doc.to_owned());
         }
         Ok(db)
     }

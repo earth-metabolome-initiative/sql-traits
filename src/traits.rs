@@ -35,6 +35,6 @@ pub trait DocumentationMetadata {
     type Documentation: Clone + Debug;
 }
 
-impl <D: DocumentationMetadata> DocumentationMetadata for &D {
+impl<D: DocumentationMetadata> DocumentationMetadata for &D {
     type Documentation = D::Documentation;
 }
