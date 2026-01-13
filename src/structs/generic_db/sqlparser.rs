@@ -639,7 +639,7 @@ impl TryFrom<&str> for ParserDB {
         for (table, metadata) in db.tables_metadata_mut() {
             let table_doc = documentation.table(table.table_name())?; 
             if let Some(doc) = table_doc.doc() {
-                metadata.set_doc(doc);
+                metadata.set_doc(doc.to_owned());
             }
         }
         Ok(db)

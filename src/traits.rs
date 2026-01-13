@@ -32,7 +32,7 @@ impl<M: Metadata> Metadata for &M {
 /// Trait for associating documentation struct with a given type
 pub trait DocumentationMetadata {
     /// The associated documentation type
-    type Documentation;
+    type Documentation: Clone + Debug;
 }
 
 impl <D: DocumentationMetadata> DocumentationMetadata for &D {
