@@ -17,13 +17,11 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
 ) -> Option<bool> {
     match expr {
         // Literal true/false
-        Expr::Value(value_with_span) => {
-            match value_with_span.value {
-                Value::Boolean(true) => Some(true),
-                Value::Boolean(false) => Some(false),
-                _ => None,
-            }
-        }
+        Expr::Value(value_with_span) => match value_with_span.value {
+            Value::Boolean(true) => Some(true),
+            Value::Boolean(false) => Some(false),
+            _ => None,
+        },
 
         Expr::IsNotNull(col_expr) => {
             // Check if the column is declared NOT NULL in the table schema

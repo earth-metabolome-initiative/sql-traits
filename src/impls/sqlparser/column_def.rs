@@ -28,13 +28,16 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
     where
         Self: 'db,
     {
-        // todo: Finish
-        // database
-        //     .table_metadata(self)
-        //     .expect("Table and Column must exist in database to access possible column documentation")
-        //     .table_doc()
-        //     .and_then(|d|d.columns())
-        None
+        database
+            .table_metadata(self.table())
+            .expect("Table must exist in database")
+            .table_doc()
+            .and_then(|d| {
+                d.columns()
+                    .iter()
+                    .find(|c| c.name() == self.attribute().name.value)
+                    .and_then(|c| c.doc())
+            })
     }
 
     #[inline]
