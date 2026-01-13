@@ -696,15 +696,19 @@ impl TryFrom<&[&Path]> for ParserDB {
             for sql_path in sql_paths {
                 let sql_content = std::fs::read_to_string(&sql_path)
                     .map_err(|e| ParserError::TokenizerError(e.to_string()))
-                    .map_err(|e| crate::errors::Error::SqlParserError {
-                        error: e,
-                        file: Some(sql_path.clone()),
+                    .map_err(|e| {
+                        crate::errors::Error::SqlParserError {
+                            error: e,
+                            file: Some(sql_path.clone()),
+                        }
                     })?;
                 let mut parser = sqlparser::parser::Parser::new(&PostgreSqlDialect {})
                     .try_with_sql(&sql_content)
-                    .map_err(|e| crate::errors::Error::SqlParserError {
-                        error: e,
-                        file: Some(sql_path.clone()),
+                    .map_err(|e| {
+                        crate::errors::Error::SqlParserError {
+                            error: e,
+                            file: Some(sql_path.clone()),
+                        }
                     })?;
                 statements.extend(parser.parse_statements().map_err(|e| {
                     crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
