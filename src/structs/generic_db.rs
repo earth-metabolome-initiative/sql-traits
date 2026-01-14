@@ -227,11 +227,55 @@ where
     }
 
     /// Iterates over the table and metadata
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "
+    /// -- table b
+    /// CREATE TABLE b (id INT);
+    /// -- table a
+    /// CREATE TABLE a (id INT);",
+    /// )?;
+    ///
+    /// let mut parsed: Vec<(&str, Option<&str>)> = db
+    ///     .tables_metadata()
+    ///     .map(|(t, meta)| (t.table_name(), meta.table_doc().and_then(|d| d.doc())))
+    ///     .collect();
+    ///
+    /// parsed.sort_by(|(a, _), (b, _)| a.cmp(b));
+    /// assert_eq!(parsed, vec![("a", Some("table a")), ("b", Some("table b"))]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn tables_metadata(&self) -> impl Iterator<Item = (&T, &T::Meta)> {
         self.tables.iter().map(|(t, m)| (t.as_ref(), m))
     }
 
     /// Iterates mutably over the table and metadata
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let mut db = ParserDB::try_from(
+    ///     r#"
+    ///     -- original doc a
+    ///     CREATE TABLE a (id INT);
+    ///     -- original doc b
+    ///     CREATE TABLE b (id INT);
+    ///     "#,
+    /// )?;
+    /// let metadata = db.tables_metadata_mut().collect::<Vec<_>>();
+    /// assert_eq!(metadata.len(), db.number_of_tables());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn tables_metadata_mut(&mut self) -> impl Iterator<Item = (&T, &mut T::Meta)> {
         self.tables.iter_mut().map(|(t, m)| ((*t).as_ref(), m))
     }
