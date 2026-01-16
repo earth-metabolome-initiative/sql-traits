@@ -24,12 +24,15 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
     }
 
     #[inline]
-    fn column_doc<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db str>
+    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db,
     {
-        // TODO(@RPG-Alex): Extract documentation from SQL comments after merging PR <https://github.com/apache/datafusion-sqlparser-rs/pull/2069>
-        None
+        database
+            .table_metadata(self.table())
+            .expect("Table must exist in database")
+            .table_doc()
+            .and_then(|d| d.column(self.column_name()).ok().and_then(|c| c.doc()))
     }
 
     #[inline]

@@ -1,8 +1,12 @@
 //! Implementations for [`GenericDB`] relative to sqlparser structures.
 
-use std::{path::Path, rc::Rc};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use git2::Repository;
+use sql_docs::SqlDoc;
 use sqlparser::{
     ast::{
         CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTrigger, Expr,
@@ -19,7 +23,7 @@ use crate::{
         generic_db::GenericDBBuilder,
         metadata::{CheckMetadata, UniqueIndexMetadata},
     },
-    traits::{DatabaseLike, FunctionLike, column::ColumnLike},
+    traits::{DatabaseLike, FunctionLike, TableLike, column::ColumnLike},
     utils::{columns_in_expression, last_str},
 };
 
@@ -634,7 +638,13 @@ impl TryFrom<&str> for ParserDB {
         let dialect = sqlparser::dialect::GenericDialect {};
         let mut parser = sqlparser::parser::Parser::new(&dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
-        Self::from_statements(statements, "unknown_catalog".to_string())
+        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+        let documentation = SqlDoc::builder_from_str(sql).build()?;
+        for (table, metadata) in db.tables_metadata_mut() {
+            let table_doc = documentation.table(table.table_name(), table.table_schema())?;
+            metadata.set_doc(table_doc.to_owned());
+        }
+        Ok(db)
     }
 }
 
@@ -674,6 +684,7 @@ impl TryFrom<&[&Path]> for ParserDB {
 
     fn try_from(paths: &[&Path]) -> Result<Self, Self::Error> {
         let mut statements = Vec::new();
+        let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
         for path in paths {
             if !path.exists() {
                 return Err(ParserError::TokenizerError(format!(
@@ -695,6 +706,7 @@ impl TryFrom<&[&Path]> for ParserDB {
                             file: Some(sql_path.clone()),
                         }
                     })?;
+
                 let mut parser = sqlparser::parser::Parser::new(&PostgreSqlDialect {})
                     .try_with_sql(&sql_content)
                     .map_err(|e| {
@@ -706,9 +718,26 @@ impl TryFrom<&[&Path]> for ParserDB {
                 statements.extend(parser.parse_statements().map_err(|e| {
                     crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
                 })?);
+                sql_str.push((sql_content, sql_path));
             }
         }
-
-        Self::from_statements(statements, "unknown_catalog".to_string())
+        let documentation = SqlDoc::builder_from_strs_with_paths(&sql_str).build()?;
+        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+        assert_eq!(
+            db.number_of_tables(),
+            documentation.number_of_tables(),
+            "The number of tables in the DB does not match with the number of tables in documentation"
+        );
+        for ((table, metadata), table_doc) in db.tables_metadata_mut().zip(documentation.tables()) {
+            debug_assert_eq!(
+                table.table_name(),
+                table_doc.name(),
+                "Db table {} is not aligned with documentation table {}",
+                table.table_name(),
+                table_doc.name()
+            );
+            metadata.set_doc(table_doc.to_owned());
+        }
+        Ok(db)
     }
 }

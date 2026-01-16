@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use crate::traits::{DatabaseLike, TableLike};
+use crate::traits::{DatabaseLike, DocumentationMetadata, TableLike};
 
 #[derive(Debug, Clone)]
 /// Metadata about a database table.
@@ -17,6 +17,8 @@ pub struct TableMetadata<T: TableLike> {
     foreign_keys: Vec<Rc<<T::DB as DatabaseLike>::ForeignKey>>,
     /// The columns composing the primary key of the table.
     primary_key: Vec<Rc<<T::DB as DatabaseLike>::Column>>,
+    /// The optional documentation associated with the table
+    documentation: Option<<T as DocumentationMetadata>::Documentation>,
 }
 
 impl<T: TableLike> Default for TableMetadata<T> {
@@ -27,6 +29,7 @@ impl<T: TableLike> Default for TableMetadata<T> {
             unique_indices: Vec::new(),
             foreign_keys: Vec::new(),
             primary_key: Vec::new(),
+            documentation: None,
         }
     }
 }
@@ -100,6 +103,18 @@ impl<T: TableLike> TableMetadata<T> {
     #[inline]
     pub fn primary_key_columns(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::Column> {
         self.primary_key.iter().map(std::convert::AsRef::as_ref)
+    }
+
+    /// Returns the documentation, if exists, for the table
+    #[inline]
+    pub fn table_doc(&self) -> Option<&<T as DocumentationMetadata>::Documentation> {
+        self.documentation.as_ref()
+    }
+
+    /// Updates the `documentation` field
+    #[inline]
+    pub fn set_doc(&mut self, s: <T as DocumentationMetadata>::Documentation) {
+        self.documentation = Some(s);
     }
 
     /// Adds a column to the table metadata.

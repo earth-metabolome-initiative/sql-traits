@@ -28,3 +28,13 @@ pub trait Metadata {
 impl<M: Metadata> Metadata for &M {
     type Meta = M::Meta;
 }
+
+/// Trait for associating documentation struct with a given type
+pub trait DocumentationMetadata {
+    /// The associated documentation type
+    type Documentation: Clone + Debug;
+}
+
+impl<D: DocumentationMetadata> DocumentationMetadata for &D {
+    type Documentation = D::Documentation;
+}
