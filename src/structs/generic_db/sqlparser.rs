@@ -1,6 +1,9 @@
 //! Implementations for [`GenericDB`] relative to sqlparser structures.
 
-use std::{path::Path, rc::Rc};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use git2::Repository;
 use sql_docs::SqlDoc;
@@ -681,6 +684,7 @@ impl TryFrom<&[&Path]> for ParserDB {
 
     fn try_from(paths: &[&Path]) -> Result<Self, Self::Error> {
         let mut statements = Vec::new();
+        let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
         for path in paths {
             if !path.exists() {
                 return Err(ParserError::TokenizerError(format!(
@@ -694,28 +698,36 @@ impl TryFrom<&[&Path]> for ParserDB {
             sql_paths.sort_unstable();
 
             for sql_path in sql_paths {
+                let path_for_errors = sql_path.clone();
                 let sql_content = std::fs::read_to_string(&sql_path)
                     .map_err(|e| ParserError::TokenizerError(e.to_string()))
                     .map_err(|e| {
                         crate::errors::Error::SqlParserError {
                             error: e,
-                            file: Some(sql_path.clone()),
+                            file: Some(path_for_errors.clone()),
                         }
                     })?;
+
                 let mut parser = sqlparser::parser::Parser::new(&PostgreSqlDialect {})
                     .try_with_sql(&sql_content)
                     .map_err(|e| {
                         crate::errors::Error::SqlParserError {
                             error: e,
-                            file: Some(sql_path.clone()),
+                            file: Some(path_for_errors.clone()),
                         }
                     })?;
                 statements.extend(parser.parse_statements().map_err(|e| {
-                    crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
+                    crate::errors::Error::SqlParserError { error: e, file: Some(path_for_errors) }
                 })?);
+                sql_str.push((sql_content, sql_path));
             }
         }
-        // TODO! add the sql_docs from paths
-        Self::from_statements(statements, "unknown_catalog".to_string())
+        let documentation = SqlDoc::builder_from_strs_with_paths(&sql_str).build()?;
+        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+        for (table, metadata) in db.tables_metadata_mut() {
+            let table_doc = documentation.table(table.table_name(), table.table_schema())?;
+            metadata.set_doc(table_doc.to_owned());
+        }
+        Ok(db)
     }
 }
