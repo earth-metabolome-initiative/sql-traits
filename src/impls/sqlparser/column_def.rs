@@ -32,13 +32,7 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
             .table_metadata(self.table())
             .expect("Table must exist in database")
             .table_doc()
-            .and_then(|d| {
-                let result = d.column(self.column_name());
-                match result {
-                    Ok(c) => c.doc(),
-                    Err(_) => None,
-                }
-            })
+            .and_then(|d| d.column(self.column_name()).ok().and_then(|c| c.doc()))
     }
 
     #[inline]

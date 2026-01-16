@@ -698,13 +698,12 @@ impl TryFrom<&[&Path]> for ParserDB {
             sql_paths.sort_unstable();
 
             for sql_path in sql_paths {
-                let path_for_errors = sql_path.clone();
                 let sql_content = std::fs::read_to_string(&sql_path)
                     .map_err(|e| ParserError::TokenizerError(e.to_string()))
                     .map_err(|e| {
                         crate::errors::Error::SqlParserError {
                             error: e,
-                            file: Some(path_for_errors.clone()),
+                            file: Some(sql_path.clone()),
                         }
                     })?;
 
@@ -713,19 +712,30 @@ impl TryFrom<&[&Path]> for ParserDB {
                     .map_err(|e| {
                         crate::errors::Error::SqlParserError {
                             error: e,
-                            file: Some(path_for_errors.clone()),
+                            file: Some(sql_path.clone()),
                         }
                     })?;
                 statements.extend(parser.parse_statements().map_err(|e| {
-                    crate::errors::Error::SqlParserError { error: e, file: Some(path_for_errors) }
+                    crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
                 })?);
                 sql_str.push((sql_content, sql_path));
             }
         }
         let documentation = SqlDoc::builder_from_strs_with_paths(&sql_str).build()?;
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
-        for (table, metadata) in db.tables_metadata_mut() {
-            let table_doc = documentation.table(table.table_name(), table.table_schema())?;
+        assert_eq!(
+            db.number_of_tables(),
+            documentation.number_of_tables(),
+            "The number of tables in the DB does not match with the number of tables in documentation"
+        );
+        for ((table, metadata), table_doc) in db.tables_metadata_mut().zip(documentation.tables()) {
+            debug_assert_eq!(
+                table.table_name(),
+                table_doc.name(),
+                "Db table {} is not aligned with documentation table {}",
+                table.table_name(),
+                table_doc.name()
+            );
             metadata.set_doc(table_doc.to_owned());
         }
         Ok(db)
