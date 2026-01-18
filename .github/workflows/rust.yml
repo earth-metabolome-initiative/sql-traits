@@ -62,10 +62,6 @@ jobs:
         components: clippy
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libfontconfig1-dev
     - name: Run clippy
       run: cargo clippy --all-targets -- -D warnings
 
@@ -78,10 +74,6 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libfontconfig1-dev
     - name: Check documentation
       run: cargo doc --no-deps --document-private-items
       env:
@@ -98,10 +90,6 @@ jobs:
         components: llvm-tools-preview
     - name: Install tarpaulin
       uses: taiki-e/install-action@cargo-tarpaulin
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libfontconfig1-dev
     - name: Generate coverage
       run: cargo tarpaulin --engine=llvm --out xml --workspace --run-types AllTargets --run-types Doctests
     - name: Upload coverage to Codecov
