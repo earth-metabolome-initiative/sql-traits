@@ -69,6 +69,25 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to query the
     ///   triggers from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE my_table (id INT, name TEXT);
+    /// CREATE FUNCTION my_func() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+    /// CREATE TRIGGER my_trigger BEFORE INSERT ON my_table FOR EACH ROW EXECUTE FUNCTION my_func();
+    /// "#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let triggers: Vec<&str> = table.triggers(&db).map(|t| t.name()).collect();
+    /// assert_eq!(triggers, vec!["my_trigger"]);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn triggers<'db>(
         &'db self,
         database: &'db Self::DB,
@@ -952,6 +971,27 @@ pub trait TableLike:
     ///   belongs.
     ///
     /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE host_table (
+    ///     id INT PRIMARY KEY,
+    ///     parent_id INT REFERENCES host_table(id),
+    ///     other_id INT REFERENCES referenced_table(id)
+    /// );
+    /// "#,
+    /// )?;
+    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let non_self_refs = host_table.non_self_referenced_tables(&db);
+    /// assert_eq!(non_self_refs.len(), 1);
+    /// assert_eq!(non_self_refs[0].table_name(), "referenced_table");
+    /// # Ok(())
+    /// # }
+    /// ```
     fn non_self_referenced_tables<'db>(&'db self, database: &'db Self::DB) -> Vec<&'db Self>
     where
         Self: 'db,
@@ -1909,6 +1949,56 @@ pub trait TableLike:
         }
 
         None
+    }
+
+    /// Returns a sorted vector of the table's spouses.
+    ///
+    /// The spouses of a table `t` are the set of tables which are:
+    /// 1. NOT ancestors of `t`.
+    /// 2. NOT equal to `t`.
+    /// 3. Ancestors of some table that descends from `t`.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE spouse_table (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE connection_table (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE child_table (
+    ///     id INT PRIMARY KEY,
+    ///     my_id INT REFERENCES my_table(id),
+    ///     spouse_id INT REFERENCES spouse_table(id)
+    /// );
+    /// "#,
+    /// )?;
+    /// let my_table = db.table(None, "my_table").unwrap();
+    /// let spouse_table = db.table(None, "spouse_table").unwrap();
+    /// let spouses = my_table.spouses(&db).collect::<Vec<_>>();
+    /// assert_eq!(spouses, vec![spouse_table]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn spouses<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Self>
+    where
+        Self: 'db,
+    {
+        let descendants: Vec<&Self> = self.dependent_tables(database).collect();
+
+        database.tables().map(Borrow::borrow).filter(move |candidate| {
+            *candidate != self
+                && !descendants.contains(candidate)
+                && !self.depends_on(database, candidate)
+                && descendants.iter().any(|descendant| descendant.depends_on(database, candidate))
+        })
     }
 }
 
