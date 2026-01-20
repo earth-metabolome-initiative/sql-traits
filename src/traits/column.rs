@@ -962,3 +962,55 @@ where
         (**self).table(database)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::prelude::*;
+
+    mod reference_impl {
+        use super::*;
+
+        #[test]
+        fn test_all_methods() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT DEFAULT 'val');";
+            let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+            let table = db.table(None, "users").expect("Table not found");
+            let column = table.column("name", &db).expect("Column not found");
+
+            let col_ref = &column;
+
+            assert_eq!(col_ref.column_name(), "name");
+            assert_eq!(col_ref.data_type(&db), "TEXT");
+            assert!(col_ref.is_nullable(&db));
+            assert_eq!(col_ref.default_value().as_deref(), Some("'val'"));
+            assert!(!col_ref.is_generated());
+            assert_eq!(ColumnLike::table(col_ref, &db).table_name(), "users");
+            assert_eq!(col_ref.column_doc(&db), None);
+        }
+    }
+
+    mod rc_impl {
+        use super::*;
+
+        #[test]
+        fn test_all_methods() {
+            let sql = "CREATE TABLE products (id INT PRIMARY KEY, price INT DEFAULT 0);";
+            let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+            let table = db.table(None, "products").expect("Table not found");
+            let column = table.column("price", &db).expect("Column not found");
+
+            let col_rc = Rc::new(column.clone());
+
+            assert_eq!(col_rc.column_name(), "price");
+            assert_eq!(col_rc.data_type(&db), "INT");
+            assert!(col_rc.is_nullable(&db));
+            assert_eq!(col_rc.default_value().as_deref(), Some("0"));
+            assert!(!col_rc.is_generated());
+            assert_eq!(ColumnLike::table(&col_rc, &db).table_name(), "products");
+            assert_eq!(col_rc.column_doc(&db), None);
+        }
+    }
+}
