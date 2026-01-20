@@ -3,31 +3,12 @@
 
 use std::fmt::Debug;
 
-use sqlparser::ast::{Expr, Ident};
+use sqlparser::ast::Expr;
 
-use crate::traits::{DatabaseLike, Metadata, TableLike};
-
-pub(crate) fn collect_column_idents(expr: &Expr) -> Vec<&Ident> {
-    match expr {
-        Expr::Identifier(ident) => vec![ident],
-        Expr::CompoundIdentifier(idents) => idents.iter().collect(),
-        Expr::Tuple(exprs) => {
-            let mut idents = Vec::new();
-            for expr in exprs {
-                idents.extend(collect_column_idents(expr));
-            }
-            idents
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            let mut cols = collect_column_idents(left);
-            cols.extend(collect_column_idents(right));
-            cols
-        }
-        Expr::UnaryOp { expr, .. } => collect_column_idents(expr),
-        Expr::Nested(inner) => collect_column_idents(inner),
-        _ => unimplemented!("Unhandled expression type in unique index: {:?}", expr),
-    }
-}
+use crate::{
+    traits::{DatabaseLike, Metadata, TableLike},
+    utils::columns_in_expression::columns_in_expression,
+};
 
 /// A unique index is a rule that specifies that the values in a column
 /// (or a group of columns) must be unique across all rows in a table.
@@ -168,10 +149,15 @@ pub trait UniqueIndexLike: Metadata + Ord + Eq + Debug + Clone {
     {
         let table = <Self as UniqueIndexLike>::table(self, database);
         let expr = self.expression(database);
-        let column_idents = match expr {
-            Expr::Nested(inner) => collect_column_idents(inner),
-            _ => collect_column_idents(expr),
-        };
-        column_idents.into_iter().filter_map(|ident| table.column(&ident.value, database))
+
+        let all_columns: Vec<&<Self::DB as DatabaseLike>::Column> =
+            table.columns(database).collect();
+
+        let table_name = table.table_name();
+
+        let found_cols: Vec<&<Self::DB as DatabaseLike>::Column> =
+            columns_in_expression(expr, table_name, &all_columns).unwrap_or_default();
+
+        found_cols.into_iter()
     }
 }

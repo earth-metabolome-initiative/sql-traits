@@ -29,6 +29,10 @@ impl<M: Metadata> Metadata for &M {
     type Meta = M::Meta;
 }
 
+impl<M: Metadata> Metadata for std::rc::Rc<M> {
+    type Meta = M::Meta;
+}
+
 /// Trait for associating documentation struct with a given type
 pub trait DocumentationMetadata {
     /// The associated documentation type

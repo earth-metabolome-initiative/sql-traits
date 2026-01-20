@@ -18,7 +18,7 @@ pub trait ColumnLike:
     + Borrow<<<Self as ColumnLike>::DB as DatabaseLike>::Column>
 {
     /// The type of the database that this column belongs to.
-    type DB: DatabaseLike<Column: Borrow<Self>>;
+    type DB: DatabaseLike;
 
     /// Returns the name of the column.
     ///
@@ -398,7 +398,8 @@ pub trait ColumnLike:
         Self: 'db,
     {
         ColumnLike::table(self, database).foreign_keys(database).filter(move |fk| {
-            fk.host_columns(database).map(Borrow::borrow).any(|col: &Self| col == self)
+            let borrowed = self.borrow();
+            fk.host_columns(database).any(|col| col == borrowed)
         })
     }
 
@@ -868,7 +869,6 @@ impl<C> ColumnLike for &C
 where
     C: ColumnLike,
     Self: Borrow<<<C as ColumnLike>::DB as DatabaseLike>::Column>,
-    for<'a> <<C as ColumnLike>::DB as DatabaseLike>::Column: Borrow<&'a C>,
 {
     type DB = C::DB;
 
@@ -911,5 +911,54 @@ where
         Self: 'db,
     {
         (*self).table(database)
+    }
+}
+
+impl<C> ColumnLike for std::rc::Rc<C>
+where
+    C: ColumnLike<DB: DatabaseLike>,
+    Self: Borrow<<<C as ColumnLike>::DB as DatabaseLike>::Column>,
+{
+    type DB = C::DB;
+
+    #[inline]
+    fn column_name(&self) -> &str {
+        (**self).column_name()
+    }
+
+    #[inline]
+    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    where
+        Self: 'db,
+    {
+        (**self).column_doc(database)
+    }
+
+    #[inline]
+    fn data_type<'db>(&'db self, database: &'db Self::DB) -> &'db str {
+        (**self).data_type(database)
+    }
+
+    #[inline]
+    fn is_generated(&self) -> bool {
+        (**self).is_generated()
+    }
+
+    #[inline]
+    fn is_nullable(&self, database: &Self::DB) -> bool {
+        (**self).is_nullable(database)
+    }
+
+    #[inline]
+    fn default_value(&self) -> Option<String> {
+        (**self).default_value()
+    }
+
+    #[inline]
+    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table
+    where
+        Self: 'db,
+    {
+        (**self).table(database)
     }
 }

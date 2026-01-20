@@ -141,6 +141,12 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Normalization for SQLParser data type")]
+    fn test_normalize_sqlparser_type_unimplemented_date() {
+        let _ = normalize_sqlparser_type(&DataType::Date);
+    }
+
+    #[test]
     #[should_panic(expected = "Normalization for custom SQLParser data type")]
     fn test_normalize_sqlparser_type_custom_unimplemented() {
         let custom = DataType::Custom(

@@ -70,7 +70,7 @@ impl ParserDB {
         table_metadata: &TableMetadata<CreateTable>,
         builder: &ParserDBBuilder,
     ) -> Result<CheckConstraintResult, crate::errors::Error> {
-        let columns_in_expression = columns_in_expression::<Self>(
+        let columns_in_expression = columns_in_expression::<Rc<<Self as DatabaseLike>::Column>>(
             check_expr,
             &create_table.name.to_string(),
             table_metadata.column_rc_slice(),
