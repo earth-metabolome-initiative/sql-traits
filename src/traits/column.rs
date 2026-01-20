@@ -709,10 +709,12 @@ pub trait ColumnLike:
         // We determine the set of ancestors of the referenced tables.
         let local_referenced_ancestors = local_referenced_tables
             .iter()
+            .copied()
             .flat_map(|table| table.ancestral_extended_tables(database))
             .collect::<Vec<_>>();
         let other_referenced_ancestors = other_referenced_tables
             .iter()
+            .copied()
             .flat_map(|table| table.ancestral_extended_tables(database))
             .collect::<Vec<_>>();
 
@@ -980,15 +982,15 @@ mod tests {
             let table = db.table(None, "users").expect("Table not found");
             let column = table.column("name", &db).expect("Column not found");
 
-            let col_ref = &column;
+            let col_ref = column;
 
-            assert_eq!(col_ref.column_name(), "name");
-            assert_eq!(col_ref.data_type(&db), "TEXT");
-            assert!(col_ref.is_nullable(&db));
-            assert_eq!(col_ref.default_value().as_deref(), Some("'val'"));
-            assert!(!col_ref.is_generated());
-            assert_eq!(ColumnLike::table(col_ref, &db).table_name(), "users");
-            assert_eq!(col_ref.column_doc(&db), None);
+            assert_eq!(<&_ as ColumnLike>::column_name(&col_ref), "name");
+            assert_eq!(<&_ as ColumnLike>::data_type(&col_ref, &db), "TEXT");
+            assert!(<&_ as ColumnLike>::is_nullable(&col_ref, &db));
+            assert_eq!(<&_ as ColumnLike>::default_value(&col_ref).as_deref(), Some("'val'"));
+            assert!(!<&_ as ColumnLike>::is_generated(&col_ref));
+            assert_eq!(<&_ as ColumnLike>::table(&col_ref, &db).table_name(), "users");
+            assert_eq!(<&_ as ColumnLike>::column_doc(&col_ref, &db), None);
         }
     }
 
@@ -1004,13 +1006,13 @@ mod tests {
 
             let col_rc = Rc::new(column.clone());
 
-            assert_eq!(col_rc.column_name(), "price");
-            assert_eq!(col_rc.data_type(&db), "INT");
-            assert!(col_rc.is_nullable(&db));
-            assert_eq!(col_rc.default_value().as_deref(), Some("0"));
-            assert!(!col_rc.is_generated());
-            assert_eq!(ColumnLike::table(&col_rc, &db).table_name(), "products");
-            assert_eq!(col_rc.column_doc(&db), None);
+            assert_eq!(<Rc<_> as ColumnLike>::column_name(&col_rc), "price");
+            assert_eq!(<Rc<_> as ColumnLike>::data_type(&col_rc, &db), "INT");
+            assert!(<Rc<_> as ColumnLike>::is_nullable(&col_rc, &db));
+            assert_eq!(<Rc<_> as ColumnLike>::default_value(&col_rc).as_deref(), Some("0"));
+            assert!(!<Rc<_> as ColumnLike>::is_generated(&col_rc));
+            assert_eq!(<Rc<_> as ColumnLike>::table(&col_rc, &db).table_name(), "products");
+            assert_eq!(<Rc<_> as ColumnLike>::column_doc(&col_rc, &db), None);
         }
     }
 }

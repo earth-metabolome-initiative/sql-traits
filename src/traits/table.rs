@@ -19,7 +19,7 @@ pub trait TableLike:
     + Borrow<<<Self as TableLike>::DB as DatabaseLike>::Table>
 {
     /// The database type the table belongs to.
-    type DB: DatabaseLike<Table: Borrow<Self>>;
+    type DB: DatabaseLike;
 
     /// Returns the name of the table.
     ///
@@ -912,8 +912,8 @@ pub trait TableLike:
     {
         let ancestors = table.ancestral_extended_tables(database);
         self.foreign_keys(database).filter(move |fk| {
-            let referenced_table = fk.referenced_table(database).borrow();
-            ancestors.iter().any(|ancestor| ancestor == &referenced_table)
+            let referenced_table = fk.referenced_table(database);
+            ancestors.iter().any(|ancestor| (*ancestor).borrow() == referenced_table)
                 && fk.is_referenced_primary_key(database)
         })
     }
@@ -946,14 +946,17 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn referenced_tables<'db>(&'db self, database: &'db Self::DB) -> Vec<&'db Self>
+    fn referenced_tables<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
         let mut referenced_tables = Vec::new();
 
         for foreign_key in self.foreign_keys(database) {
-            referenced_tables.push(foreign_key.referenced_table(database).borrow());
+            referenced_tables.push(foreign_key.referenced_table(database));
         }
 
         referenced_tables.sort_unstable();
@@ -992,12 +995,15 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn non_self_referenced_tables<'db>(&'db self, database: &'db Self::DB) -> Vec<&'db Self>
+    fn non_self_referenced_tables<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
         let mut referenced_tables = self.referenced_tables(database);
-        referenced_tables.retain(|&table| table != self);
+        referenced_tables.retain(|&table| table != self.borrow());
         referenced_tables
     }
 
@@ -1066,11 +1072,14 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn extended_tables<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Self>
+    fn extended_tables<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
-        self.extension_foreign_keys(database).map(|fk| fk.referenced_table(database).borrow())
+        self.extension_foreign_keys(database).map(|fk| fk.referenced_table(database))
     }
 
     /// Returns the root table of the extension hierarchy for the current
@@ -1106,7 +1115,10 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn extension_root_table<'db>(&'db self, database: &'db Self::DB) -> Option<&'db Self>
+    fn extension_root_table<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Option<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
@@ -1141,14 +1153,18 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn extending_tables<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Self>
+    fn extending_tables<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
-        database
-            .tables()
-            .map(Borrow::borrow)
-            .filter(move |table: &&Self| table.is_descendant_of(database, self))
+        database.tables().map(Borrow::borrow).filter(
+            move |table: &&<Self::DB as DatabaseLike>::Table| {
+                table.is_descendant_of(database, self.borrow())
+            },
+        )
     }
 
     /// Returns whether the current table is extended by any other table.
@@ -1228,13 +1244,14 @@ pub trait TableLike:
     fn extension_foreign_key_to<'db>(
         &'db self,
         database: &'db Self::DB,
-        table: &'db Self,
+        table: &'db <Self::DB as DatabaseLike>::Table,
     ) -> Option<&'db <Self::DB as DatabaseLike>::ForeignKey>
     where
         Self: 'db,
     {
         self.extension_foreign_keys(database).find(|fk| {
-            let referenced_table: &Self = fk.referenced_table(database).borrow();
+            let referenced_table: &<Self::DB as DatabaseLike>::Table =
+                fk.referenced_table(database);
             referenced_table == table
                 || referenced_table.extension_foreign_key_to(database, table).is_some()
         })
@@ -1283,13 +1300,12 @@ pub trait TableLike:
     fn extended_table_to<'db>(
         &'db self,
         database: &'db Self::DB,
-        table: &'db Self,
-    ) -> Option<&'db Self>
+        table: &'db <Self::DB as DatabaseLike>::Table,
+    ) -> Option<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
-        self.extension_foreign_key_to(database, table)
-            .map(|fk| fk.referenced_table(database).borrow())
+        self.extension_foreign_key_to(database, table).map(|fk| fk.referenced_table(database))
     }
 
     /// Returns the unique tables which are extended by either the current
@@ -1320,14 +1336,18 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn ancestral_extended_tables<'db>(&'db self, database: &'db Self::DB) -> Vec<&'db Self>
+    fn ancestral_extended_tables<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
-        let extension_tables = self.extended_tables(database).collect::<Vec<&Self>>();
+        let extension_tables =
+            self.extended_tables(database).collect::<Vec<&<Self::DB as DatabaseLike>::Table>>();
         let mut ancestral_tables = extension_tables.clone();
 
-        for table in &extension_tables {
+        for table in extension_tables {
             let mut parent_ancestral_tables = table.ancestral_extended_tables(database);
             ancestral_tables.append(&mut parent_ancestral_tables);
         }
@@ -1361,20 +1381,18 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
     /// )?;
+    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// let ancestral_tables: Vec<&str> = child_table
-    ///     .ancestral_extended_tables_topological(&db)
-    ///     .iter()
-    ///     .map(|t| t.table_name())
-    ///     .collect();
-    /// assert_eq!(ancestral_tables, vec!["grandparent_table", "parent_table"]);
+    /// let ancestral_tables = child_table.ancestral_extended_tables_topological(&db);
+    /// assert_eq!(ancestral_tables, vec![grandparent_table, parent_table]);
     /// # Ok(())
     /// # }
     /// ```
     fn ancestral_extended_tables_topological<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Vec<&'db Self>
+    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
@@ -1388,7 +1406,7 @@ pub trait TableLike:
             .table_dag()
             .into_iter()
             .map(std::borrow::Borrow::borrow)
-            .collect::<Vec<&Self>>();
+            .collect::<Vec<&<Self::DB as DatabaseLike>::Table>>();
 
         ancestral_extended_tables.sort_by_key(|table| {
             sorted_dag
@@ -1435,7 +1453,7 @@ pub trait TableLike:
         &'db self,
         database: &'db Self::DB,
         column: &<Self::DB as DatabaseLike>::Column,
-    ) -> Vec<&'db Self>
+    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
@@ -1445,7 +1463,7 @@ pub trait TableLike:
             if fk.host_columns(database).all(|col| col == column)
                 && fk.is_referenced_primary_key(database)
             {
-                referenced_tables.push(fk.referenced_table(database).borrow());
+                referenced_tables.push(fk.referenced_table(database));
             }
         }
 
@@ -1514,7 +1532,11 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn is_descendant_of(&self, database: &Self::DB, other: &Self) -> bool {
+    fn is_descendant_of(
+        &self,
+        database: &Self::DB,
+        other: &<Self::DB as DatabaseLike>::Table,
+    ) -> bool {
         self.ancestral_extended_tables(database).contains(&other)
     }
 
@@ -1560,14 +1582,18 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn shares_ancestors_with(&self, database: &Self::DB, other: &Self) -> bool {
+    fn shares_ancestors_with(
+        &self,
+        database: &Self::DB,
+        other: &<Self::DB as DatabaseLike>::Table,
+    ) -> bool {
         let self_ancestors = self.ancestral_extended_tables(database);
         let other_ancestors = other.ancestral_extended_tables(database);
 
         self_ancestors.iter().any(|table| other_ancestors.contains(table))
-            || self == other
+            || self.borrow() == other
             || self_ancestors.contains(&other)
-            || other_ancestors.contains(&self)
+            || other_ancestors.contains(&self.borrow())
     }
 
     /// Returns the table singleton foreign keys.
@@ -1748,14 +1774,14 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn depends_on(&self, database: &Self::DB, other: &Self) -> bool {
-        if self == other {
+    fn depends_on(&self, database: &Self::DB, other: &<Self::DB as DatabaseLike>::Table) -> bool {
+        if self.borrow() == other {
             return true;
         }
         self.foreign_keys(database).any(|fk| {
-            let referenced_table: &Self = fk.referenced_table(database).borrow();
+            let referenced_table = fk.referenced_table(database);
             referenced_table == other
-                || referenced_table != self && referenced_table.depends_on(database, other)
+                || referenced_table != self.borrow() && referenced_table.depends_on(database, other)
         })
     }
 
@@ -1797,9 +1823,9 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn refers_to(&self, database: &Self::DB, other: &Self) -> bool {
+    fn refers_to(&self, database: &Self::DB, other: &<Self::DB as DatabaseLike>::Table) -> bool {
         self.foreign_keys(database).any(|fk| {
-            let referenced_table: &Self = fk.referenced_table(database).borrow();
+            let referenced_table = fk.referenced_table(database);
             referenced_table == other
         })
     }
@@ -1834,17 +1860,15 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn dependent_tables<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Self>
+    fn dependent_tables<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
-        database.tables().filter_map(move |table| {
-            let table_ref: &Self = table.borrow();
-            if table_ref != self && table_ref.depends_on(database, self) {
-                Some(table_ref)
-            } else {
-                None
-            }
+        database.tables().filter(move |table| {
+            *table != self.borrow() && table.depends_on(database, self.borrow())
         })
     }
 
@@ -1931,13 +1955,16 @@ pub trait TableLike:
     fn most_recent_common_ancestor<'db>(
         &'db self,
         database: &'db Self::DB,
-        others: &[&'db Self],
-    ) -> Option<&'db Self>
+        others: &[&'db <Self::DB as DatabaseLike>::Table],
+    ) -> Option<&'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
-        if others.iter().all(|&other| other == self || other.is_descendant_of(database, self)) {
-            return Some(self);
+        if others
+            .iter()
+            .all(|&other| other == self.borrow() || other.is_descendant_of(database, self.borrow()))
+        {
+            return Some(self.borrow());
         }
 
         for extended_table in self.extended_tables(database) {
@@ -1997,14 +2024,18 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn spouses<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Self>
+    fn spouses<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
     where
         Self: 'db,
     {
-        let descendants: Vec<&Self> = self.extending_tables(database).collect();
+        let descendants: Vec<&<Self::DB as DatabaseLike>::Table> =
+            self.extending_tables(database).collect();
 
-        database.tables().map(Borrow::borrow).filter(move |candidate| {
-            *candidate != self
+        database.tables().filter(move |candidate| {
+            *candidate != self.borrow()
                 && !descendants.contains(candidate)
                 && !self.is_descendant_of(database, candidate)
                 && descendants
@@ -2017,7 +2048,6 @@ pub trait TableLike:
 impl<T: TableLike> TableLike for &T
 where
     Self: Borrow<<<T as TableLike>::DB as DatabaseLike>::Table>,
-    for<'a> <T::DB as DatabaseLike>::Table: Borrow<&'a T>,
 {
     type DB = T::DB;
 
@@ -2109,21 +2139,57 @@ mod tests {
 
             let table_ref = &table;
 
-            assert_eq!(table_ref.table_name(), table.table_name());
-            assert_eq!(table_ref.table_doc(&db), table.table_doc(&db));
-            assert_eq!(table_ref.table_schema(), table.table_schema());
+            assert_eq!(<&_ as TableLike>::table_name(table_ref), table.table_name());
+            assert_eq!(<&_ as TableLike>::table_doc(table_ref, &db), table.table_doc(&db));
+            assert_eq!(<&_ as TableLike>::table_schema(table_ref), table.table_schema());
 
-            assert_eq!(table_ref.columns(&db).count(), table.columns(&db).count());
             assert_eq!(
-                table_ref.primary_key_columns(&db).count(),
+                <&_ as TableLike>::columns(table_ref, &db).count(),
+                table.columns(&db).count()
+            );
+            assert_eq!(
+                <&_ as TableLike>::primary_key_columns(table_ref, &db).count(),
                 table.primary_key_columns(&db).count()
             );
             assert_eq!(
-                table_ref.check_constraints(&db).count(),
+                <&_ as TableLike>::check_constraints(table_ref, &db).count(),
                 table.check_constraints(&db).count()
             );
-            assert_eq!(table_ref.unique_indices(&db).count(), table.unique_indices(&db).count());
-            assert_eq!(table_ref.foreign_keys(&db).count(), table.foreign_keys(&db).count());
+            assert_eq!(
+                <&_ as TableLike>::unique_indices(table_ref, &db).count(),
+                table.unique_indices(&db).count()
+            );
+            assert_eq!(
+                <&_ as TableLike>::foreign_keys(table_ref, &db).count(),
+                table.foreign_keys(&db).count()
+            );
+        }
+
+        #[test]
+        fn test_dependent_tables() {
+            let sql = "
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));
+            ";
+            let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+            let parent = db.table(None, "parent").expect("Parent not found");
+            let child = db.table(None, "child").expect("Child not found");
+
+            let parent_ref = &parent;
+
+            // calling dependent_tables on &parent
+            // parent has 'child' depending on it
+            let deps: Vec<_> = <&_ as TableLike>::dependent_tables(parent_ref, &db)
+                .map(|t| t.table_name())
+                .collect();
+
+            assert!(deps.contains(&"child"));
+            assert!(!deps.contains(&"parent"));
+
+            // calling on &child - nothing depends on child
+            let child_ref = &child;
+            let child_deps: Vec<_> = <&_ as TableLike>::dependent_tables(child_ref, &db).collect();
+            assert!(child_deps.is_empty());
         }
     }
 }

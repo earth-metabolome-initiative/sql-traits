@@ -234,8 +234,11 @@ pub trait DatabaseLike: Clone + Debug {
     /// );
     /// "#,
     /// )?;
-    /// let ordered_tables: Vec<&str> = db.table_dag().iter().map(|t| t.table_name()).collect();
-    /// assert_eq!(ordered_tables, vec!["users", "comments", "extended_comments"]);
+    /// let user_table = db.table(None, "users").unwrap();
+    /// let comment_table = db.table(None, "comments").unwrap();
+    /// let extended_comment_table = db.table(None, "extended_comments").unwrap();
+    /// let ordered_tables = db.table_dag();
+    /// assert_eq!(ordered_tables, vec![user_table, comment_table, extended_comment_table]);
     /// # Ok(())
     /// # }
     /// ```
@@ -259,7 +262,7 @@ pub trait DatabaseLike: Clone + Debug {
                         Some(tables_ref.binary_search(&referenced_table).unwrap_or_else(|_| panic!("Referenced table '{}' not found in database '{}' - Tables are {:?}",
                             referenced_table.table_name(),
                             self.catalog_name(),
-                            tables_ref.iter().map(|t| t.table_name()).collect::<Vec<&str>>())))
+                            tables_ref.iter().map(TableLike::table_name).collect::<Vec<&str>>())))
                     })
                     .map(move |referenced_table_number| (referenced_table_number, table_number))
             })
