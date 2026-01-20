@@ -2180,7 +2180,7 @@ mod tests {
             // calling dependent_tables on &parent
             // parent has 'child' depending on it
             let deps: Vec<_> = <&_ as TableLike>::dependent_tables(parent_ref, &db)
-                .map(|t| t.table_name())
+                .map(TableLike::table_name)
                 .collect();
 
             assert!(deps.contains(&"child"));
