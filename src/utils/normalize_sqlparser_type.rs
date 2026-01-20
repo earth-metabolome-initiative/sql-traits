@@ -81,3 +81,75 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::ast::{DataType, Ident, ObjectName, ObjectNamePart, TimezoneInfo};
+
+    use super::*;
+
+    #[test]
+    fn test_normalize_sqlparser_type_simple() {
+        assert_eq!(normalize_sqlparser_type(&DataType::Uuid), "UUID");
+        assert_eq!(normalize_sqlparser_type(&DataType::Text), "TEXT");
+        assert_eq!(normalize_sqlparser_type(&DataType::Varchar(None)), "VARCHAR");
+        assert_eq!(normalize_sqlparser_type(&DataType::Int(None)), "INT");
+        assert_eq!(normalize_sqlparser_type(&DataType::Integer(None)), "INT");
+        assert_eq!(normalize_sqlparser_type(&DataType::Real), "REAL");
+        assert_eq!(normalize_sqlparser_type(&DataType::SmallInt(None)), "SMALLINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::Bool), "BOOLEAN");
+        assert_eq!(normalize_sqlparser_type(&DataType::Boolean), "BOOLEAN");
+    }
+
+    #[test]
+    fn test_normalize_sqlparser_type_timestamp() {
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Timestamp(None, TimezoneInfo::None)),
+            "TIMESTAMP"
+        );
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
+            "TIMESTAMPTZ"
+        );
+    }
+
+    #[test]
+    fn test_normalize_sqlparser_type_custom() {
+        let geography = DataType::Custom(
+            ObjectName(vec![ObjectNamePart::Identifier(Ident::new("GEOGRAPHY"))]),
+            vec!["Point".to_string(), "4326".to_string()],
+        );
+        assert_eq!(normalize_sqlparser_type(&geography), "GEOGRAPHY(Point, 4326)");
+
+        let geometry = DataType::Custom(
+            ObjectName(vec![ObjectNamePart::Identifier(Ident::new("GEOMETRY"))]),
+            vec!["Point".to_string(), "4326".to_string()],
+        );
+        assert_eq!(normalize_sqlparser_type(&geometry), "GEOMETRY(Point, 4326)");
+
+        let other = DataType::Custom(
+            ObjectName(vec![ObjectNamePart::Identifier(Ident::new("OTHER"))]),
+            vec![],
+        );
+        assert_eq!(normalize_sqlparser_type(&other), "OTHER");
+    }
+
+    #[test]
+    #[should_panic(expected = "Normalization for SQLParser data type")]
+    fn test_normalize_sqlparser_type_unimplemented() {
+        let _ = normalize_sqlparser_type(&DataType::BigInt(None));
+    }
+
+    #[test]
+    #[should_panic(expected = "Normalization for custom SQLParser data type")]
+    fn test_normalize_sqlparser_type_custom_unimplemented() {
+        let custom = DataType::Custom(
+            ObjectName(vec![
+                ObjectNamePart::Identifier(Ident::new("Many")),
+                ObjectNamePart::Identifier(Ident::new("Parts")),
+            ]),
+            vec![],
+        );
+        let _ = normalize_sqlparser_type(&custom);
+    }
+}
