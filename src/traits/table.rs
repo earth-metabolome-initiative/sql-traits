@@ -2086,3 +2086,44 @@ where
         T::foreign_keys(self, database)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prelude::*;
+
+    mod reference_impl {
+        use super::*;
+
+        #[test]
+        fn test_all_methods() {
+            let sql = "
+                CREATE TABLE users (
+                    id INT PRIMARY KEY,
+                    name TEXT CHECK (length(name) > 0),
+                    UNIQUE(name)
+                );
+            ";
+            let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+            let table = db.table(None, "users").expect("Table not found");
+
+            let table_ref = &table;
+
+            assert_eq!(table_ref.table_name(), table.table_name());
+            assert_eq!(table_ref.table_doc(&db), table.table_doc(&db));
+            assert_eq!(table_ref.table_schema(), table.table_schema());
+
+            assert_eq!(table_ref.columns(&db).count(), table.columns(&db).count());
+            assert_eq!(
+                table_ref.primary_key_columns(&db).count(),
+                table.primary_key_columns(&db).count()
+            );
+            assert_eq!(
+                table_ref.check_constraints(&db).count(),
+                table.check_constraints(&db).count()
+            );
+            assert_eq!(table_ref.unique_indices(&db).count(), table.unique_indices(&db).count());
+            assert_eq!(table_ref.foreign_keys(&db).count(), table.foreign_keys(&db).count());
+        }
+    }
+}
