@@ -113,6 +113,25 @@ where
 
     /// Returns a reference to the metadata of the specified table, if it exists
     /// in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    ///     -- This is a test table
+    ///     CREATE TABLE test_table (id INT);
+    ///     "#,
+    /// )?;
+    /// let table = db.table(None, "test_table").unwrap();
+    /// let metadata = db.table_metadata(table).unwrap();
+    /// assert_eq!(metadata.table_doc().and_then(|d| d.doc()), Some("This is a test table"));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn table_metadata(&self, table: &T) -> Option<&T::Meta> {
         self.tables
             .binary_search_by_key(
@@ -133,6 +152,21 @@ where
 
     /// Returns a reference to the metadata of the specified column, if it
     /// exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// let table = db.table(None, "t").unwrap();
+    /// let column = table.column("id", &db).unwrap();
+    /// // The metadata for columns in ParserDB is currently unit ()
+    /// assert_eq!(db.column_metadata(column), Some(&()));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn column_metadata(&self, column: &C) -> Option<&C::Meta> {
         self.columns
             .binary_search_by(|(c, _)| c.as_ref().cmp(column))
@@ -142,6 +176,22 @@ where
 
     /// Returns a reference to the metadata of the specified unique index, if it
     /// exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE t (id INT UNIQUE);")?;
+    /// let table = db.table(None, "t").unwrap();
+    /// let index = table.unique_indices(&db).next().unwrap();
+    /// // The metadata for unique indices in ParserDB is currently unit ()
+    /// // (actually it might be struct depending on impl, let's just check existence)
+    /// assert!(db.index_metadata(index).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn index_metadata(&self, index: &U) -> Option<&U::Meta> {
         self.unique_indices
             .binary_search_by(|(i, _)| i.as_ref().cmp(index))
@@ -151,6 +201,20 @@ where
 
     /// Returns a reference to the metadata of the specified check constraint,
     /// if it exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE t (id INT CHECK (id > 0));")?;
+    /// let table = db.table(None, "t").unwrap();
+    /// let check = table.check_constraints(&db).next().unwrap();
+    /// assert!(db.check_constraint_metadata(check).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn check_constraint_metadata(&self, constraint: &Ch) -> Option<&Ch::Meta> {
         self.check_constraints
             .binary_search_by(|(c, _)| c.as_ref().cmp(constraint))
@@ -160,6 +224,25 @@ where
 
     /// Returns a reference to the metadata of the specified foreign key, if it
     /// exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    ///     CREATE TABLE parent (id INT PRIMARY KEY);
+    ///     CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
+    ///     "#,
+    /// )?;
+    /// let child = db.table(None, "child").unwrap();
+    /// let fk = child.foreign_keys(&db).next().unwrap();
+    /// assert!(db.foreign_key_metadata(fk).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn foreign_key_metadata(&self, key: &F) -> Option<&F::Meta> {
         self.foreign_keys
             .binary_search_by(|(k, _)| k.as_ref().cmp(key))
@@ -172,6 +255,20 @@ where
     /// # Arguments
     ///
     /// * `name` - The name of the function to retrieve.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
+    /// let func = db.function("my_func").unwrap();
+    /// assert_eq!(func.name(), "my_func");
+    /// assert!(db.function("non_existent").is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn function(&self, name: &str) -> Option<&Func> {
         self.functions
@@ -186,6 +283,19 @@ where
     /// # Arguments
     ///
     /// * `function` - The function to retrieve metadata for.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
+    /// let func = db.function("my_func").unwrap();
+    /// assert!(db.function_metadata(func).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn function_metadata(&self, function: &Func) -> Option<&Func::Meta> {
         self.functions
             .binary_search_by(|(f, _)| f.name().cmp(function.name()))
@@ -198,6 +308,26 @@ where
     /// # Arguments
     ///
     /// * `name` - The name of the trigger to retrieve.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    ///     CREATE TABLE t (id INT);
+    ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
+    ///     CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
+    ///     "#,
+    /// )?;
+    /// let trigger = db.trigger("my_trigger").unwrap();
+    /// assert_eq!(trigger.name(), "my_trigger");
+    /// assert!(db.trigger("non_existent").is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn trigger(&self, name: &str) -> Option<&Tr> {
         self.triggers
@@ -212,6 +342,25 @@ where
     /// # Arguments
     ///
     /// * `trigger` - The trigger to retrieve metadata for.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    ///     CREATE TABLE t (id INT);
+    ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
+    ///     CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
+    ///     "#,
+    /// )?;
+    /// let trigger = db.trigger("my_trigger").unwrap();
+    /// assert!(db.trigger_metadata(trigger).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn trigger_metadata(&self, trigger: &Tr) -> Option<&Tr::Meta> {
         self.triggers
             .binary_search_by(|(t, _)| t.name().cmp(trigger.name()))
@@ -220,6 +369,21 @@ where
     }
 
     /// Returns a reference to the catalog name.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// assert_eq!(db.catalog_name(), "unknown_catalog");
+    ///
+    /// let db_custom: ParserDB = ParserDB::new("my_catalog".to_string()).into();
+    /// assert_eq!(db_custom.catalog_name(), "my_catalog");
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn catalog_name(&self) -> &str {

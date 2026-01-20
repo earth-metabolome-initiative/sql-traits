@@ -31,12 +31,56 @@ pub trait DatabaseLike: Clone + Debug {
     type CheckConstraint: CheckConstraintLike<DB = Self>;
 
     /// Returns the name of the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// assert_eq!(db.catalog_name(), "unknown_catalog");
+    /// # Ok(())
+    /// # }
+    /// ```
     fn catalog_name(&self) -> &str;
 
     /// Returns the number of tables in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE t1 (id INT);
+    /// CREATE TABLE t2 (id INT);
+    /// "#,
+    /// )?;
+    /// assert_eq!(db.number_of_tables(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn number_of_tables(&self) -> usize;
 
     /// Returns the timezone of the database, if any.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from("SET TIME ZONE 'UTC';")?;
+    /// assert_eq!(db.timezone(), Some("UTC"));
+    ///
+    /// let db_no_tz = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// assert_eq!(db_no_tz.timezone(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn timezone(&self) -> Option<&str>;
 
     /// Iterates over the tables defined in the schema.
@@ -62,6 +106,25 @@ pub trait DatabaseLike: Clone + Debug {
     fn tables(&self) -> impl Iterator<Item = &Self::Table>;
 
     /// Iterates over the triggers defined in the schema.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE t (id INT);
+    /// CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END;' LANGUAGE plpgsql;
+    /// CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
+    /// "#,
+    /// )?;
+    /// let triggers: Vec<&str> = db.triggers().map(|t| t.name()).collect();
+    /// assert_eq!(triggers, vec!["my_trigger"]);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn triggers(&self) -> impl Iterator<Item = &Self::Trigger>;
 
     /// Returns whether the database has at least one table.
