@@ -1970,20 +1970,30 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::try_from(
     ///     r#"
-    /// CREATE TABLE spouse_table (id INT PRIMARY KEY, name TEXT);
-    /// CREATE TABLE connection_table (id INT PRIMARY KEY, name TEXT);
-    /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE root (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE spouse_table (
+    ///     id INT PRIMARY KEY REFERENCES root(id),
+    ///     name TEXT
+    /// );
+    /// CREATE TABLE my_table (
+    ///     id INT PRIMARY KEY REFERENCES root(id),
+    ///     name TEXT
+    /// );
     /// CREATE TABLE child_table (
     ///     id INT PRIMARY KEY,
-    ///     my_id INT REFERENCES my_table(id),
-    ///     spouse_id INT REFERENCES spouse_table(id)
+    ///     FOREIGN KEY (id) REFERENCES my_table(id),
+    ///     FOREIGN KEY (id) REFERENCES spouse_table(id)
     /// );
     /// "#,
     /// )?;
+    /// let root = db.table(None, "root").unwrap();
+    /// let child_table = db.table(None, "child_table").unwrap();
     /// let my_table = db.table(None, "my_table").unwrap();
     /// let spouse_table = db.table(None, "spouse_table").unwrap();
-    /// let spouses = my_table.spouses(&db).collect::<Vec<_>>();
-    /// assert_eq!(spouses, vec![spouse_table]);
+    /// assert_eq!(my_table.spouses(&db).next(), Some(spouse_table));
+    /// assert_eq!(spouse_table.spouses(&db).next(), Some(my_table));
+    /// assert!(root.spouses(&db).next().is_none());
+    /// assert!(child_table.spouses(&db).next().is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -1991,13 +2001,15 @@ pub trait TableLike:
     where
         Self: 'db,
     {
-        let descendants: Vec<&Self> = self.dependent_tables(database).collect();
+        let descendants: Vec<&Self> = self.extending_tables(database).collect();
 
         database.tables().map(Borrow::borrow).filter(move |candidate| {
             *candidate != self
                 && !descendants.contains(candidate)
-                && !self.depends_on(database, candidate)
-                && descendants.iter().any(|descendant| descendant.depends_on(database, candidate))
+                && !self.is_descendant_of(database, candidate)
+                && descendants
+                    .iter()
+                    .any(|descendant| descendant.is_descendant_of(database, candidate))
         })
     }
 }
