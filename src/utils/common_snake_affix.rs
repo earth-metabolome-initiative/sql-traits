@@ -82,9 +82,7 @@ where
         let bytes = s.as_bytes();
         len = len.min(bytes.len());
         let mut i = 0;
-        while i < len
-            && first_bytes[first_bytes.len() - 1 - i] == bytes[bytes.len() - 1 - i]
-        {
+        while i < len && first_bytes[first_bytes.len() - 1 - i] == bytes[bytes.len() - 1 - i] {
             i += 1;
         }
         len = i;

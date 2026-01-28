@@ -2066,7 +2066,8 @@ pub trait TableLike:
     /// ```
     #[inline]
     fn has_common_snake_prefix(&self, database: &Self::DB) -> bool {
-        crate::utils::common_snake_prefix(self.columns(database).map(ColumnLike::column_name)).is_some()
+        crate::utils::common_snake_prefix(self.columns(database).map(ColumnLike::column_name))
+            .is_some()
     }
 
     /// Returns the shared snake_case prefix across the table's columns.
@@ -2128,7 +2129,8 @@ pub trait TableLike:
     /// ```
     #[inline]
     fn has_common_snake_suffix(&self, database: &Self::DB) -> bool {
-        crate::utils::common_snake_suffix(self.columns(database).map(ColumnLike::column_name)).is_some()
+        crate::utils::common_snake_suffix(self.columns(database).map(ColumnLike::column_name))
+            .is_some()
     }
 
     /// Returns the shared snake_case suffix across the table's columns.
@@ -2167,8 +2169,6 @@ pub trait TableLike:
     {
         crate::utils::common_snake_suffix(self.columns(database).map(ColumnLike::column_name))
     }
-
-
 }
 
 impl<T: TableLike> TableLike for &T
