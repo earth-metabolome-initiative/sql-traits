@@ -2048,7 +2048,8 @@ pub trait TableLike:
     ///
     /// # Arguments
     ///
-    /// * `database` - A reference to the database instance to which the table belongs.
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
     ///
     /// # Example
     ///
@@ -2057,7 +2058,7 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::try_from(
-    ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);"
+    ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert!(table.has_common_snake_prefix(&db));
@@ -2072,12 +2073,14 @@ pub trait TableLike:
 
     /// Returns the shared snake_case prefix across the table's columns.
     ///
-    /// The returned prefix ends at the last `_` boundary within the common prefix.
-    /// If no `_` boundary exists in the common prefix, returns `None`.
+    /// The returned prefix ends at the last `_` boundary within the common
+    /// prefix. If no `_` boundary exists in the common prefix, returns
+    /// `None`.
     ///
     /// # Arguments
     ///
-    /// * `database` - A reference to the database instance to which the table belongs.
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
     ///
     /// # Example
     ///
@@ -2086,14 +2089,12 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::try_from(
-    ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);"
+    ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert_eq!(table.common_snake_prefix(&db), Some("user_"));
     ///
-    /// let db = ParserDB::try_from(
-    ///     "CREATE TABLE other_table (id INT, name TEXT);"
-    /// )?;
+    /// let db = ParserDB::try_from("CREATE TABLE other_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "other_table").unwrap();
     /// assert_eq!(table.common_snake_prefix(&db), None);
     /// # Ok(())
@@ -2111,7 +2112,8 @@ pub trait TableLike:
     ///
     /// # Arguments
     ///
-    /// * `database` - A reference to the database instance to which the table belongs.
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
     ///
     /// # Example
     ///
@@ -2119,9 +2121,7 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
-    ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);"
-    /// )?;
+    /// let db = ParserDB::try_from("CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert!(table.has_common_snake_suffix(&db));
     /// # Ok(())
@@ -2135,12 +2135,14 @@ pub trait TableLike:
 
     /// Returns the shared snake_case suffix across the table's columns.
     ///
-    /// The returned suffix starts at the first `_` boundary within the common suffix.
-    /// If no `_` boundary exists in the common suffix, returns `None`.
+    /// The returned suffix starts at the first `_` boundary within the common
+    /// suffix. If no `_` boundary exists in the common suffix, returns
+    /// `None`.
     ///
     /// # Arguments
     ///
-    /// * `database` - A reference to the database instance to which the table belongs.
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
     ///
     /// # Example
     ///
@@ -2148,15 +2150,11 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
-    ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);"
-    /// )?;
+    /// let db = ParserDB::try_from("CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert_eq!(table.common_snake_suffix(&db), Some("_id"));
     ///
-    /// let db = ParserDB::try_from(
-    ///     "CREATE TABLE other_table (id INT, name TEXT);"
-    /// )?;
+    /// let db = ParserDB::try_from("CREATE TABLE other_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "other_table").unwrap();
     /// assert_eq!(table.common_snake_suffix(&db), None);
     /// # Ok(())

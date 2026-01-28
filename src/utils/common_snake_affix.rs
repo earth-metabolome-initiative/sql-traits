@@ -50,9 +50,9 @@ where
 
 /// Returns the shared snake_case suffix across all strings.
 ///
-/// The returned suffix starts at the first `_` boundary within the common suffix.
-/// If no `_` boundary exists in the common suffix (or the iterator is empty),
-/// this returns `None`.
+/// The returned suffix starts at the first `_` boundary within the common
+/// suffix. If no `_` boundary exists in the common suffix (or the iterator is
+/// empty), this returns `None`.
 ///
 /// # Examples
 ///
