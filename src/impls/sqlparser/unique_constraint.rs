@@ -34,6 +34,4 @@ impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
     }
 }
 
-impl UniqueIndexLike for TableAttribute<CreateTable, UniqueConstraint> {
-    type DB = ParserDB;
-}
+impl UniqueIndexLike for TableAttribute<CreateTable, UniqueConstraint> {}

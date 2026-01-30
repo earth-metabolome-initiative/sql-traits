@@ -1,15 +1,12 @@
 //! Submodule definining the `UniqueIndexLike` trait for SQL unique
 //! indexes.
 
-use crate::traits::{DatabaseLike, IndexLike, TableLike};
+use crate::traits::{IndexLike, TableLike};
 
 /// A unique index is a rule that specifies that the values in a column
 /// (or a group of columns) must be unique across all rows in a table.
 /// This trait represents such a unique index in a database-agnostic way.
-pub trait UniqueIndexLike: IndexLike<DB = <Self as UniqueIndexLike>::DB> {
-    /// The database type the unique index belongs to.
-    type DB: DatabaseLike<UniqueIndex = Self>;
-
+pub trait UniqueIndexLike: IndexLike {
     /// Returns whether this unique index is also the primary key of the table.
     ///
     /// # Example
@@ -30,7 +27,7 @@ pub trait UniqueIndexLike: IndexLike<DB = <Self as UniqueIndexLike>::DB> {
     /// # }
     /// ```
     #[inline]
-    fn is_primary_key(&self, database: &<Self as UniqueIndexLike>::DB) -> bool {
+    fn is_primary_key(&self, database: &<Self as IndexLike>::DB) -> bool {
         self.table(database).primary_key_columns(database).eq(self.columns(database))
     }
 }
