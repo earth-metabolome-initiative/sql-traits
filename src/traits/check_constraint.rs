@@ -153,6 +153,47 @@ fn extract_null_columns(expr: &Expr, is_null: bool) -> Option<Vec<&Ident>> {
     }
 }
 
+/// Helper function to recursively determine if an expression checks for a
+/// not-empty text constraint.
+fn check_not_empty_text_recursive<C>(database: &C::DB, expr: &Expr, check_constraint: &C) -> bool
+where
+    C: CheckConstraintLike,
+{
+    match expr {
+        Expr::BinaryOp { left, op, right } => {
+            if matches!(op, BinaryOperator::NotEq) {
+                let check_side = |col_expr: &Expr, val_expr: &Expr| -> bool {
+                    if let (Expr::Identifier(ident), Expr::Value(val_wrapper)) =
+                        (col_expr, val_expr)
+                        && let Value::SingleQuotedString(s) = &val_wrapper.value
+                        && s.is_empty()
+                    {
+                        return check_constraint
+                            .column(database, &ident.value)
+                            .is_some_and(|c| c.is_textual(database));
+                    }
+                    false
+                };
+
+                if check_side(left.as_ref(), right.as_ref())
+                    || check_side(right.as_ref(), left.as_ref())
+                {
+                    return true;
+                }
+            }
+
+            if matches!(op, BinaryOperator::And) {
+                return check_not_empty_text_recursive(database, left, check_constraint)
+                    || check_not_empty_text_recursive(database, right, check_constraint);
+            }
+
+            false
+        }
+        Expr::Nested(inner) => check_not_empty_text_recursive(database, inner, check_constraint),
+        _ => false,
+    }
+}
+
 /// A check constraint is a rule that specifies a condition that must be met
 /// for data to be inserted or updated in a table. This trait represents such
 /// a check constraint in a database-agnostic way.
@@ -655,5 +696,46 @@ pub trait CheckConstraintLike:
         } else {
             false
         }
+    }
+
+    /// Returns whether the check constraint checks that a textual column is not
+    /// empty (i.e., `col <> ''` or `col != ''`).
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the table
+    ///   from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"CREATE TABLE my_table (
+    ///         text_col TEXT CHECK (text_col <> ''),
+    ///         int_col INT CHECK (int_col <> 0),
+    ///         desc TEXT CHECK (desc != ''),
+    ///         chained TEXT CHECK (chained <> '' AND chained IS NOT NULL),
+    ///         chained_or TEXT CHECK (chained_or <> '' OR chained_or = 'default')
+    ///     );"#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let [cc1, cc2, cc3, cc4, cc5] = &check_constraints.as_slice() else {
+    ///     panic!("Expected five check constraints");
+    /// };
+    /// assert!(cc1.is_not_empty_text_constraint(&db));
+    /// assert!(!cc2.is_not_empty_text_constraint(&db));
+    /// assert!(cc3.is_not_empty_text_constraint(&db));
+    /// assert!(cc4.is_not_empty_text_constraint(&db));
+    /// assert!(!cc5.is_not_empty_text_constraint(&db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn is_not_empty_text_constraint(&self, database: &Self::DB) -> bool {
+        let expr = self.expression(database);
+        check_not_empty_text_recursive(database, expr, self)
     }
 }
