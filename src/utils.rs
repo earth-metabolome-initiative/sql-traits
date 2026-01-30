@@ -9,4 +9,4 @@ pub use columns_in_expression::columns_in_expression;
 mod last_str;
 pub use last_str::last_str;
 mod common_snake_affix;
-pub use common_snake_affix::{common_snake_prefix, common_snake_suffix};
+pub use common_snake_affix::{common_column_name_snake_prefix, common_column_name_snake_suffix};

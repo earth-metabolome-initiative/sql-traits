@@ -9,19 +9,18 @@
 /// # Examples
 ///
 /// ```
-/// use sql_traits::utils::common_snake_prefix;
+/// use sql_traits::utils::common_column_name_snake_prefix;
 ///
 /// let strings = vec!["alpha_one", "alpha_two", "alpha_three"];
-/// assert_eq!(common_snake_prefix(strings.iter().copied()), Some("alpha_"));
+/// assert_eq!(common_column_name_snake_prefix(strings.iter().copied()), Some("alpha_"));
 ///
-/// let strings = ["cat", "caterpillar"];
-/// assert_eq!(common_snake_prefix(strings), None);
+/// let strings = ["user_id", "username"];
+/// assert_eq!(common_column_name_snake_prefix(strings), None);
 ///
 /// let empty: Vec<&str> = Vec::new();
-/// assert_eq!(common_snake_prefix(empty), None);
+/// assert_eq!(common_column_name_snake_prefix(empty), None);
 /// ```
-#[must_use]
-pub fn common_snake_prefix<'a, I>(strings: I) -> Option<&'a str>
+pub fn common_column_name_snake_prefix<'a, I>(strings: I) -> Option<&'a str>
 where
     I: IntoIterator<Item = &'a str>,
 {
@@ -44,8 +43,8 @@ where
     }
 
     let prefix = &first[..len];
-    let underscore = prefix.rfind('_')?;
-    Some(&first[..=underscore])
+    let (head, _) = prefix.rsplit_once('_')?;
+    Some(&first[..=head.len()])
 }
 
 /// Returns the shared snake_case suffix across all strings.
@@ -57,19 +56,18 @@ where
 /// # Examples
 ///
 /// ```
-/// use sql_traits::utils::common_snake_suffix;
+/// use sql_traits::utils::common_column_name_snake_suffix;
 ///
 /// let strings = vec!["user_id", "group_id", "team_id"];
-/// assert_eq!(common_snake_suffix(strings.iter().copied()), Some("_id"));
+/// assert_eq!(common_column_name_snake_suffix(strings.iter().copied()), Some("_id"));
 ///
 /// let strings = ["cat", "dog"];
-/// assert_eq!(common_snake_suffix(strings), None);
+/// assert_eq!(common_column_name_snake_suffix(strings), None);
 ///
 /// let empty: Vec<&str> = Vec::new();
-/// assert_eq!(common_snake_suffix(empty), None);
+/// assert_eq!(common_column_name_snake_suffix(empty), None);
 /// ```
-#[must_use]
-pub fn common_snake_suffix<'a, I>(strings: I) -> Option<&'a str>
+pub fn common_column_name_snake_suffix<'a, I>(strings: I) -> Option<&'a str>
 where
     I: IntoIterator<Item = &'a str>,
 {
@@ -92,6 +90,6 @@ where
     }
 
     let suffix = &first[first.len() - len..];
-    let underscore = suffix.find('_')?;
-    Some(&suffix[underscore..])
+    let (before, _) = suffix.split_once('_')?;
+    Some(&suffix[before.len()..])
 }

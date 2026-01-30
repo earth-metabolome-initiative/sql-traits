@@ -2060,14 +2060,18 @@ pub trait TableLike:
     /// let db = ParserDB::try_from(
     ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);",
     /// )?;
+    /// let no_snake_prefix_db =
+    ///     ParserDB::try_from("CREATE TABLE my_table (user_id INT, username TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(table.has_common_snake_prefix(&db));
+    /// let no_snake_prefix_table = no_snake_prefix_db.table(None, "my_table").unwrap();
+    /// assert!(table.has_common_column_name_snake_prefix(&db));
+    /// assert!(!no_snake_prefix_table.has_common_column_name_snake_prefix(&no_snake_prefix_db));
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_common_snake_prefix(&self, database: &Self::DB) -> bool {
-        self.common_snake_prefix(database).is_some()
+    fn has_common_column_name_snake_prefix(&self, database: &Self::DB) -> bool {
+        self.common_column_name_snake_prefix(database).is_some()
     }
 
     /// Returns the shared snake_case prefix across the table's columns.
@@ -2091,20 +2095,26 @@ pub trait TableLike:
     ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert_eq!(table.common_snake_prefix(&db), Some("user_"));
+    /// assert_eq!(table.common_column_name_snake_prefix(&db), Some("user_"));
     ///
     /// let db = ParserDB::try_from("CREATE TABLE other_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "other_table").unwrap();
-    /// assert_eq!(table.common_snake_prefix(&db), None);
+    /// assert_eq!(table.common_column_name_snake_prefix(&db), None);
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE my_table (user_id INT, username TEXT, email TEXT);")?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// assert_eq!(table.common_column_name_snake_prefix(&db), None);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn common_snake_prefix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn common_column_name_snake_prefix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db,
     {
-        crate::utils::common_snake_prefix(self.columns(database).map(ColumnLike::column_name))
+        crate::utils::common_column_name_snake_prefix(
+            self.columns(database).map(ColumnLike::column_name),
+        )
     }
 
     /// Returns whether the table's columns share a snake_case suffix.
@@ -2122,13 +2132,17 @@ pub trait TableLike:
     ///
     /// let db = ParserDB::try_from("CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(table.has_common_snake_suffix(&db));
+    /// assert!(table.has_common_column_name_snake_suffix(&db));
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE my_table (userid INT, group_id INT, id_team INT);")?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// assert!(!table.has_common_column_name_snake_suffix(&db));
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_common_snake_suffix(&self, database: &Self::DB) -> bool {
-        self.common_snake_suffix(database).is_some()
+    fn has_common_column_name_snake_suffix(&self, database: &Self::DB) -> bool {
+        self.common_column_name_snake_suffix(database).is_some()
     }
 
     /// Returns the shared snake_case suffix across the table's columns.
@@ -2150,20 +2164,26 @@ pub trait TableLike:
     ///
     /// let db = ParserDB::try_from("CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert_eq!(table.common_snake_suffix(&db), Some("_id"));
+    /// assert_eq!(table.common_column_name_snake_suffix(&db), Some("_id"));
     ///
     /// let db = ParserDB::try_from("CREATE TABLE other_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "other_table").unwrap();
-    /// assert_eq!(table.common_snake_suffix(&db), None);
+    /// assert_eq!(table.common_column_name_snake_suffix(&db), None);
+    ///
+    /// let db = ParserDB::try_from("CREATE TABLE my_table (user_id INT, groupid INT, teamid INT);")?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// assert_eq!(table.common_column_name_snake_suffix(&db), None);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn common_snake_suffix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn common_column_name_snake_suffix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db,
     {
-        crate::utils::common_snake_suffix(self.columns(database).map(ColumnLike::column_name))
+        crate::utils::common_column_name_snake_suffix(
+            self.columns(database).map(ColumnLike::column_name),
+        )
     }
 }
 
