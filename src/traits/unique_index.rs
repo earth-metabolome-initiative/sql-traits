@@ -31,3 +31,5 @@ pub trait UniqueIndexLike: IndexLike {
         self.table(database).primary_key_columns(database).eq(self.columns(database))
     }
 }
+
+impl<T: IndexLike> UniqueIndexLike for T {}

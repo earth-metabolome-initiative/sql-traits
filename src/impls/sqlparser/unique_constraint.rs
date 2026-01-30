@@ -4,7 +4,7 @@ use sqlparser::ast::{CreateTable, Expr, UniqueConstraint};
 
 use crate::{
     structs::{TableAttribute, generic_db::ParserDB, metadata::UniqueIndexMetadata},
-    traits::{DatabaseLike, IndexLike, Metadata, UniqueIndexLike},
+    traits::{DatabaseLike, IndexLike, Metadata},
 };
 
 impl Metadata for TableAttribute<CreateTable, UniqueConstraint> {
@@ -33,5 +33,3 @@ impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
             .expression()
     }
 }
-
-impl UniqueIndexLike for TableAttribute<CreateTable, UniqueConstraint> {}
