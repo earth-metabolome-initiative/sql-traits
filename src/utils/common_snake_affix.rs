@@ -2,9 +2,9 @@
 
 /// Returns the shared snake_case prefix across all strings.
 ///
-/// The returned prefix ends at the last `_` boundary within the common prefix.
-/// If no `_` boundary exists in the common prefix (or the iterator is empty),
-/// this returns `None`.
+/// The returned prefix is the first segment (up to the first `_`) plus the `_`
+/// itself. If any string lacks a `_` or the first segments differ (or the
+/// iterator is empty), this returns `None`.
 ///
 /// # Examples
 ///
@@ -26,32 +26,20 @@ where
 {
     let mut iter = strings.into_iter();
     let first = iter.next()?;
-    let first_bytes = first.as_bytes();
-    let mut len = first_bytes.len();
-
+    let (head, _) = first.split_once('_')?;
     for s in iter {
-        let bytes = s.as_bytes();
-        len = len.min(bytes.len());
-        let mut i = 0;
-        while i < len && first_bytes[i] == bytes[i] {
-            i += 1;
-        }
-        len = i;
-        if len == 0 {
-            break;
+        if s.split_once('_').map(|(h, _)| h) != Some(head) {
+            return None;
         }
     }
-
-    let prefix = &first[..len];
-    let (head, _) = prefix.rsplit_once('_')?;
     Some(&first[..=head.len()])
 }
 
 /// Returns the shared snake_case suffix across all strings.
 ///
-/// The returned suffix starts at the first `_` boundary within the common
-/// suffix. If no `_` boundary exists in the common suffix (or the iterator is
-/// empty), this returns `None`.
+/// The returned suffix is the last `_` plus the final segment. If any string
+/// lacks a `_` or the final segments differ (or the iterator is empty), this
+/// returns `None`.
 ///
 /// # Examples
 ///
@@ -73,23 +61,11 @@ where
 {
     let mut iter = strings.into_iter();
     let first = iter.next()?;
-    let first_bytes = first.as_bytes();
-    let mut len = first_bytes.len();
-
+    let (before, tail) = first.rsplit_once('_')?;
     for s in iter {
-        let bytes = s.as_bytes();
-        len = len.min(bytes.len());
-        let mut i = 0;
-        while i < len && first_bytes[first_bytes.len() - 1 - i] == bytes[bytes.len() - 1 - i] {
-            i += 1;
-        }
-        len = i;
-        if len == 0 {
-            break;
+        if s.rsplit_once('_').map(|(_, t)| t) != Some(tail) {
+            return None;
         }
     }
-
-    let suffix = &first[first.len() - len..];
-    let (before, _) = suffix.split_once('_')?;
-    Some(&suffix[before.len()..])
+    Some(&first[before.len()..])
 }
