@@ -908,7 +908,7 @@ pub trait ColumnLike:
     }
 
     /// Iterates over the
-    /// [`UniqueIndexLike`]s
+    /// [`UniqueIndexLike`](crate::traits::UniqueIndexLike)s
     /// that involve this column within the table.
     ///
     /// # Arguments
