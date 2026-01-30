@@ -6,7 +6,9 @@ pub mod table;
 use std::fmt::Debug;
 
 pub use column::ColumnLike;
+pub mod index;
 pub use database::DatabaseLike;
+pub use index::IndexLike;
 pub use table::TableLike;
 pub mod check_constraint;
 pub use check_constraint::CheckConstraintLike;

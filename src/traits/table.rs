@@ -738,8 +738,39 @@ pub trait TableLike:
         self.non_tautological_check_constraints(database).next().is_some()
     }
 
-    /// Iterates over the unique indexes of the table using the provided
-    /// schema.
+    /// Iterates over the indices associated with the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE my_table (id INT, name TEXT);
+    /// CREATE INDEX my_index ON my_table (name);
+    /// "#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let indices: Vec<_> = table.indices(&db).collect();
+    /// assert_eq!(indices.len(), 1);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn indices<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    where
+        Self: 'db;
+
+    /// Iterates over the unique indices of the table using the provided schema.
     ///
     /// # Arguments
     ///
@@ -2104,6 +2135,16 @@ where
         Self: 'db,
     {
         T::unique_indices(self, database)
+    }
+
+    fn indices<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    where
+        Self: 'db,
+    {
+        T::indices(self, database)
     }
 
     fn foreign_keys<'db>(

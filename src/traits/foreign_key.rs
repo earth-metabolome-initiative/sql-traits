@@ -4,7 +4,7 @@ use std::{borrow::Borrow, fmt::Debug};
 
 use sqlparser::ast::ConstraintReferenceMatchKind;
 
-use crate::traits::{ColumnLike, DatabaseLike, Metadata, TableLike, UniqueIndexLike};
+use crate::traits::{ColumnLike, DatabaseLike, IndexLike, Metadata, TableLike};
 
 /// A foreign key constraint is a rule that specifies a relationship between
 /// two tables. This trait represents such a foreign key constraint in a
@@ -855,7 +855,7 @@ pub trait ForeignKeyLike:
         let referenced_columns: Vec<_> = self.referenced_columns(database).collect();
         referenced_table.unique_indices(database).find(
             |index: &&<Self::DB as DatabaseLike>::UniqueIndex| {
-                let index_columns: Vec<_> = UniqueIndexLike::columns(*index, database).collect();
+                let index_columns: Vec<_> = (*index).columns(database).collect();
                 index_columns.len() == referenced_columns.len()
                     && index_columns.iter().all(|col| referenced_columns.contains(col))
             },

@@ -9,8 +9,8 @@ use geometric_traits::{
 };
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, TriggerLike,
-    UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, TableLike,
+    TriggerLike, UniqueIndexLike,
 };
 
 /// A trait for types that can be treated as SQL databases.
@@ -19,6 +19,8 @@ pub trait DatabaseLike: Clone + Debug {
     type Table: TableLike<DB = Self>;
     /// Type of the columns in the schema.
     type Column: ColumnLike<DB = Self>;
+    /// Type of the indices in the schema.
+    type Index: IndexLike<DB = Self>;
     /// Type of the foreign keys in the schema.
     type ForeignKey: ForeignKeyLike<DB = Self>;
     /// Type of the functions in the schema.

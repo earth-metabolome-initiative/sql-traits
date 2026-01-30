@@ -4,14 +4,14 @@ use sqlparser::ast::{CreateTable, Expr, UniqueConstraint};
 
 use crate::{
     structs::{TableAttribute, generic_db::ParserDB, metadata::UniqueIndexMetadata},
-    traits::{DatabaseLike, Metadata, UniqueIndexLike},
+    traits::{DatabaseLike, IndexLike, Metadata, UniqueIndexLike},
 };
 
 impl Metadata for TableAttribute<CreateTable, UniqueConstraint> {
     type Meta = UniqueIndexMetadata<Self>;
 }
 
-impl UniqueIndexLike for TableAttribute<CreateTable, UniqueConstraint> {
+impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
     type DB = ParserDB;
 
     #[inline]
@@ -27,6 +27,13 @@ impl UniqueIndexLike for TableAttribute<CreateTable, UniqueConstraint> {
     where
         Self: 'db,
     {
-        database.index_metadata(self).expect("Unique index must exist in database").expression()
+        database
+            .unique_index_metadata(self)
+            .expect("Unique index must exist in database")
+            .expression()
     }
+}
+
+impl UniqueIndexLike for TableAttribute<CreateTable, UniqueConstraint> {
+    type DB = ParserDB;
 }

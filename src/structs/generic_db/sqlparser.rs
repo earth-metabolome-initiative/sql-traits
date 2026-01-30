@@ -9,9 +9,9 @@ use git2::Repository;
 use sql_docs::SqlDoc;
 use sqlparser::{
     ast::{
-        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateTable, CreateTrigger, Expr,
-        ForeignKeyConstraint, IndexColumn, OrderByExpr, OrderByOptions, Statement, TableConstraint,
-        UniqueConstraint, Value, ValueWithSpan,
+        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateIndex, CreateTable,
+        CreateTrigger, Expr, ForeignKeyConstraint, IndexColumn, OrderByExpr, OrderByOptions,
+        Statement, TableConstraint, UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::PostgreSqlDialect,
     parser::{Parser, ParserError},
@@ -21,7 +21,7 @@ use crate::{
     structs::{
         GenericDB, TableAttribute, TableMetadata,
         generic_db::GenericDBBuilder,
-        metadata::{CheckMetadata, UniqueIndexMetadata},
+        metadata::{CheckMetadata, IndexMetadata, UniqueIndexMetadata},
     },
     traits::{DatabaseLike, FunctionLike, TableLike, column::ColumnLike},
     utils::{columns_in_expression, last_str},
@@ -33,6 +33,7 @@ mod functions_in_expression;
 pub type ParserDB = GenericDB<
     CreateTable,
     TableAttribute<CreateTable, ColumnDef>,
+    TableAttribute<CreateTable, CreateIndex>,
     TableAttribute<CreateTable, UniqueConstraint>,
     TableAttribute<CreateTable, ForeignKeyConstraint>,
     CreateFunction,
@@ -45,6 +46,7 @@ pub type ParserDB = GenericDB<
 pub type ParserDBBuilder = GenericDBBuilder<
     CreateTable,
     TableAttribute<CreateTable, ColumnDef>,
+    TableAttribute<CreateTable, CreateIndex>,
     TableAttribute<CreateTable, UniqueConstraint>,
     TableAttribute<CreateTable, ForeignKeyConstraint>,
     CreateFunction,
@@ -82,17 +84,17 @@ impl ParserDB {
         Ok((columns_in_expression, functions_in_expression))
     }
 
-    /// Helper function to create a unique constraint expression from columns.
-    fn create_unique_expression(columns: &[IndexColumn]) -> Expr {
+    /// Helper function to create an index expression from columns.
+    fn create_index_expression(columns: &[IndexColumn]) -> Expr {
         let expression_string = format!(
             "({})",
             columns.iter().map(|ident| ident.column.to_string()).collect::<Vec<_>>().join(", ")
         );
         Parser::new(&sqlparser::dialect::GenericDialect {})
             .try_with_sql(expression_string.as_str())
-            .expect("Failed to parse unique constraint expression")
+            .expect("Failed to parse index constraint expression")
             .parse_expr()
-            .expect("No expression found in parsed unique constraint")
+            .expect("No expression found in parsed index constraint")
     }
 
     /// Helper function to process unique constraints.
@@ -101,9 +103,38 @@ impl ParserDB {
         create_table: &Rc<CreateTable>,
     ) -> UniqueConstraintResult {
         let unique_index = Rc::new(TableAttribute::new(create_table.clone(), unique_constraint));
-        let expression = Self::create_unique_expression(&unique_index.attribute().columns);
+        let expression = Self::create_index_expression(&unique_index.attribute().columns);
         let unique_index_metadata = UniqueIndexMetadata::new(expression, create_table.clone());
         (unique_index, unique_index_metadata)
+    }
+
+    #[allow(clippy::type_complexity)]
+    /// Helper function to process create index statements.
+    fn process_create_index(
+        create_index: CreateIndex,
+        builder: &ParserDBBuilder,
+    ) -> Result<
+        (
+            Rc<TableAttribute<CreateTable, CreateIndex>>,
+            IndexMetadata<TableAttribute<CreateTable, CreateIndex>>,
+        ),
+        crate::errors::Error,
+    > {
+        let table_name = last_str(&create_index.table_name);
+
+        let Some((table, _)) =
+            builder.tables().iter().find(|(t, _)| t.name.to_string() == table_name)
+        else {
+            return Err(crate::errors::Error::TableNotFoundForIndex {
+                table_name: table_name.to_string(),
+                index_name: create_index.name.as_ref().map_or("<unnamed>", last_str).to_string(),
+            });
+        };
+
+        let index_rc = Rc::new(TableAttribute::new(table.clone(), create_index));
+        let expression = Self::create_index_expression(&index_rc.attribute().columns);
+        let metadata = IndexMetadata::new(expression, table.clone());
+        Ok((index_rc, metadata))
     }
 
     /// Helper function to process column options.
@@ -544,6 +575,18 @@ impl ParserDB {
 
                     builder = builder.add_trigger(Rc::new(create_trigger), ());
                 }
+                Statement::CreateIndex(create_index) => {
+                    let (index, metadata) = Self::process_create_index(create_index, &builder)?;
+                    let table_name = index.table().table_name();
+                    if let Some(entry) = builder
+                        .tables_mut()
+                        .iter_mut()
+                        .find(|entry| entry.0.table_name() == table_name)
+                    {
+                        entry.1.add_index(index.clone());
+                    }
+                    builder = builder.add_index(index, metadata);
+                }
                 Statement::CreateTable(create_table) => {
                     let create_table = Rc::new(create_table);
                     let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
@@ -596,8 +639,7 @@ impl ParserDB {
                 | Statement::CreateOperatorFamily(_)
                 | Statement::CreateType { .. }
                 | Statement::CreateExtension(_)
-                | Statement::Insert(_)
-                | Statement::CreateIndex(_) => {
+                | Statement::Insert(_) => {
                     // At the moment, we ignore these CREATE statements.
                 }
                 _ => {

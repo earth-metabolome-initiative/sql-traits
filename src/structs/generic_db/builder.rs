@@ -5,16 +5,17 @@ use std::rc::Rc;
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, TriggerLike,
-        UniqueIndexLike,
+        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, TableLike,
+        TriggerLike, UniqueIndexLike,
     },
 };
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, U, F, Func, Ch, Tr>
+pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
@@ -29,6 +30,8 @@ where
     tables: Vec<(Rc<T>, T::Meta)>,
     /// List of columns in the database.
     columns: Vec<(Rc<C>, C::Meta)>,
+    /// List of indices in the database.
+    indices: Vec<(Rc<I>, I::Meta)>,
     /// List of unique indices in the database.
     unique_indices: Vec<(Rc<U>, U::Meta)>,
     /// List of foreign keys in the database.
@@ -41,16 +44,22 @@ where
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
 }
 
-impl<T, C, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
 {
+    /// Returns a mutable reference to the tables list.
+    pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Rc<T>, T::Meta)> {
+        &mut self.tables
+    }
+
     #[must_use]
     /// Creates a new `GenericDBBuilder` instance.
     pub fn new(catalog_name: String) -> Self {
@@ -59,6 +68,7 @@ where
             timezone: None,
             tables: Vec::new(),
             columns: Vec::new(),
+            indices: Vec::new(),
             unique_indices: Vec::new(),
             foreign_keys: Vec::new(),
             functions: Vec::new(),
@@ -68,10 +78,11 @@ where
     }
 }
 
-impl<T, C, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
@@ -113,6 +124,22 @@ where
     #[inline]
     pub fn add_columns(mut self, columns: impl IntoIterator<Item = (Rc<C>, C::Meta)>) -> Self {
         self.columns.extend(columns);
+        self
+    }
+
+    /// Adds an index with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_index(mut self, index: Rc<I>, metadata: I::Meta) -> Self {
+        self.indices.push((index, metadata));
+        self
+    }
+
+    /// Adds multiple indices with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_indices(mut self, indices: impl IntoIterator<Item = (Rc<I>, I::Meta)>) -> Self {
+        self.indices.extend(indices);
         self
     }
 
@@ -198,18 +225,19 @@ where
     }
 }
 
-impl<T, C, U, F, Func, Ch, Tr> From<GenericDBBuilder<T, C, U, F, Func, Ch, Tr>>
-    for GenericDB<T, C, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr> From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>>
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, U, F, Func, Ch, Tr>) -> Self {
+    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -220,6 +248,7 @@ where
         });
 
         builder.columns.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+        builder.indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         builder.unique_indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         builder.foreign_keys.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         builder.functions.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
@@ -231,6 +260,7 @@ where
             timezone: builder.timezone,
             tables: builder.tables,
             columns: builder.columns,
+            indices: builder.indices,
             unique_indices: builder.unique_indices,
             foreign_keys: builder.foreign_keys,
             functions: builder.functions,

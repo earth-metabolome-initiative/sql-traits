@@ -10,15 +10,16 @@ pub use builder::GenericDBBuilder;
 pub use sqlparser::ParserDB;
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, TableLike, TriggerLike,
-    UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, TableLike,
+    TriggerLike, UniqueIndexLike,
 };
 
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, U, F, Func, Ch, Tr>
+pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
@@ -33,6 +34,8 @@ where
     tables: Vec<(Rc<T>, T::Meta)>,
     /// List of columns in the database.
     columns: Vec<(Rc<C>, C::Meta)>,
+    /// List of indices in the database.
+    indices: Vec<(Rc<I>, I::Meta)>,
     /// List of unique indices in the database.
     unique_indices: Vec<(Rc<U>, U::Meta)>,
     /// List of foreign keys in the database.
@@ -45,10 +48,11 @@ where
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
 }
 
-impl<T, C, U, F, Func, Ch, Tr> Debug for GenericDB<T, C, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr> Debug for GenericDB<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
@@ -61,6 +65,7 @@ where
             .field("timezone", &self.timezone)
             .field("tables", &self.tables.len())
             .field("columns", &self.columns.len())
+            .field("indices", &self.indices.len())
             .field("unique_indices", &self.unique_indices.len())
             .field("foreign_keys", &self.foreign_keys.len())
             .field("functions", &self.functions.len())
@@ -70,10 +75,11 @@ where
     }
 }
 
-impl<T, C, U, F, Func, Ch, Tr> Clone for GenericDB<T, C, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr> Clone for GenericDB<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
@@ -86,6 +92,7 @@ where
             timezone: self.timezone.clone(),
             tables: self.tables.clone(),
             columns: self.columns.clone(),
+            indices: self.indices.clone(),
             unique_indices: self.unique_indices.clone(),
             foreign_keys: self.foreign_keys.clone(),
             functions: self.functions.clone(),
@@ -95,10 +102,11 @@ where
     }
 }
 
-impl<T, C, U, F, Func, Ch, Tr> GenericDB<T, C, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr> GenericDB<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike,
     C: ColumnLike,
+    I: IndexLike,
     U: UniqueIndexLike,
     F: ForeignKeyLike,
     Func: FunctionLike,
@@ -107,7 +115,7 @@ where
 {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
-    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, U, F, Func, Ch, Tr> {
+    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr> {
         GenericDBBuilder::new(catalog_name)
     }
 
@@ -188,11 +196,11 @@ where
     /// let index = table.unique_indices(&db).next().unwrap();
     /// // The metadata for unique indices in ParserDB is currently unit ()
     /// // (actually it might be struct depending on impl, let's just check existence)
-    /// assert!(db.index_metadata(index).is_some());
+    /// assert!(db.unique_index_metadata(index).is_some());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn index_metadata(&self, index: &U) -> Option<&U::Meta> {
+    pub fn unique_index_metadata(&self, index: &U) -> Option<&U::Meta> {
         self.unique_indices
             .binary_search_by(|(i, _)| i.as_ref().cmp(index))
             .ok()
@@ -248,6 +256,15 @@ where
             .binary_search_by(|(k, _)| k.as_ref().cmp(key))
             .ok()
             .map(|index| &self.foreign_keys[index].1)
+    }
+
+    /// Returns a reference to the metadata of the specified index, if it exists
+    /// in the database.
+    pub fn index_metadata(&self, index: &I) -> Option<&I::Meta> {
+        self.indices
+            .binary_search_by(|(i, _)| i.as_ref().cmp(index))
+            .ok()
+            .map(|index| &self.indices[index].1)
     }
 
     /// Returns a reference of the function by name.

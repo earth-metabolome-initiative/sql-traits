@@ -3,15 +3,16 @@
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, DatabaseLike, ForeignKeyLike, FunctionLike, TableLike,
-        TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnLike, DatabaseLike, ForeignKeyLike, FunctionLike, IndexLike,
+        TableLike, TriggerLike, UniqueIndexLike,
     },
 };
 
-impl<T, C, U, F, Func, Ch, Tr> DatabaseLike for GenericDB<T, C, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr> DatabaseLike for GenericDB<T, C, I, U, F, Func, Ch, Tr>
 where
     T: TableLike<DB = Self>,
     C: ColumnLike<DB = Self>,
+    I: IndexLike<DB = Self>,
     U: UniqueIndexLike<DB = Self>,
     F: ForeignKeyLike<DB = Self>,
     Func: FunctionLike<DB = Self>,
@@ -20,6 +21,7 @@ where
 {
     type Table = T;
     type Column = C;
+    type Index = I;
     type ForeignKey = F;
     type Function = Func;
     type UniqueIndex = U;

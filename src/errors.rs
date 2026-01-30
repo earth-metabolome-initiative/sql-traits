@@ -54,6 +54,14 @@ pub enum Error {
         /// Name of the trigger.
         trigger_name: String,
     },
+    #[error("Table `{table_name}` not found for index `{index_name}`.")]
+    /// Error indicating that an index references a table that does not exist.
+    TableNotFoundForIndex {
+        /// Name of the table the index belongs to.
+        table_name: String,
+        /// Name of the index.
+        index_name: String,
+    },
     #[error("Function `{function_name}` not found for trigger `{trigger_name}`.")]
     /// Error indicating that a trigger references a function that does not
     /// exist.

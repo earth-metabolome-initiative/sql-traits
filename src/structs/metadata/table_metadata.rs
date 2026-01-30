@@ -11,6 +11,8 @@ pub struct TableMetadata<T: TableLike> {
     columns: Vec<Rc<<T::DB as DatabaseLike>::Column>>,
     /// The check constraints of the table.
     check_constraints: Vec<Rc<<T::DB as DatabaseLike>::CheckConstraint>>,
+    /// The indices of the table.
+    indices: Vec<Rc<<T::DB as DatabaseLike>::Index>>,
     /// The unique indices of the table.
     unique_indices: Vec<Rc<<T::DB as DatabaseLike>::UniqueIndex>>,
     /// The foreign keys of the table.
@@ -26,6 +28,7 @@ impl<T: TableLike> Default for TableMetadata<T> {
         Self {
             columns: Vec::new(),
             check_constraints: Vec::new(),
+            indices: Vec::new(),
             unique_indices: Vec::new(),
             foreign_keys: Vec::new(),
             primary_key: Vec::new(),
@@ -68,6 +71,18 @@ impl<T: TableLike> TableMetadata<T> {
         &self,
     ) -> impl Iterator<Item = &Rc<<T::DB as DatabaseLike>::CheckConstraint>> {
         self.check_constraints.iter()
+    }
+
+    /// Returns an iterator over the indices of the table.
+    #[inline]
+    pub fn indices(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::Index> {
+        self.indices.iter().map(std::convert::AsRef::as_ref)
+    }
+
+    /// Returns an iterator over the Rc of indices of the table.
+    #[inline]
+    pub fn index_rcs(&self) -> impl Iterator<Item = &Rc<<T::DB as DatabaseLike>::Index>> {
+        self.indices.iter()
     }
 
     /// Returns an iterator over the unique indices of the table.
@@ -138,6 +153,16 @@ impl<T: TableLike> TableMetadata<T> {
         constraint: Rc<<T::DB as DatabaseLike>::CheckConstraint>,
     ) {
         self.check_constraints.push(constraint);
+    }
+
+    /// Adds an index to the table metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The index to add.
+    #[inline]
+    pub fn add_index(&mut self, index: Rc<<T::DB as DatabaseLike>::Index>) {
+        self.indices.push(index);
     }
 
     /// Adds a unique index to the table metadata.

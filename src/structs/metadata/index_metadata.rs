@@ -4,21 +4,21 @@ use std::rc::Rc;
 
 use sqlparser::ast::Expr;
 
-use crate::traits::{DatabaseLike, UniqueIndexLike};
+use crate::traits::{DatabaseLike, IndexLike};
 
 #[derive(Debug, Clone)]
-/// Struct collecting metadata about a unique index.
-pub struct UniqueIndexMetadata<U: UniqueIndexLike> {
+/// Struct collecting metadata about an index.
+pub struct IndexMetadata<I: IndexLike> {
     /// The expression defining the index.
     expression: Expr,
     /// The table on which the index is defined.
-    table: Rc<<U::DB as DatabaseLike>::Table>,
+    table: Rc<<I::DB as DatabaseLike>::Table>,
 }
 
-impl<U: UniqueIndexLike> UniqueIndexMetadata<U> {
-    /// Creates a new `UniqueIndexMetadata` instance.
+impl<I: IndexLike> IndexMetadata<I> {
+    /// Creates a new `IndexMetadata` instance.
     #[inline]
-    pub fn new(expression: Expr, table: Rc<<U::DB as DatabaseLike>::Table>) -> Self {
+    pub fn new(expression: Expr, table: Rc<<I::DB as DatabaseLike>::Table>) -> Self {
         Self { expression, table }
     }
 
@@ -32,7 +32,10 @@ impl<U: UniqueIndexLike> UniqueIndexMetadata<U> {
     /// Returns a reference to the table on which the index is defined.
     #[must_use]
     #[inline]
-    pub fn table(&self) -> &<U::DB as DatabaseLike>::Table {
+    pub fn table(&self) -> &<I::DB as DatabaseLike>::Table {
         &self.table
     }
 }
+
+/// Type alias for `IndexMetadata` to be used with unique indices.
+pub type UniqueIndexMetadata<U> = IndexMetadata<U>;

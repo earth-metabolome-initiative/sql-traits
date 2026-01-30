@@ -3,9 +3,7 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
-    traits::{
-        CheckConstraintLike, DatabaseLike, ForeignKeyLike, Metadata, TableLike, UniqueIndexLike,
-    },
+    traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
     utils::normalize_postgres_type,
 };
 
@@ -766,6 +764,47 @@ pub trait ColumnLike:
         table
             .check_constraints(database)
             .filter(|check| check.involves_column(database, self.borrow()))
+    }
+
+    /// Returns an iterator over the indices that involve this column.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - The database containing the column.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (id INT, name TEXT);CREATE INDEX idx_name ON my_table(name);",
+    /// )?;
+    ///
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    ///
+    /// let name_indices: Vec<_> = name_column.indices(&db).collect();
+    /// let id_indices: Vec<_> = id_column.indices(&db).collect();
+    ///
+    /// assert_eq!(name_indices.len(), 1, "name column should have one index");
+    /// assert_eq!(id_indices.len(), 0, "id column should have no indices");
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn indices<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    where
+        Self: 'db,
+    {
+        let table = self.table(database);
+        table
+            .indices(database)
+            .filter(move |index| index.columns(database).any(|col| col == self.borrow()))
     }
 
     /// Returns whether the column has any check constraints.

@@ -86,6 +86,16 @@ impl TableLike for CreateTable {
         database.table_metadata(self).expect("Table must exist in database").unique_indices()
     }
 
+    fn indices<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    where
+        Self: 'db,
+    {
+        database.table_metadata(self).expect("Table must exist in database").indices()
+    }
+
     fn check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
