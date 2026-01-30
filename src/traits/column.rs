@@ -3,7 +3,9 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
-    traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, Metadata, TableLike},
+    traits::{
+        CheckConstraintLike, DatabaseLike, ForeignKeyLike, Metadata, TableLike, UniqueIndexLike,
+    },
     utils::normalize_postgres_type,
 };
 
@@ -864,6 +866,56 @@ pub trait ColumnLike:
     /// ```
     fn has_non_tautological_check_constraints(&self, database: &Self::DB) -> bool {
         self.non_tautological_check_constraints(database).next().is_some()
+    }
+
+    /// Iterates over the
+    /// [`UniqueIndexLike`]s
+    /// that involve this column within the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query unique
+    ///   indices from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (id INT PRIMARY KEY, other TEXT, age INT, score INT, UNIQUE (age, score));",
+    /// )?;
+    ///
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
+    /// let other_column = table.column("other", &db).expect("Column 'other' should exist");
+    ///
+    /// let id_unique = id_column.unique_indices(&db).collect::<Vec<_>>();
+    /// let age_unique = age_column.unique_indices(&db).collect::<Vec<_>>();
+    /// let score_unique = score_column.unique_indices(&db).collect::<Vec<_>>();
+    /// let other_unique = other_column.unique_indices(&db).collect::<Vec<_>>();
+    ///
+    /// assert_eq!(id_unique.len(), 1, "id column should have one unique index");
+    /// assert_eq!(age_unique.len(), 1, "age column should have one unique index");
+    /// assert_eq!(score_unique.len(), 1, "score column should have one unique index");
+    /// assert_eq!(other_unique.len(), 0, "other column should have no unique indices");
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn unique_indices<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>
+    where
+        Self: 'db,
+    {
+        let table = self.table(database);
+        table.unique_indices(database).filter(move |unique_index| {
+            unique_index.columns(database).any(|col| col == self.borrow())
+        })
     }
 }
 
