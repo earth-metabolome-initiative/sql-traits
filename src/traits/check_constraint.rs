@@ -3,9 +3,13 @@
 
 use std::{borrow::Borrow, fmt::Debug};
 
-use sqlparser::ast::{BinaryOperator, Expr, Ident, Value};
+use sqlparser::ast::{
+    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Value,
+};
 
-use crate::traits::{DatabaseLike, Metadata, column::ColumnLike, function_like::FunctionLike};
+use crate::traits::{
+    DatabaseLike, Metadata, TableLike, column::ColumnLike, function_like::FunctionLike,
+};
 
 /// Helper function to determine if an expression evaluates to a constant
 /// boolean value. Returns `Some(true)` if always true, `Some(false)` if always
@@ -149,6 +153,289 @@ fn extract_null_columns(expr: &Expr, is_null: bool) -> Option<Vec<&Ident>> {
             Some(left_cols)
         }
         Expr::Nested(inner) => extract_null_columns(inner, is_null),
+        _ => None,
+    }
+}
+
+/// Helper to swap comparison operators
+fn swap_cmp_op(op: &BinaryOperator) -> BinaryOperator {
+    match op {
+        BinaryOperator::Lt => BinaryOperator::Gt,
+        BinaryOperator::LtEq => BinaryOperator::GtEq,
+        BinaryOperator::Gt => BinaryOperator::Lt,
+        BinaryOperator::GtEq => BinaryOperator::LtEq,
+        _ => op.clone(),
+    }
+}
+
+/// The direction of the length bound we are checking for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoundDirection {
+    /// Inclusive minimum length (e.g. `LEN > 5` -> 6)
+    Lower,
+    /// Strict maximum length (e.g. `LEN < 5` -> 5)
+    Upper,
+}
+
+/// Helper to resolve the global bound for a column.
+/// This prevents infinite recursion by tracking visited columns.
+fn resolve_global_bound<C>(
+    database: &C::DB,
+    table: &<C::DB as DatabaseLike>::Table,
+    target_col: &str,
+    visited_cols: &mut Vec<String>,
+    direction: BoundDirection,
+) -> Option<usize>
+where
+    C: CheckConstraintLike,
+{
+    visited_cols.push(target_col.to_string());
+
+    let mut bound_agg = None;
+
+    for constraint in table.check_constraints(database) {
+        let cc: &C = constraint.borrow();
+        let expr = cc.expression(database);
+        if let Some(bound) = check_text_length_bound_recursive(
+            database,
+            expr,
+            cc,
+            Some(target_col),
+            visited_cols,
+            direction,
+        ) {
+            bound_agg = match (bound_agg, direction) {
+                (Some(current), BoundDirection::Upper) => Some(std::cmp::min(current, bound)),
+                (Some(current), BoundDirection::Lower) => Some(std::cmp::max(current, bound)),
+                (None, _) => Some(bound),
+            };
+        }
+    }
+
+    visited_cols.pop();
+    bound_agg
+}
+
+/// Helper to extract length limit from an expression
+#[allow(clippy::too_many_arguments)]
+fn get_length_bound<C>(
+    database: &C::DB,
+    func_expr: &Expr,
+    op: &BinaryOperator,
+    val_expr: &Expr,
+    check_constraint: &C,
+    target_col: Option<&str>,
+    visited_cols: &mut Vec<String>,
+    direction: BoundDirection,
+) -> Option<usize>
+where
+    C: CheckConstraintLike,
+{
+    // Check Operator matches direction
+    let is_inclusive = match (direction, op) {
+        (BoundDirection::Upper, BinaryOperator::Lt)
+        | (BoundDirection::Lower, BinaryOperator::Gt) => false,
+        (BoundDirection::Upper, BinaryOperator::LtEq)
+        | (BoundDirection::Lower, BinaryOperator::GtEq) => true,
+        _ => return None,
+    };
+
+    // Parse Left Side: Function(col_ident)
+    let Expr::Function(Function { name, args, .. }) = func_expr else {
+        return None;
+    };
+
+    let name_str = name.to_string();
+    let valid_funcs = ["length", "len", "char_length", "character_length", "octet_length"];
+    if !valid_funcs.iter().any(|&f| name_str.eq_ignore_ascii_case(f)) {
+        return None;
+    }
+
+    let args_list = match args {
+        FunctionArguments::List(list) => &list.args,
+        _ => return None,
+    };
+    if args_list.len() != 1 {
+        return None;
+    }
+    let FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(col_ident))) = &args_list[0]
+    else {
+        return None;
+    };
+
+    // Check if col_ident matches target_col if specified
+    if target_col.is_some_and(|target| col_ident.value != target) {
+        return None;
+    }
+
+    // Verify it's a textual column
+    if !check_constraint.column(database, &col_ident.value).is_some_and(|c| c.is_textual(database))
+    {
+        return None;
+    }
+
+    // Check Right Side
+    // Case 1: Constant Number
+    if let Expr::Value(val) = val_expr
+        && let Value::Number(num_str, _) = &val.value
+        && let Ok(limit) = num_str.parse::<usize>()
+    {
+        return match direction {
+            BoundDirection::Upper => Some(if is_inclusive { limit + 1 } else { limit }),
+            BoundDirection::Lower => Some(if is_inclusive { limit } else { limit + 1 }),
+        };
+    }
+
+    // Case 2: Another Function Call (Transitive Check)
+    if let Expr::Function(Function { name: inner_name, args: inner_args, .. }) = val_expr {
+        let inner_name_str = inner_name.to_string();
+        if valid_funcs.iter().any(|&f| inner_name_str.eq_ignore_ascii_case(f)) {
+            let inner_args_list = match inner_args {
+                FunctionArguments::List(list) => &list.args,
+                _ => return None,
+            };
+            if inner_args_list.len() == 1
+                && let FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+                    inner_col_ident,
+                ))) = &inner_args_list[0]
+            {
+                // We need to resolve the bound for `inner_col` with the SAME direction.
+                // len(A) < len(B) AND len(B) < 10 => len(A) < 10 (Upper transitive)
+                // len(A) > len(B) AND len(B) > 10 => len(A) > 10 (Lower transitive)
+
+                // Avoid cycles
+                if visited_cols.contains(&inner_col_ident.value) {
+                    return None;
+                }
+
+                let table = check_constraint.table(database);
+                if let Some(limit) = resolve_global_bound::<C>(
+                    database,
+                    table,
+                    &inner_col_ident.value,
+                    visited_cols,
+                    direction,
+                ) {
+                    return match direction {
+                        BoundDirection::Upper => Some(if is_inclusive { limit + 1 } else { limit }),
+                        BoundDirection::Lower => Some(if is_inclusive { limit } else { limit + 1 }),
+                    };
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Helper function to recursively determine the bound of a text length
+/// constraint.
+fn check_text_length_bound_recursive<C>(
+    database: &C::DB,
+    expr: &Expr,
+    check_constraint: &C,
+    target_col: Option<&str>,
+    visited_cols: &mut Vec<String>,
+    direction: BoundDirection,
+) -> Option<usize>
+where
+    C: CheckConstraintLike,
+{
+    match expr {
+        Expr::BinaryOp { left, op, right } => {
+            // Check direct comparison: func(col) <op> right
+            if let Some(bound) = get_length_bound(
+                database,
+                left,
+                op,
+                right,
+                check_constraint,
+                target_col,
+                visited_cols,
+                direction,
+            ) {
+                return Some(bound);
+            }
+            // Check reversed comparison: right <op> func(col)
+            // If checking Upper Bound (func(col) < N), we might see N > func(col).
+            // N > func(col) is equivalent to func(col) < N.
+            // If `op` is Gt, `swap` is Lt. `get_length_bound` accepts `Lt` for `Upper`.
+            if let Some(bound) = get_length_bound(
+                database,
+                right,
+                &swap_cmp_op(op),
+                left,
+                check_constraint,
+                target_col,
+                visited_cols,
+                direction,
+            ) {
+                return Some(bound);
+            }
+
+            if matches!(op, BinaryOperator::And) {
+                let l = check_text_length_bound_recursive(
+                    database,
+                    left,
+                    check_constraint,
+                    target_col,
+                    visited_cols,
+                    direction,
+                );
+                let r = check_text_length_bound_recursive(
+                    database,
+                    right,
+                    check_constraint,
+                    target_col,
+                    visited_cols,
+                    direction,
+                );
+                return match (l, r, direction) {
+                    // AND + Upper: Minimize (most restrictive limit)
+                    (Some(a), Some(b), BoundDirection::Upper) => Some(std::cmp::min(a, b)),
+                    // AND + Lower: Maximize (most restrictive minimum)
+                    (Some(a), Some(b), BoundDirection::Lower) => Some(std::cmp::max(a, b)),
+                    (Some(a), None, _) => Some(a),
+                    (None, Some(b), _) => Some(b),
+                    _ => None,
+                };
+            }
+
+            if matches!(op, BinaryOperator::Or) {
+                let l = check_text_length_bound_recursive(
+                    database,
+                    left,
+                    check_constraint,
+                    target_col,
+                    visited_cols,
+                    direction,
+                );
+                let r = check_text_length_bound_recursive(
+                    database,
+                    right,
+                    check_constraint,
+                    target_col,
+                    visited_cols,
+                    direction,
+                );
+                return match (l, r, direction) {
+                    // OR + Lower: Minimize (least restrictive minimum)
+                    (Some(a), Some(b), BoundDirection::Lower) => Some(std::cmp::min(a, b)),
+                    _ => None,
+                };
+            }
+            None
+        }
+        Expr::Nested(inner) => {
+            check_text_length_bound_recursive(
+                database,
+                inner,
+                check_constraint,
+                target_col,
+                visited_cols,
+                direction,
+            )
+        }
         _ => None,
     }
 }
@@ -589,6 +876,8 @@ pub trait CheckConstraintLike:
     /// - `CHECK (1 = 0)` - unequal constant comparisons
     /// - `CHECK (NOT TRUE)` - negated true
     /// - `CHECK (column IS NULL)` for `NOT NULL` columns
+    /// - `CHECK (len(col) < X AND len(col) > Y)` where X <= Y (contradictory
+    ///   length constraints)
     ///
     /// # Example
     ///
@@ -600,6 +889,8 @@ pub trait CheckConstraintLike:
     ///     r#"CREATE TABLE my_table (
     ///         col1 INT NOT NULL,
     ///         col2 INT,
+    ///         s1 TEXT CHECK (length(s1) < 5 AND length(s1) > 10),
+    ///         s2 TEXT CHECK (length(s2) < 5 AND length(s2) > 2),
     ///         CHECK (col1 IS NULL),
     ///         CHECK (FALSE),
     ///         CHECK (1 = 0),
@@ -609,9 +900,11 @@ pub trait CheckConstraintLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
-    /// let [cc1, cc2, cc3, cc4, cc5] = &check_constraints.as_slice() else {
-    ///     panic!("Expected five check constraints");
+    /// let [cc_s1, cc_s2, cc1, cc2, cc3, cc4, cc5] = &check_constraints.as_slice() else {
+    ///     panic!("Expected seven check constraints");
     /// };
+    /// assert!(cc_s1.is_negation(&db)); // len < 5 AND len > 10 is impossible
+    /// assert!(!cc_s2.is_negation(&db)); // len < 5 AND len > 2 is possible (3, 4)
     /// assert!(cc1.is_negation(&db)); // col1 IS NULL on NOT NULL column
     /// assert!(cc2.is_negation(&db)); // FALSE
     /// assert!(cc3.is_negation(&db)); // 1 = 0
@@ -628,6 +921,18 @@ pub trait CheckConstraintLike:
         // First check using expression analysis
         if let Some(false) = evaluate_constant_expr(database, &columns, expr) {
             return true;
+        }
+
+        // Check for contradicting length constraints
+        if let (Some(upper), Some(lower)) = (
+            self.is_upper_bounded_text_constraint(database),
+            self.is_lower_bounded_text_constraint(database),
+        ) {
+            // upper is exclusive upper bound, lower is inclusive lower bound
+            // if lower >= upper, then impossible
+            if lower >= upper {
+                return true;
+            }
         }
 
         false
@@ -737,5 +1042,135 @@ pub trait CheckConstraintLike:
     fn is_not_empty_text_constraint(&self, database: &Self::DB) -> bool {
         let expr = self.expression(database);
         check_not_empty_text_recursive(database, expr, self)
+    }
+
+    /// Returns the upper bound of a text length constraint if the constraint
+    /// enforces one.
+    ///
+    /// The returned value is the first non-accepted length (i.e., the strict
+    /// upper bound).
+    /// - `length(col) < N` returns `Some(N)`
+    /// - `length(col) <= N` returns `Some(N + 1)`
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the table
+    ///   from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"CREATE TABLE my_table (
+    ///         s1 TEXT CHECK (length(s1) < 10),
+    ///         s2 TEXT CHECK (length(s2) <= 10),
+    ///         s3 TEXT CHECK (10 > length(s3)),
+    ///         s4 TEXT CHECK (10 >= length(s4)),
+    ///         s5 TEXT CHECK (len(s5) < 10 AND len(s5) < 5),
+    ///         s6 INT CHECK (s6 < 10),
+    ///         s7 TEXT CHECK (length(s7) < length(s1)),
+    ///         s8 TEXT CHECK (length(s8) < 10 OR length(s8) < 5),
+    ///         s9 TEXT CHECK (length(s9) < length(s10)),
+    ///         s10 TEXT CHECK (length(s10) < length(s9)),
+    ///         s11 TEXT CHECK (length(s11) < length(s12)),
+    ///         s12 TEXT CHECK (length(s12) < length(s13)),
+    ///         s13 TEXT CHECK (length(s13) < 10)
+    ///     );"#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7, cc8, cc9, cc10, cc11, cc12, cc13] =
+    ///     &check_constraints.as_slice()
+    /// else {
+    ///     panic!("Expected thirteen check constraints");
+    /// };
+    /// assert_eq!(cc1.is_upper_bounded_text_constraint(&db), Some(10));
+    /// assert_eq!(cc2.is_upper_bounded_text_constraint(&db), Some(11));
+    /// assert_eq!(cc3.is_upper_bounded_text_constraint(&db), Some(10));
+    /// assert_eq!(cc4.is_upper_bounded_text_constraint(&db), Some(11));
+    /// assert_eq!(cc5.is_upper_bounded_text_constraint(&db), Some(5));
+    /// assert_eq!(cc6.is_upper_bounded_text_constraint(&db), None);
+    /// assert_eq!(cc7.is_upper_bounded_text_constraint(&db), Some(10));
+    /// assert_eq!(cc8.is_upper_bounded_text_constraint(&db), None);
+    /// assert_eq!(cc9.is_upper_bounded_text_constraint(&db), None);
+    /// assert_eq!(cc10.is_upper_bounded_text_constraint(&db), None);
+    /// assert_eq!(cc11.is_upper_bounded_text_constraint(&db), Some(10));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn is_upper_bounded_text_constraint(&self, database: &Self::DB) -> Option<usize> {
+        let expr = self.expression(database);
+        let mut visited_cols = Vec::new();
+        check_text_length_bound_recursive(
+            database,
+            expr,
+            self,
+            None,
+            &mut visited_cols,
+            BoundDirection::Upper,
+        )
+    }
+
+    /// Returns the lower bound of a text length constraint if the constraint
+    /// enforces one.
+    ///
+    /// The returned value is the inclusive lower bound (i.e., the minimum
+    /// accepted length).
+    /// - `length(col) > N` returns `Some(N + 1)`
+    /// - `length(col) >= N` returns `Some(N)`
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the table
+    ///   from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"CREATE TABLE my_table (
+    ///         s1 TEXT CHECK (length(s1) > 10),
+    ///         s2 TEXT CHECK (length(s2) >= 10),
+    ///         s3 TEXT CHECK (10 < length(s3)),
+    ///         s4 TEXT CHECK (10 <= length(s4)),
+    ///         s5 TEXT CHECK (len(s5) > 10 AND len(s5) > 5),
+    ///         s6 INT CHECK (s6 > 10),
+    ///         s7 TEXT CHECK (length(s7) > length(s1)),
+    ///         s8 TEXT CHECK (length(s8) > 10 OR length(s8) > 5)
+    ///     );"#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7, cc8] = &check_constraints.as_slice() else {
+    ///     panic!("Expected eight check constraints");
+    /// };
+    /// assert_eq!(cc1.is_lower_bounded_text_constraint(&db), Some(11));
+    /// assert_eq!(cc2.is_lower_bounded_text_constraint(&db), Some(10));
+    /// assert_eq!(cc3.is_lower_bounded_text_constraint(&db), Some(11));
+    /// assert_eq!(cc4.is_lower_bounded_text_constraint(&db), Some(10));
+    /// assert_eq!(cc5.is_lower_bounded_text_constraint(&db), Some(11));
+    /// assert_eq!(cc6.is_lower_bounded_text_constraint(&db), None);
+    /// assert_eq!(cc7.is_lower_bounded_text_constraint(&db), Some(12));
+    /// assert_eq!(cc8.is_lower_bounded_text_constraint(&db), Some(6));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn is_lower_bounded_text_constraint(&self, database: &Self::DB) -> Option<usize> {
+        let expr = self.expression(database);
+        let mut visited_cols = Vec::new();
+        check_text_length_bound_recursive(
+            database,
+            expr,
+            self,
+            None,
+            &mut visited_cols,
+            BoundDirection::Lower,
+        )
     }
 }
