@@ -2074,6 +2074,154 @@ pub trait TableLike:
                     .any(|descendant| descendant.is_descendant_of(database, candidate))
         })
     }
+
+    /// Returns whether the table's columns share a snake_case prefix.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);
+    ///      CREATE TABLE no_snake_prefix_table (user_id INT, username TEXT);",
+    /// )?;
+    ///
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let no_snake_prefix_table = db.table(None, "no_snake_prefix_table").unwrap();
+    ///
+    /// assert!(table.has_common_column_name_snake_prefix(&db));
+    /// assert!(!no_snake_prefix_table.has_common_column_name_snake_prefix(&db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_common_column_name_snake_prefix(&self, database: &Self::DB) -> bool {
+        self.common_column_name_snake_prefix(database).is_some()
+    }
+
+    /// Returns the shared snake_case prefix across the table's columns.
+    ///
+    /// The returned prefix ends at the last `_` boundary within the common
+    /// prefix. If no `_` boundary exists in the common prefix, returns
+    /// `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);
+    ///      CREATE TABLE other_table (id INT, name TEXT);
+    ///      CREATE TABLE another_table (user_id INT, username TEXT, email TEXT);",
+    /// )?;
+    ///
+    /// let my_table = db.table(None, "my_table").unwrap();
+    /// let other_table = db.table(None, "other_table").unwrap();
+    /// let another_table = db.table(None, "another_table").unwrap();
+    ///
+    /// assert_eq!(my_table.common_column_name_snake_prefix(&db), Some("user_"));
+    /// assert_eq!(other_table.common_column_name_snake_prefix(&db), None);
+    /// assert_eq!(another_table.common_column_name_snake_prefix(&db), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn common_column_name_snake_prefix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    where
+        Self: 'db,
+    {
+        crate::utils::common_column_name_snake_prefix(
+            self.columns(database).map(ColumnLike::column_name),
+        )
+    }
+
+    /// Returns whether the table's columns share a snake_case suffix.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);
+    ///      CREATE TABLE other_table (userid INT, group_id INT, id_team INT);",
+    /// )?;
+    ///
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let other_table = db.table(None, "other_table").unwrap();
+    ///
+    /// assert!(table.has_common_column_name_snake_suffix(&db));
+    /// assert!(!other_table.has_common_column_name_snake_suffix(&db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_common_column_name_snake_suffix(&self, database: &Self::DB) -> bool {
+        self.common_column_name_snake_suffix(database).is_some()
+    }
+
+    /// Returns the shared snake_case suffix across the table's columns.
+    ///
+    /// The returned suffix starts at the first `_` boundary within the common
+    /// suffix. If no `_` boundary exists in the common suffix, returns
+    /// `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);
+    ///      CREATE TABLE other_table (user_id INT, groupid INT, teamid INT);
+    ///      CREATE TABLE another_table (id INT, name TEXT);",
+    /// )?;
+    ///
+    /// let my_table = db.table(None, "my_table").unwrap();
+    /// let other_table = db.table(None, "other_table").unwrap();
+    /// let another_table = db.table(None, "another_table").unwrap();
+    ///
+    /// assert_eq!(my_table.common_column_name_snake_suffix(&db), Some("_id"));
+    /// assert_eq!(other_table.common_column_name_snake_suffix(&db), None);
+    /// assert_eq!(another_table.common_column_name_snake_suffix(&db), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn common_column_name_snake_suffix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    where
+        Self: 'db,
+    {
+        crate::utils::common_column_name_snake_suffix(
+            self.columns(database).map(ColumnLike::column_name),
+        )
+    }
 }
 
 impl<T: TableLike> TableLike for &T
