@@ -112,14 +112,16 @@ pub trait PolicyLike:
     ///
     /// let policy = table.policies(&db).find(|p| p.name() == "my_policy").unwrap();
     /// // Logic to verify roles (roles() returns iterator)
-    /// assert_eq!(policy.roles().count(), 2);
+    /// assert_eq!(policy.roles(&db).count(), 2);
     ///
     /// let public_policy = table.policies(&db).find(|p| p.name() == "public_policy").unwrap();
-    /// assert_eq!(public_policy.roles().count(), 1);
+    /// assert_eq!(public_policy.roles(&db).count(), 1);
     /// # Ok(())
     /// # }
     /// ```
-    fn roles(&self) -> impl Iterator<Item = &Owner>;
+    fn roles<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Owner>
+    where
+        Self: 'db;
 
     /// Returns the `USING` expression of the policy, if any.
     ///
@@ -137,13 +139,37 @@ pub trait PolicyLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
-    /// assert!(policy.using_expression().is_some());
+    /// assert!(policy.using_expression(&db).is_some());
     /// # Ok(())
     /// # }
     /// ```
-    fn using_expression(&self) -> Option<&Expr>;
+    fn using_expression<'db>(&'db self, database: &'db Self::DB) -> Option<&'db Expr>
+    where
+        Self: 'db;
 
     /// Returns the functions used in the `USING` expression.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE FUNCTION my_func() RETURNS BOOLEAN AS 'SELECT true';
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE POLICY my_policy ON my_table USING (my_func());
+    /// "#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let policy = table.policies(&db).next().unwrap();
+    /// let functions: Vec<_> = policy.using_functions(&db).collect();
+    /// assert_eq!(functions.len(), 1);
+    /// assert_eq!(functions[0].name(), "my_func");
+    /// # Ok(())
+    /// # }
+    /// ```
     fn using_functions<'db>(
         &'db self,
         database: &'db Self::DB,
@@ -165,13 +191,37 @@ pub trait PolicyLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
-    /// assert!(policy.check_expression().is_some());
+    /// assert!(policy.check_expression(&db).is_some());
     /// # Ok(())
     /// # }
     /// ```
-    fn check_expression(&self) -> Option<&Expr>;
+    fn check_expression<'db>(&'db self, database: &'db Self::DB) -> Option<&'db Expr>
+    where
+        Self: 'db;
 
     /// Returns the functions used in the `WITH CHECK` expression.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE FUNCTION check_func() RETURNS BOOLEAN AS 'SELECT true';
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE POLICY my_policy ON my_table WITH CHECK (check_func());
+    /// "#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let policy = table.policies(&db).next().unwrap();
+    /// let functions: Vec<_> = policy.check_functions(&db).collect();
+    /// assert_eq!(functions.len(), 1);
+    /// assert_eq!(functions[0].name(), "check_func");
+    /// # Ok(())
+    /// # }
+    /// ```
     fn check_functions<'db>(
         &'db self,
         database: &'db Self::DB,
@@ -199,12 +249,18 @@ where
         (*self).command()
     }
 
-    fn roles(&self) -> impl Iterator<Item = &Owner> {
-        (*self).roles()
+    fn roles<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Owner>
+    where
+        Self: 'db,
+    {
+        (*self).roles(database)
     }
 
-    fn using_expression(&self) -> Option<&Expr> {
-        (*self).using_expression()
+    fn using_expression<'db>(&'db self, database: &'db Self::DB) -> Option<&'db Expr>
+    where
+        Self: 'db,
+    {
+        (*self).using_expression(database)
     }
 
     fn using_functions<'db>(
@@ -214,8 +270,11 @@ where
         (*self).using_functions(database)
     }
 
-    fn check_expression(&self) -> Option<&Expr> {
-        (*self).check_expression()
+    fn check_expression<'db>(&'db self, database: &'db Self::DB) -> Option<&'db Expr>
+    where
+        Self: 'db,
+    {
+        (*self).check_expression(database)
     }
 
     fn check_functions<'db>(

@@ -36,11 +36,17 @@ impl PolicyLike for CreatePolicy {
         self.command.unwrap_or(CreatePolicyCommand::All)
     }
 
-    fn roles(&self) -> impl Iterator<Item = &Owner> {
+    fn roles<'db>(&'db self, _database: &'db Self::DB) -> impl Iterator<Item = &'db Owner>
+    where
+        Self: 'db,
+    {
         self.to.iter().flat_map(|roles| roles.iter())
     }
 
-    fn using_expression(&self) -> Option<&Expr> {
+    fn using_expression<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db Expr>
+    where
+        Self: 'db,
+    {
         self.using.as_ref()
     }
 
@@ -51,7 +57,10 @@ impl PolicyLike for CreatePolicy {
         database.policy_metadata(self).expect("Policy must exist in database").using_functions()
     }
 
-    fn check_expression(&self) -> Option<&Expr> {
+    fn check_expression<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db Expr>
+    where
+        Self: 'db,
+    {
         self.with_check.as_ref()
     }
 
