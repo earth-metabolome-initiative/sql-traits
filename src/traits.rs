@@ -20,6 +20,8 @@ pub mod function_like;
 pub use function_like::FunctionLike;
 pub mod trigger;
 pub use trigger::TriggerLike;
+pub mod policy;
+pub use policy::PolicyLike;
 
 /// Trait for associating a metadata struct to a given type.
 pub trait Metadata {

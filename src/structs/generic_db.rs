@@ -10,12 +10,12 @@ pub use builder::GenericDBBuilder;
 pub use sqlparser::ParserDB;
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, TableLike,
-    TriggerLike, UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike,
+    TableLike, TriggerLike, UniqueIndexLike,
 };
 
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr>
+pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -25,6 +25,7 @@ where
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
+    P: PolicyLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -44,11 +45,13 @@ where
     functions: Vec<(Rc<Func>, Func::Meta)>,
     /// List of triggers created in the database.
     triggers: Vec<(Rc<Tr>, Tr::Meta)>,
+    /// List of policies created in the database.
+    policies: Vec<(Rc<P>, P::Meta)>,
     /// Phantom data for check constraints.
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr> Debug for GenericDB<T, C, I, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr, P> Debug for GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -57,6 +60,7 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
+    P: PolicyLike,
     Tr: TriggerLike,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -70,12 +74,13 @@ where
             .field("foreign_keys", &self.foreign_keys.len())
             .field("functions", &self.functions.len())
             .field("triggers", &self.triggers.len())
+            .field("policies", &self.policies.len())
             .field("check_constraints", &self.check_constraints.len())
             .finish()
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr> Clone for GenericDB<T, C, I, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr, P> Clone for GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -85,6 +90,7 @@ where
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
+    P: PolicyLike,
 {
     fn clone(&self) -> Self {
         Self {
@@ -97,12 +103,13 @@ where
             foreign_keys: self.foreign_keys.clone(),
             functions: self.functions.clone(),
             triggers: self.triggers.clone(),
+            policies: self.policies.clone(),
             check_constraints: self.check_constraints.clone(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr> GenericDB<T, C, I, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr, P> GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -112,10 +119,11 @@ where
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
+    P: PolicyLike,
 {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
-    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr> {
+    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P> {
         GenericDBBuilder::new(catalog_name)
     }
 
@@ -383,6 +391,15 @@ where
             .binary_search_by(|(t, _)| t.name().cmp(trigger.name()))
             .ok()
             .map(|index| &self.triggers[index].1)
+    }
+
+    /// Returns a reference to the metadata of the specified policy, if it
+    /// exists in the database.
+    pub fn policy_metadata(&self, policy: &P) -> Option<&P::Meta> {
+        self.policies
+            .binary_search_by(|(p, _)| p.name().cmp(policy.name()))
+            .ok()
+            .map(|index| &self.policies[index].1)
     }
 
     /// Returns a reference to the catalog name.

@@ -9,10 +9,11 @@ use git2::Repository;
 use sql_docs::SqlDoc;
 use sqlparser::{
     ast::{
-        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateFunctionBody, CreateIndex,
-        CreateTable, CreateTrigger, DataType, ExactNumberInfo, Expr, ForeignKeyConstraint, Ident,
-        IndexColumn, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions,
-        Statement, TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
+        AlterTableOperation, CheckConstraint, ColumnDef, ColumnOption, CreateFunction,
+        CreateFunctionBody, CreateIndex, CreatePolicy, CreateTable, CreateTrigger, DataType,
+        ExactNumberInfo, Expr, ForeignKeyConstraint, Ident, IndexColumn, ObjectName,
+        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Statement,
+        TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::PostgreSqlDialect,
     parser::{Parser, ParserError},
@@ -23,7 +24,7 @@ use crate::{
     structs::{
         GenericDB, TableAttribute, TableMetadata,
         generic_db::GenericDBBuilder,
-        metadata::{CheckMetadata, IndexMetadata, UniqueIndexMetadata},
+        metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
     },
     traits::{DatabaseLike, FunctionLike, TableLike, column::ColumnLike},
     utils::{columns_in_expression, last_str},
@@ -41,6 +42,7 @@ pub type ParserDB = GenericDB<
     CreateFunction,
     TableAttribute<CreateTable, CheckConstraint>,
     CreateTrigger,
+    CreatePolicy,
 >;
 
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
@@ -54,6 +56,7 @@ pub type ParserDBBuilder = GenericDBBuilder<
     CreateFunction,
     TableAttribute<CreateTable, CheckConstraint>,
     CreateTrigger,
+    CreatePolicy,
 >;
 
 /// A type alias for the result of processing check constraints.
@@ -626,6 +629,8 @@ impl ParserDB {
                 determinism_specifier: None,
                 options: None,
                 remote_connection: None,
+                security: None,
+                set_params: vec![],
             };
             builder = builder.add_function(Rc::new(create_function), ());
         }
@@ -674,6 +679,33 @@ impl ParserDB {
                     }
                     builder = builder.add_index(index, metadata);
                 }
+                Statement::AlterTable(alter_table) => {
+                    let table_name = last_str(&alter_table.name);
+
+                    for operation in alter_table.operations {
+                        match operation {
+                            AlterTableOperation::EnableRowLevelSecurity => {
+                                if let Some(entry) = builder
+                                    .tables_mut()
+                                    .iter_mut()
+                                    .find(|entry| entry.0.table_name() == table_name)
+                                {
+                                    entry.1.set_rls_enabled(true);
+                                }
+                            }
+                            AlterTableOperation::DisableRowLevelSecurity => {
+                                if let Some(entry) = builder
+                                    .tables_mut()
+                                    .iter_mut()
+                                    .find(|entry| entry.0.table_name() == table_name)
+                                {
+                                    entry.1.set_rls_enabled(false);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 Statement::CreateTable(create_table) => {
                     let create_table = Rc::new(create_table);
                     let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
@@ -704,6 +736,28 @@ impl ParserDB {
                     )?;
 
                     builder = builder.add_table(create_table, table_metadata);
+                }
+                Statement::CreatePolicy(policy) => {
+                    let using_functions = if let Some(using_expr) = &policy.using {
+                        functions_in_expression::functions_in_expression::<ParserDB>(
+                            using_expr,
+                            builder.function_rc_vec().as_slice(),
+                        )
+                    } else {
+                        Vec::new()
+                    };
+
+                    let check_functions = if let Some(check_expr) = &policy.with_check {
+                        functions_in_expression::functions_in_expression::<ParserDB>(
+                            check_expr,
+                            builder.function_rc_vec().as_slice(),
+                        )
+                    } else {
+                        Vec::new()
+                    };
+
+                    let metadata = PolicyMetadata::new(using_functions, check_functions);
+                    builder = builder.add_policy(Rc::new(policy), metadata);
                 }
                 Statement::Set(sqlparser::ast::Set::SetTimeZone { local, value }) => {
                     // We currently ignore SET TIME ZONE statements.

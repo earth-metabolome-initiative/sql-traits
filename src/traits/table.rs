@@ -3,8 +3,8 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::traits::{
-    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, Metadata, TriggerLike,
-    check_constraint::CheckConstraintLike,
+    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, Metadata, PolicyLike,
+    TriggerLike, check_constraint::CheckConstraintLike,
 };
 
 /// A trait for types that can be treated as SQL tables.
@@ -2222,6 +2222,91 @@ pub trait TableLike:
             self.columns(database).map(ColumnLike::column_name),
         )
     }
+    /// Returns whether the table has Row Level Security (RLS) enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE my_table (id INT);
+    /// ALTER TABLE my_table ENABLE ROW LEVEL SECURITY;
+    /// CREATE TABLE my_other_table (id INT);
+    /// "#,
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// assert!(table.has_row_level_security(&db));
+    /// let other_table = db.table(None, "my_other_table").unwrap();
+    /// assert!(!other_table.has_row_level_security(&db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_row_level_security(&self, _database: &Self::DB) -> bool {
+        false
+    }
+
+    /// Iterates over the policies associated with the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the
+    ///   policies from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::ast::CreatePolicyCommand;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE POLICY select_policy ON my_table FOR SELECT USING (id > 0);
+    /// CREATE POLICY insert_policy ON my_table FOR INSERT WITH CHECK (id > 0);
+    /// CREATE POLICY all_policy ON my_table TO public USING (true);
+    /// CREATE TABLE other_table (id INT);
+    /// CREATE POLICY other_policy ON other_table USING (true);
+    /// "#,
+    /// )?;
+    ///
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let mut policies: Vec<_> = table.policies(&db).collect();
+    /// policies.sort_by(|a, b| a.name().cmp(b.name()));
+    ///
+    /// assert_eq!(policies.len(), 3);
+    /// assert_eq!(policies[0].name(), "all_policy");
+    /// assert_eq!(policies[1].name(), "insert_policy");
+    /// assert_eq!(policies[2].name(), "select_policy");
+    ///
+    /// assert_eq!(policies[0].command(), CreatePolicyCommand::All);
+    /// assert_eq!(policies[1].command(), CreatePolicyCommand::Insert);
+    /// assert_eq!(policies[2].command(), CreatePolicyCommand::Select);
+    ///
+    /// let other_table = db.table(None, "other_table").unwrap();
+    /// let other_policies: Vec<_> = other_table.policies(&db).collect();
+    /// assert_eq!(other_policies.len(), 1);
+    /// assert_eq!(other_policies[0].name(), "other_policy");
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn policies<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Policy>
+    where
+        Self: 'db,
+    {
+        database.policies().filter(move |policy| policy.table(database).borrow() == self.borrow())
+    }
 }
 
 impl<T: TableLike> TableLike for &T
@@ -2253,6 +2338,10 @@ where
         Self: 'db,
     {
         T::columns(self, database)
+    }
+
+    fn has_row_level_security(&self, database: &Self::DB) -> bool {
+        T::has_row_level_security(self, database)
     }
 
     fn primary_key_columns<'db>(

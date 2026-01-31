@@ -8,3 +8,5 @@ mod index_metadata;
 pub use index_metadata::{IndexMetadata, UniqueIndexMetadata};
 mod check_metadata;
 pub use check_metadata::CheckMetadata;
+mod policy_metadata;
+pub use policy_metadata::PolicyMetadata;

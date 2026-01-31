@@ -19,6 +19,8 @@ pub struct TableMetadata<T: TableLike> {
     foreign_keys: Vec<Rc<<T::DB as DatabaseLike>::ForeignKey>>,
     /// The columns composing the primary key of the table.
     primary_key: Vec<Rc<<T::DB as DatabaseLike>::Column>>,
+    /// Whether Row Level Security is enabled for the table.
+    rls_enabled: bool,
     /// The optional documentation associated with the table
     documentation: Option<<T as DocumentationMetadata>::Documentation>,
 }
@@ -32,12 +34,29 @@ impl<T: TableLike> Default for TableMetadata<T> {
             unique_indices: Vec::new(),
             foreign_keys: Vec::new(),
             primary_key: Vec::new(),
+            rls_enabled: false,
             documentation: None,
         }
     }
 }
 
 impl<T: TableLike> TableMetadata<T> {
+    /// Returns whether Row Level Security is enabled for the table.
+    #[inline]
+    pub fn rls_enabled(&self) -> bool {
+        self.rls_enabled
+    }
+
+    /// Sets whether Row Level Security is enabled for the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `rls_enabled` - Whether Row Level Security is enabled.
+    #[inline]
+    pub fn set_rls_enabled(&mut self, rls_enabled: bool) {
+        self.rls_enabled = rls_enabled;
+    }
+
     /// Returns an iterator over the references of columns of the table.
     #[inline]
     pub fn columns(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::Column> {

@@ -9,8 +9,8 @@ use geometric_traits::{
 };
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, TableLike,
-    TriggerLike, UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike,
+    TableLike, TriggerLike, UniqueIndexLike,
 };
 
 /// A trait for types that can be treated as SQL databases.
@@ -31,6 +31,8 @@ pub trait DatabaseLike: Clone + Debug {
     type UniqueIndex: UniqueIndexLike<DB = Self>;
     /// Type of the check constraints in the schema.
     type CheckConstraint: CheckConstraintLike<DB = Self>;
+    /// Type of the policies in the schema.
+    type Policy: PolicyLike<DB = Self>;
 
     /// Returns the name of the database.
     ///
@@ -407,4 +409,25 @@ pub trait DatabaseLike: Clone + Debug {
     /// # }
     /// ```
     fn function(&self, name: &str) -> Option<&Self::Function>;
+
+    /// Iterates over the policies defined in the schema.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE t (id INT);
+    /// CREATE POLICY my_policy ON t USING (id > 0);
+    /// "#,
+    /// )?;
+    /// let policies: Vec<&str> = db.policies().map(|p| p.name()).collect();
+    /// assert_eq!(policies, vec!["my_policy"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn policies(&self) -> impl Iterator<Item = &Self::Policy>;
 }

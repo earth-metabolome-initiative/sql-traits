@@ -115,4 +115,9 @@ impl TableLike for CreateTable {
     {
         database.table_metadata(self).expect("Table must exist in database").foreign_keys()
     }
+
+    #[inline]
+    fn has_row_level_security(&self, database: &Self::DB) -> bool {
+        database.table_metadata(self).expect("Table must exist in database").rls_enabled()
+    }
 }

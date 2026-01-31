@@ -5,13 +5,13 @@ use std::rc::Rc;
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, TableLike,
-        TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike,
+        TableLike, TriggerLike, UniqueIndexLike,
     },
 };
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>
+pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -21,6 +21,7 @@ where
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
+    P: PolicyLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -40,11 +41,13 @@ where
     functions: Vec<(Rc<Func>, Func::Meta)>,
     /// List of triggers created in the database.
     triggers: Vec<(Rc<Tr>, Tr::Meta)>,
+    /// List of policies created in the database.
+    policies: Vec<(Rc<P>, P::Meta)>,
     /// Phantom data for check constraints.
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr, P> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -54,6 +57,7 @@ where
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
+    P: PolicyLike,
 {
     /// Returns a mutable reference to the tables list.
     pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Rc<T>, T::Meta)> {
@@ -73,12 +77,13 @@ where
             foreign_keys: Vec::new(),
             functions: Vec::new(),
             triggers: Vec::new(),
+            policies: Vec::new(),
             check_constraints: Vec::new(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr, P> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -88,6 +93,7 @@ where
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
+    P: PolicyLike,
 {
     /// Sets the timezone for the database.
     #[must_use]
@@ -194,6 +200,22 @@ where
         self
     }
 
+    /// Adds a policy with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_policy(mut self, policy: Rc<P>, metadata: P::Meta) -> Self {
+        self.policies.push((policy, metadata));
+        self
+    }
+
+    /// Adds multiple policies with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_policies(mut self, policies: impl IntoIterator<Item = (Rc<P>, P::Meta)>) -> Self {
+        self.policies.extend(policies);
+        self
+    }
+
     /// Adds multiple functions with their metadata to the builder.
     #[must_use]
     #[inline]
@@ -225,8 +247,8 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr> From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>>
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr>
+impl<T, C, I, U, F, Func, Ch, Tr, P> From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>>
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
 where
     T: TableLike,
     C: ColumnLike,
@@ -236,8 +258,9 @@ where
     Func: FunctionLike,
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
+    P: PolicyLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr>) -> Self {
+    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -253,6 +276,7 @@ where
         builder.foreign_keys.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         builder.functions.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.triggers.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        builder.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
 
         GenericDB {
@@ -265,6 +289,7 @@ where
             foreign_keys: builder.foreign_keys,
             functions: builder.functions,
             triggers: builder.triggers,
+            policies: builder.policies,
             check_constraints: builder.check_constraints,
         }
     }

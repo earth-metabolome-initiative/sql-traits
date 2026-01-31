@@ -41,7 +41,7 @@ impl TriggerLike for CreateTrigger {
 
     #[inline]
     fn orientation(&self) -> Option<sqlparser::ast::TriggerObjectKind> {
-        self.trigger_object.clone()
+        self.trigger_object
     }
 
     #[inline]

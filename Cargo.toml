@@ -11,12 +11,12 @@ keywords = ["sql", "traits", "parser", "geometry"]
 categories = ["database", "parsing", "geometry"]
 
 [dependencies]
-sqlparser = "0.60"
+sqlparser = { git = "https://github.com/LucaCappelletti94/sqlparser-rs", branch = "externalize-statements" }
 geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geometric-traits", branch = "main" }
 thiserror = "2.0"
 git2 = "0.20.3"
 tempfile = "3.10"
-sql_docs = "1.0.11"
+sql_docs = { version = "1.0.11", git = "https://github.com/LucaCappelletti94/sql-docs", branch = "main" }
 
 [lints.rust]
 missing_docs = "forbid"
