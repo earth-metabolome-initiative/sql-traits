@@ -22,3 +22,4 @@ target
 cobertura.xml
 
 .vscode/*
+build_rs_cov.profraw

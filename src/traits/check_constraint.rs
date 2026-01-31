@@ -1174,3 +1174,86 @@ pub trait CheckConstraintLike:
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::*;
+
+    #[test]
+    fn test_built_in_functions_in_check_constraint() {
+        let sql = r"
+            CREATE TABLE t (
+                col TEXT CHECK (length(col) > 0),
+                col2 TEXT CHECK (len(col2) > 0)
+            );
+        ";
+        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "t").expect("Table 't' not found");
+        let constraints: Vec<_> = table.check_constraints(&db).collect();
+
+        assert_eq!(constraints.len(), 2);
+
+        let cc_length = &constraints[0];
+        let functions_length: Vec<_> =
+            cc_length.functions(&db).map(|f| f.name().to_string()).collect();
+        assert!(
+            functions_length.contains(&"length".to_string()),
+            "Function 'length' not found. Found: {functions_length:?}"
+        );
+
+        let cc_len = &constraints[1];
+        let functions_len: Vec<_> = cc_len.functions(&db).map(|f| f.name().to_string()).collect();
+        assert!(
+            functions_len.contains(&"len".to_string()),
+            "Function 'len' not found. Found: {functions_len:?}"
+        );
+    }
+
+    #[test]
+    fn test_extended_built_in_functions() {
+        let sql = r"
+            CREATE TABLE t (
+                c1 TIMESTAMP CHECK (c1 <= now()),
+                c2 TEXT CHECK (coalesce(c2, 'default') = 'default'),
+                c3 INT CHECK (c3 > 0)
+            );
+        ";
+        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "t").expect("Table 't' not found");
+        let constraints: Vec<_> = table.check_constraints(&db).collect();
+
+        // Find constraint with 'now'
+        let has_now = constraints.iter().any(|cc| cc.functions(&db).any(|f| f.name() == "now"));
+        assert!(has_now, "Function 'now' not found in constraints");
+
+        // Find constraint with 'coalesce'
+        let has_coalesce =
+            constraints.iter().any(|cc| cc.functions(&db).any(|f| f.name() == "coalesce"));
+        assert!(has_coalesce, "Function 'coalesce' not found in constraints");
+    }
+
+    #[test]
+    fn test_uuid_functions() {
+        let sql = r"
+            CREATE TABLE t (
+                c1 UUID CHECK (c1 = gen_random_uuid()),
+                c2 UUID CHECK (c2 = uuidv4()),
+                c3 UUID CHECK (c3 = uuidv7()),
+                c4 UUID CHECK (c4 = uuidv7('10 minutes'::INTERVAL))
+            );
+        ";
+        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "t").expect("Table 't' not found");
+        let constraints: Vec<_> = table.check_constraints(&db).collect();
+        assert_eq!(constraints.len(), 4);
+
+        let functions: Vec<_> = constraints
+            .iter()
+            .flat_map(|cc| cc.functions(&db).map(|f| f.name().to_string()))
+            .collect();
+
+        assert!(functions.contains(&"gen_random_uuid".to_string()));
+        assert!(functions.contains(&"uuidv4".to_string()));
+        assert!(functions.contains(&"uuidv7".to_string()));
+    }
+}

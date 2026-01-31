@@ -9,12 +9,14 @@ use git2::Repository;
 use sql_docs::SqlDoc;
 use sqlparser::{
     ast::{
-        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateIndex, CreateTable,
-        CreateTrigger, Expr, ForeignKeyConstraint, IndexColumn, OrderByExpr, OrderByOptions,
-        Statement, TableConstraint, UniqueConstraint, Value, ValueWithSpan,
+        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateFunctionBody, CreateIndex,
+        CreateTable, CreateTrigger, DataType, ExactNumberInfo, Expr, ForeignKeyConstraint, Ident,
+        IndexColumn, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions,
+        Statement, TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::PostgreSqlDialect,
     parser::{Parser, ParserError},
+    tokenizer::Span,
 };
 
 use crate::{
@@ -535,13 +537,98 @@ impl ParserDB {
     /// // This should panic
     /// let _ = ParserDB::from_statements(statements, "test".to_string());
     /// ```
-    #[must_use = "The result should be checked for errors"]
     #[allow(clippy::too_many_lines)]
     pub fn from_statements(
         statements: Vec<Statement>,
         catalog_name: String,
     ) -> Result<Self, crate::errors::Error> {
         let mut builder: ParserDBBuilder = GenericDBBuilder::new(catalog_name);
+
+        let any_type = DataType::Custom(
+            ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
+            vec![],
+        );
+
+        // Helper to create a standard argument
+        let arg = |data_type: DataType| {
+            OperateFunctionArg { mode: None, name: None, data_type, default_expr: None }
+        };
+
+        // Helper to create a VARIADIC argument
+        let variadic_arg = |data_type: DataType| {
+            OperateFunctionArg {
+                mode: None,
+                name: Some(Ident::new("VARIADIC")),
+                data_type,
+                default_expr: None,
+            }
+        };
+
+        let builtins = vec![
+            // String functions
+            ("length", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("len", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("char_length", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("character_length", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("octet_length", vec![arg(DataType::Text)], DataType::Int(None)),
+            // Conditional functions
+            ("coalesce", vec![variadic_arg(any_type.clone())], any_type.clone()),
+            ("nullif", vec![arg(any_type.clone()), arg(any_type.clone())], any_type.clone()),
+            // Date/Time functions
+            ("now", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
+            ("current_timestamp", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
+            ("current_date", vec![], DataType::Date),
+            ("current_time", vec![], DataType::Time(None, TimezoneInfo::WithTimeZone)),
+            ("localtimestamp", vec![], DataType::Timestamp(None, TimezoneInfo::None)),
+            ("localtime", vec![], DataType::Time(None, TimezoneInfo::None)),
+            // UUID functions
+            ("gen_random_uuid", vec![], DataType::Uuid),
+            ("uuidv4", vec![], DataType::Uuid),
+            ("uuidv7", vec![], DataType::Uuid),
+            (
+                "uuidv7",
+                vec![arg(DataType::Interval { fields: None, precision: None })],
+                DataType::Uuid,
+            ),
+            // Aggregate functions
+            ("count", vec![arg(any_type.clone())], DataType::BigInt(None)),
+            ("sum", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
+            ("avg", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
+            ("min", vec![arg(any_type.clone())], any_type.clone()),
+            ("max", vec![arg(any_type.clone())], any_type.clone()),
+            // System functions
+            ("current_user", vec![], DataType::Text),
+            ("session_user", vec![], DataType::Text),
+            ("user", vec![], DataType::Text),
+        ];
+
+        for (name, args, return_type) in builtins {
+            let create_function = CreateFunction {
+                or_alter: false,
+                or_replace: false,
+                temporary: false,
+                if_not_exists: false,
+                name: ObjectName(vec![ObjectNamePart::Identifier(Ident::new(name))]),
+                args: Some(args),
+                return_type: Some(return_type),
+                function_body: Some(CreateFunctionBody::AsBeforeOptions {
+                    body: Expr::Value(ValueWithSpan {
+                        value: Value::SingleQuotedString(String::new()),
+                        span: Span::empty(),
+                    }),
+                    link_symbol: None,
+                }),
+                behavior: None,
+                called_on_null: None,
+                parallel: None,
+                using: None,
+                language: Some(Ident::new("internal")),
+                determinism_specifier: None,
+                options: None,
+                remote_connection: None,
+            };
+            builder = builder.add_function(Rc::new(create_function), ());
+        }
 
         for statement in statements {
             match statement {
