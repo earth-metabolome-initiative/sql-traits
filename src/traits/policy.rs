@@ -284,3 +284,63 @@ where
         (*self).check_functions(database)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::structs::ParserDB;
+    use crate::traits::{DatabaseLike, FunctionLike, TableLike};
+    use sqlparser::ast::CreatePolicyCommand;
+
+    #[test]
+    fn test_policy_ref_implementation() {
+        let sql = r"
+            CREATE TABLE my_table (id INT);
+            CREATE FUNCTION my_func() RETURNS BOOLEAN AS 'SELECT true';
+            CREATE FUNCTION check_func() RETURNS BOOLEAN AS 'SELECT true';
+            CREATE POLICY my_policy ON my_table
+                FOR SELECT
+                TO PUBLIC
+                USING (id > 0 AND my_func())
+                WITH CHECK (id < 10 AND check_func());
+        ";
+        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "my_table").expect("Table not found");
+        let policy = table.policies(&db).next().expect("Policy not found");
+
+        // Use reference to policy
+        let policy_ref = &policy;
+
+        assert_eq!(policy_ref.name(), "my_policy");
+
+        let policy_table = policy_ref.table(&db);
+        assert_eq!(policy_table.table_name(), "my_table");
+
+        assert_eq!(policy_ref.command(), CreatePolicyCommand::Select);
+
+        let roles: Vec<_> = policy_ref.roles(&db).collect();
+        assert_eq!(roles.len(), 1);
+        assert_eq!(roles[0].to_string(), "PUBLIC");
+
+        let using_expr = policy_ref.using_expression(&db);
+        assert!(using_expr.is_some());
+        let using_str = using_expr.unwrap().to_string();
+        assert!(using_str.contains("id > 0"));
+        assert!(using_str.contains("my_func()"));
+
+        let using_funcs: Vec<_> = policy_ref.using_functions(&db).collect();
+        assert_eq!(using_funcs.len(), 1);
+        assert_eq!(using_funcs[0].name(), "my_func");
+
+        let check_expr = policy_ref.check_expression(&db);
+        assert!(check_expr.is_some());
+        let check_str = check_expr.unwrap().to_string();
+        assert!(check_str.contains("id < 10"));
+        assert!(check_str.contains("check_func()"));
+
+        let check_funcs: Vec<_> = policy_ref.check_functions(&db).collect();
+        assert_eq!(check_funcs.len(), 1);
+        assert_eq!(check_funcs[0].name(), "check_func");
+    }
+}
+
