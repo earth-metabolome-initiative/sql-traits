@@ -154,6 +154,39 @@ pub trait ColumnLike:
         table.is_primary_key_column(database, self.borrow())
     }
 
+    #[inline]
+    /// Returns whether the column is a surrogate key.
+    ///
+    /// A surrogate key is defined as a primary key that is also generative.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to query the table
+    ///   from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db =
+    ///     ParserDB::try_from("CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT, age INT);")?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
+    /// assert!(id_column.is_surrogate_key(&db), "id column should be a surrogate key");
+    /// assert!(!name_column.is_surrogate_key(&db), "name column should not be a surrogate key");
+    /// assert!(!age_column.is_surrogate_key(&db), "age column should not be a surrogate key");
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn is_surrogate_key(&self, database: &Self::DB) -> bool {
+        let table: &<Self::DB as DatabaseLike>::Table = ColumnLike::table(self, database);
+        table.has_surrogate_primary_key(database) && self.is_primary_key(database)
+    }
+
     /// Returns the normalized data type of the column as a string.
     ///
     /// # Example
