@@ -738,6 +738,44 @@ pub trait TableLike:
         self.non_tautological_check_constraints(database).next().is_some()
     }
 
+    /// Returns whether the table or any of its ancestral extended tables have
+    /// non-tautological check constraints.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE parent_table (id INT PRIMARY KEY, age INT CHECK (age > 0));
+    /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id), salary INT);
+    /// CREATE TABLE another_table (id INT PRIMARY KEY, value INT CHECK (TRUE));
+    /// "#,
+    /// )?;
+    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// assert!(parent_table.has_non_tautological_check_constraints_in_hierarchy(&db));
+    /// let child_table = db.table(None, "child_table").unwrap();
+    /// assert!(child_table.has_non_tautological_check_constraints_in_hierarchy(&db));
+    /// let another_table = db.table(None, "another_table").unwrap();
+    /// assert!(!another_table.has_non_tautological_check_constraints_in_hierarchy(&db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_non_tautological_check_constraints_in_hierarchy(&self, database: &Self::DB) -> bool {
+        self.has_non_tautological_check_constraints(database)
+            || self
+                .ancestral_extended_tables(database)
+                .into_iter()
+                .any(|table| table.has_non_tautological_check_constraints(database))
+    }
+
     /// Iterates over the indices associated with the table.
     ///
     /// # Arguments
