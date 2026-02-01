@@ -523,3 +523,120 @@ impl<T: TriggerLike> TriggerLike for &T {
         (*self).maintenance_assignments(database)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        structs::ParserDB,
+        traits::{ColumnLike, DatabaseLike, FunctionLike, TableLike},
+    };
+
+    #[test]
+    fn test_trigger_ref_implementation() {
+        let sql = r"
+            CREATE TABLE users (id INT, updated_at TIMESTAMP);
+            CREATE FUNCTION update_timestamp() RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.updated_at = CURRENT_TIMESTAMP;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER my_trigger
+            BEFORE UPDATE ON users
+            FOR EACH ROW
+            EXECUTE FUNCTION update_timestamp();
+        ";
+
+        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let trigger = db.triggers().next().expect("No trigger found");
+
+        // Use reference to trigger
+        let trigger_ref = &trigger;
+
+        assert_eq!(trigger_ref.name(), "my_trigger");
+
+        let table = trigger_ref.table(&db);
+        assert_eq!(table.table_name(), "users");
+
+        let events = trigger_ref.events();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], sqlparser::ast::TriggerEvent::Update(_)));
+
+        assert!(matches!(trigger_ref.timing(), Some(sqlparser::ast::TriggerPeriod::Before)));
+
+        assert!(matches!(
+            trigger_ref.orientation(),
+            Some(sqlparser::ast::TriggerObjectKind::ForEach(sqlparser::ast::TriggerObject::Row))
+        ));
+
+        let function = trigger_ref.function(&db).expect("Function should exist");
+        assert_eq!(function.name(), "update_timestamp");
+
+        assert!(trigger_ref.is_maintenance_trigger(&db));
+
+        let assignments: Vec<_> = trigger_ref.maintenance_assignments(&db).collect();
+        assert_eq!(assignments.len(), 1);
+
+        let (col, expr) = &assignments[0];
+        assert_eq!(col.column_name(), "updated_at");
+        assert_eq!(expr.to_string(), "CURRENT_TIMESTAMP");
+    }
+
+    #[test]
+    fn test_trigger_missing_function() {
+        use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+
+        let sql = r"
+            CREATE TRIGGER my_trigger
+            BEFORE UPDATE ON users
+            FOR EACH ROW
+            EXECUTE FUNCTION non_existent_function();
+        ";
+        let dialect = PostgreSqlDialect {};
+        let mut statements = Parser::parse_sql(&dialect, sql).expect("Parse SQL");
+        let statement = statements.pop().unwrap();
+
+        let sqlparser::ast::Statement::CreateTrigger(trigger) = statement else {
+            panic!("Expected CreateTrigger")
+        };
+
+        // Create a separate DB that doesn't have the function
+        let db = ParserDB::try_from("CREATE TABLE users (id INT);").expect("Failed to create DB");
+
+        // function() should return None because "non_existent_function" is not in db
+        assert!(trigger.function(&db).is_none());
+        assert!(!trigger.is_maintenance_trigger(&db));
+        assert_eq!(trigger.maintenance_assignments(&db).count(), 0);
+    }
+
+    #[test]
+    fn test_trigger_function_no_body() {
+        // Defines a function with RETURN expression which is not a string literal
+        // block. FunctionLike implementation returns None for body() in this
+        // case.
+        let sql = r"
+            CREATE TABLE users (id INT, val INT);
+            CREATE FUNCTION atomic_calc() RETURNS INT RETURN 1;
+            
+            CREATE TRIGGER my_trigger
+            BEFORE UPDATE ON users
+            FOR EACH ROW
+            EXECUTE FUNCTION atomic_calc();
+        ";
+
+        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let trigger = db.triggers().next().expect("No trigger found");
+        let trigger_ref = &trigger;
+
+        // Function exists
+        assert!(trigger_ref.function(&db).is_some());
+
+        // But body() is None because it's not a string literal body (internal logic of
+        // impls/sqlparser/create_function.rs)
+        assert!(trigger_ref.function(&db).unwrap().body().is_none());
+
+        assert!(!trigger_ref.is_maintenance_trigger(&db));
+        assert_eq!(trigger_ref.maintenance_assignments(&db).count(), 0);
+    }
+}
