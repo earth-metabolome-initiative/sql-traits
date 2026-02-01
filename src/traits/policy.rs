@@ -287,10 +287,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::structs::ParserDB;
-    use crate::traits::{DatabaseLike, FunctionLike, TableLike};
     use sqlparser::ast::CreatePolicyCommand;
+
+    use super::*;
+    use crate::{
+        structs::ParserDB,
+        traits::{DatabaseLike, FunctionLike, TableLike},
+    };
 
     #[test]
     fn test_policy_ref_implementation() {
@@ -343,4 +346,3 @@ mod tests {
         assert_eq!(check_funcs[0].name(), "check_func");
     }
 }
-
