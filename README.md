@@ -33,13 +33,14 @@ use sql_traits::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse SQL DDL into a database model
-    let db = GenericParserDB::parse(
+    let db = ParserDB::parse(
         r#"
         CREATE TABLE users (
             id INT PRIMARY KEY,
             username TEXT NOT NULL
         );
-        "#
+        "#,
+        &GenericDialect,
     )?;
 
     // Retrieve a table by name

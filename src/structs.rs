@@ -1,7 +1,7 @@
 //! Submodule providing general structs for representing database schemas.
 
 pub mod generic_db;
-pub use generic_db::{GenericDB, GenericParserDB, ParserDB, ParserDBInner, ParserPG};
+pub use generic_db::{GenericDB, ParserDB, ParserDBBuilder};
 pub mod metadata;
 
 pub use metadata::{TableAttribute, TableMetadata};

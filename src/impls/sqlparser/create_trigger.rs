@@ -4,7 +4,7 @@
 use sqlparser::ast::CreateTrigger;
 
 use crate::{
-    structs::ParserDBInner,
+    structs::ParserDB,
     traits::{DatabaseLike, Metadata, TriggerLike},
     utils::last_str,
 };
@@ -14,7 +14,7 @@ impl Metadata for CreateTrigger {
 }
 
 impl TriggerLike for CreateTrigger {
-    type DB = ParserDBInner;
+    type DB = ParserDB;
 
     #[inline]
     fn name(&self) -> &str {

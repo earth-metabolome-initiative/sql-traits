@@ -3,7 +3,7 @@
 use sqlparser::ast::CreateRole;
 
 use crate::{
-    structs::ParserDBInner,
+    structs::ParserDB,
     traits::{DatabaseLike, Metadata, PolicyLike, RoleLike},
     utils::last_str,
 };
@@ -13,7 +13,7 @@ impl Metadata for CreateRole {
 }
 
 impl RoleLike for CreateRole {
-    type DB = ParserDBInner;
+    type DB = ParserDB;
 
     fn name(&self) -> &str {
         last_str(self.names.first().expect("CREATE ROLE must have a name"))
@@ -95,19 +95,18 @@ fn owner_matches_role(owner: &sqlparser::ast::Owner, role_name: &str) -> bool {
 mod tests {
     use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
 
-    use super::*;
-    use crate::{structs::ParserPG, traits::RoleLike};
+    use crate::{structs::ParserDB, traits::RoleLike};
 
     /// Helper to parse SQL using PostgreSQL dialect
-    fn parse_postgres(sql: &str) -> ParserDBInner {
+    fn parse_postgres(sql: &str) -> ParserDB {
         let dialect = PostgreSqlDialect {};
         let statements = Parser::parse_sql(&dialect, sql).unwrap();
-        ParserDBInner::from_statements(statements, "test".to_string()).unwrap()
+        ParserDB::from_statements(statements, "test".to_string()).unwrap()
     }
 
     #[test]
     fn test_basic_role() {
-        let db = ParserPG::parse("CREATE ROLE test_role;").unwrap();
+        let db = ParserDB::parse("CREATE ROLE test_role;", &PostgreSqlDialect {}).unwrap();
         let role = db.role("test_role").unwrap();
 
         assert_eq!(role.name(), "test_role");

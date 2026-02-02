@@ -3,7 +3,7 @@
 use sqlparser::ast::{CreatePolicy, CreatePolicyCommand, Expr, Owner};
 
 use crate::{
-    structs::{generic_db::ParserDBInner, metadata::PolicyMetadata},
+    structs::{ParserDB, metadata::PolicyMetadata},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, PolicyLike},
     utils::last_str,
 };
@@ -17,7 +17,7 @@ impl DocumentationMetadata for CreatePolicy {
 }
 
 impl PolicyLike for CreatePolicy {
-    type DB = ParserDBInner;
+    type DB = ParserDB;
 
     fn name(&self) -> &str {
         &self.name.value

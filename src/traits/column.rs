@@ -28,7 +28,7 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);")?;
+    /// let db = ParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);", &GenericDialect {})?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let columns: Vec<&str> = table.columns(&db).map(|col| col.column_name()).collect();
     /// assert_eq!(columns, vec!["id", "name"]);
@@ -50,12 +50,13 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (
     ///     -- the id of the table_row
     ///     id INT,
     ///     name TEXT
     /// );",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let column = table.column("id", &db).expect("Column 'id' should exist");
@@ -77,7 +78,10 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse("CREATE TABLE my_table (id INT, name TEXT, score REAL);")?;
+    /// let db = ParserDB::parse(
+    ///     "CREATE TABLE my_table (id INT, name TEXT, score REAL);",
+    ///     &GenericDialect {},
+    /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
@@ -99,9 +103,10 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"CREATE TABLE parent (id SERIAL, name TEXT, age INT, bigg_id BIGSERIAL);
     ///     CREATE TABLE child (parent_id INT PRIMARY KEY REFERENCES parent(id), other TEXT);"#,
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
@@ -137,8 +142,10 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db =
-    ///     GenericParserDB::parse("CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, age INT);")?;
+    /// let db = ParserDB::parse(
+    ///     "CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, age INT);",
+    ///     &GenericDialect {},
+    /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
@@ -171,8 +178,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT, age INT);",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
@@ -197,8 +205,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT, serial_id SERIAL, bigg_id BIGSERIAL, small_id SMALLSERIAL, name TEXT);",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
@@ -232,8 +241,10 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db =
-    ///     GenericParserDB::parse("CREATE TABLE my_table (id INT, name TEXT, description VARCHAR);")?;
+    /// let db = ParserDB::parse(
+    ///     "CREATE TABLE my_table (id INT, name TEXT, description VARCHAR);",
+    ///     &GenericDialect {},
+    /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
@@ -263,8 +274,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT, name TEXT, is_bool BOOL, also_bool BOOLEAN);",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
@@ -291,8 +303,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT NOT NULL, name TEXT, optional_field INT);",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
@@ -318,8 +331,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT DEFAULT 0, name TEXT, created_at TIMESTAMP DEFAULT NOW());",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
@@ -350,8 +364,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT DEFAULT 0, name TEXT, created_at TIMESTAMP DEFAULT NOW());",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
@@ -381,7 +396,7 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);")?;
+    /// let db = ParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);", &GenericDialect {})?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
     /// let column_table = ColumnLike::table(id_column, &db);
@@ -406,7 +421,7 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -415,6 +430,7 @@ pub trait ColumnLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
@@ -454,7 +470,7 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent (id INT PRIMARY KEY);
     /// CREATE TABLE child (
@@ -465,6 +481,7 @@ pub trait ColumnLike:
     ///     child_id INT REFERENCES child(id)
     /// );
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let parent_table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
@@ -512,13 +529,14 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent (id INT PRIMARY KEY);
     /// CREATE TABLE child (
     ///     parent_id INT PRIMARY KEY REFERENCES parent(id)
     /// );
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let parent_table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
@@ -556,7 +574,7 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -564,6 +582,7 @@ pub trait ColumnLike:
     ///    name TEXT
     /// );
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).unwrap();
@@ -591,7 +610,7 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -600,6 +619,7 @@ pub trait ColumnLike:
     ///    FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
@@ -643,7 +663,7 @@ pub trait ColumnLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE another_referenced_table (id INT PRIMARY KEY, name TEXT);
@@ -659,6 +679,7 @@ pub trait ColumnLike:
     /// CREATE TABLE serial_table_one (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE serial_table_two (id SERIAL PRIMARY KEY, name TEXT);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
@@ -776,8 +797,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));",
+    ///     &GenericDialect,
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -814,8 +836,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT, name TEXT);CREATE INDEX idx_name ON my_table(name);",
+    ///     &GenericDialect,
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -855,8 +878,9 @@ pub trait ColumnLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
@@ -890,8 +914,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
@@ -924,8 +949,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
@@ -960,8 +986,9 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     "CREATE TABLE my_table (id INT PRIMARY KEY, other TEXT, age INT, score INT, UNIQUE (age, score));",
+    ///     &GenericDialect,
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -1098,6 +1125,8 @@ where
 mod tests {
     use std::rc::Rc;
 
+    use sqlparser::dialect::GenericDialect;
+
     use super::*;
     use crate::prelude::*;
 
@@ -1107,7 +1136,7 @@ mod tests {
         #[test]
         fn test_all_methods() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT DEFAULT 'val');";
-            let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
+            let db = ParserDB::parse(sql, &GenericDialect {}).expect("Failed to parse SQL");
             let table = db.table(None, "users").expect("Table not found");
             let column = table.column("name", &db).expect("Column not found");
 
@@ -1129,7 +1158,7 @@ mod tests {
         #[test]
         fn test_all_methods() {
             let sql = "CREATE TABLE products (id INT PRIMARY KEY, price INT DEFAULT 0);";
-            let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
+            let db = ParserDB::parse(sql, &GenericDialect {}).expect("Failed to parse SQL");
             let table = db.table(None, "products").expect("Table not found");
             let column = table.column("price", &db).expect("Column not found");
 

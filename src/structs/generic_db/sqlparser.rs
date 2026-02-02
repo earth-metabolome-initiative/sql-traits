@@ -1,8 +1,6 @@
-//! Implementations for [`GenericDB`] relative to sqlparser structures.
+//! Implementations for [`ParserDB`] - a database schema parsed from SQL text.
 
 use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -17,7 +15,7 @@ use sqlparser::{
         ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Statement,
         TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
     },
-    dialect::{Dialect, GenericDialect, PostgreSqlDialect},
+    dialect::{Dialect, GenericDialect},
     parser::{Parser, ParserError},
     tokenizer::Span,
 };
@@ -25,169 +23,17 @@ use sqlparser::{
 use crate::{
     structs::{
         GenericDB, TableAttribute, TableMetadata,
-        generic_db::GenericDBBuilder,
         metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
     },
-    traits::{DatabaseLike, FunctionLike, TableLike, column::ColumnLike},
+    traits::{ColumnLike, FunctionLike, TableLike},
     utils::{columns_in_expression, last_str},
 };
 
 mod functions_in_expression;
 
-/// A type alias for the inner `GenericDB` specialized for `sqlparser`'s
-/// `CreateTable`.
-///
-/// This is used internally by [`ParserDB`] to store the actual database schema.
-pub type ParserDBInner = GenericDB<
-    CreateTable,
-    TableAttribute<CreateTable, ColumnDef>,
-    TableAttribute<CreateTable, CreateIndex>,
-    TableAttribute<CreateTable, UniqueConstraint>,
-    TableAttribute<CreateTable, ForeignKeyConstraint>,
-    CreateFunction,
-    TableAttribute<CreateTable, CheckConstraint>,
-    CreateTrigger,
-    CreatePolicy,
-    CreateRole,
->;
-
-/// A database schema parsed from SQL text, generic over the SQL dialect.
-///
-/// This is the main type for working with SQL schemas parsed from SQL text.
-/// It provides methods for parsing SQL from strings, files, or git
-/// repositories.
-///
-/// The dialect type parameter `D` determines which SQL dialect is used for
-/// parsing. By default, it uses [`GenericDialect`].
-///
-/// # Example
-///
-/// ```rust
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use sql_traits::prelude::*;
-///
-/// let db = GenericParserDB::parse("CREATE TABLE users (id INT PRIMARY KEY);")?;
-/// let table = db.table(None, "users").unwrap();
-/// assert_eq!(table.table_name(), "users");
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # Using a specific dialect
-///
-/// ```rust
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use sql_traits::prelude::*;
-///
-/// let sql = "CREATE ROLE admin SUPERUSER LOGIN;";
-/// let db = ParserPG::parse(sql)?;
-/// let role = db.role("admin").unwrap();
-/// assert!(role.is_superuser());
-/// # Ok(())
-/// # }
-/// ```
-#[derive(Debug, Clone)]
-pub struct ParserDB<D: Dialect = GenericDialect> {
-    inner: ParserDBInner,
-    _dialect: PhantomData<D>,
-}
-
-impl<D: Dialect> Deref for ParserDB<D> {
-    type Target = ParserDBInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<D: Dialect> DerefMut for ParserDB<D> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-impl<D: Dialect> ParserDB<D> {
-    /// Creates a new `ParserDB` from a `ParserDBInner`.
-    #[must_use]
-    pub fn new(inner: ParserDBInner) -> Self {
-        Self { inner, _dialect: PhantomData }
-    }
-
-    /// Returns a reference to the inner `ParserDBInner`.
-    #[must_use]
-    pub fn inner(&self) -> &ParserDBInner {
-        &self.inner
-    }
-
-    /// Consumes the `ParserDB` and returns the inner `ParserDBInner`.
-    #[must_use]
-    pub fn into_inner(self) -> ParserDBInner {
-        self.inner
-    }
-
-    /// Creates a `ParserDB<D>` from a vector of SQL statements.
-    ///
-    /// This method wraps `ParserDBInner::from_statements` and returns a
-    /// `ParserDB<D>`.
-    ///
-    /// # Arguments
-    ///
-    /// * `statements` - A vector of SQL statements to parse.
-    /// * `catalog_name` - The name of the database catalog.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if a check constraint references an unknown column.
-    pub fn from_statements(
-        statements: Vec<Statement>,
-        catalog_name: String,
-    ) -> Result<Self, crate::errors::Error> {
-        Ok(Self::new(ParserDBInner::from_statements(statements, catalog_name)?))
-    }
-}
-
-/// A type alias for a `ParserDB` specialized for `PostgreSqlDialect`.
-///
-/// This is a convenience type for working with PostgreSQL-specific SQL syntax.
-///
-/// # Example
-///
-/// ```rust
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use sql_traits::prelude::*;
-///
-/// let sql = "CREATE ROLE admin SUPERUSER LOGIN;";
-/// let db = ParserPG::parse(sql)?;
-/// let role = db.role("admin").unwrap();
-/// assert!(role.is_superuser());
-/// # Ok(())
-/// # }
-/// ```
-pub type ParserPG = ParserDB<PostgreSqlDialect>;
-
-/// A type alias for [`ParserDB`] using the [`GenericDialect`].
-///
-/// This is the most common type for parsing SQL that doesn't require
-/// a specific dialect's features.
-///
-/// # Example
-///
-/// ```rust
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use sql_traits::prelude::*;
-///
-/// let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
-/// let db = GenericParserDB::parse(sql)?;
-/// let table = db.table(None, "users").unwrap();
-/// assert_eq!(table.table_name(), "users");
-/// # Ok(())
-/// # }
-/// ```
-pub type GenericParserDB = ParserDB<GenericDialect>;
-
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
 /// `CreateTable`.
-pub type ParserDBBuilder = GenericDBBuilder<
+pub type ParserDBBuilder = super::GenericDBBuilder<
     CreateTable,
     TableAttribute<CreateTable, ColumnDef>,
     TableAttribute<CreateTable, CreateIndex>,
@@ -201,18 +47,63 @@ pub type ParserDBBuilder = GenericDBBuilder<
 >;
 
 /// A type alias for the result of processing check constraints.
-pub type CheckConstraintResult = (
-    Vec<Rc<<ParserDBInner as DatabaseLike>::Column>>,
-    Vec<Rc<<ParserDBInner as DatabaseLike>::Function>>,
-);
+type CheckConstraintResult =
+    (Vec<Rc<TableAttribute<CreateTable, ColumnDef>>>, Vec<Rc<CreateFunction>>);
 
 /// A type alias for the result of processing unique constraints.
-pub type UniqueConstraintResult = (
+type UniqueConstraintResult = (
     Rc<TableAttribute<CreateTable, UniqueConstraint>>,
     UniqueIndexMetadata<TableAttribute<CreateTable, UniqueConstraint>>,
 );
 
-impl ParserDBInner {
+/// A database schema parsed from SQL text.
+///
+/// This is the main type for working with SQL schemas parsed from SQL text.
+/// It provides methods for parsing SQL from strings, files, or git
+/// repositories.
+///
+/// # Example
+///
+/// ```rust
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// use sql_traits::prelude::*;
+/// use sqlparser::dialect::GenericDialect;
+///
+/// let db = ParserDB::parse("CREATE TABLE users (id INT PRIMARY KEY);", &GenericDialect {})?;
+/// let table = db.table(None, "users").unwrap();
+/// assert_eq!(table.table_name(), "users");
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Using PostgreSQL dialect
+///
+/// ```rust
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// use sql_traits::prelude::*;
+/// use sqlparser::dialect::PostgreSqlDialect;
+///
+/// let sql = "CREATE ROLE admin SUPERUSER LOGIN;";
+/// let db = ParserDB::parse(sql, &PostgreSqlDialect {})?;
+/// let role = db.role("admin").unwrap();
+/// assert!(role.is_superuser());
+/// # Ok(())
+/// # }
+/// ```
+pub type ParserDB = GenericDB<
+    CreateTable,
+    TableAttribute<CreateTable, ColumnDef>,
+    TableAttribute<CreateTable, CreateIndex>,
+    TableAttribute<CreateTable, UniqueConstraint>,
+    TableAttribute<CreateTable, ForeignKeyConstraint>,
+    CreateFunction,
+    TableAttribute<CreateTable, CheckConstraint>,
+    CreateTrigger,
+    CreatePolicy,
+    CreateRole,
+>;
+
+impl ParserDB {
     /// Helper function to process check constraints.
     fn process_check_constraint(
         check_expr: &Expr,
@@ -220,11 +111,12 @@ impl ParserDBInner {
         table_metadata: &TableMetadata<CreateTable>,
         builder: &ParserDBBuilder,
     ) -> Result<CheckConstraintResult, crate::errors::Error> {
-        let columns_in_expression = columns_in_expression::<Rc<<Self as DatabaseLike>::Column>>(
-            check_expr,
-            &create_table.name.to_string(),
-            table_metadata.column_rc_slice(),
-        )?;
+        let columns_in_expression =
+            columns_in_expression::<Rc<TableAttribute<CreateTable, ColumnDef>>>(
+                check_expr,
+                &create_table.name.to_string(),
+                table_metadata.column_rc_slice(),
+            )?;
         let functions_in_expression = functions_in_expression::functions_in_expression::<Self>(
             check_expr,
             builder.function_rc_vec().as_slice(),
@@ -238,7 +130,7 @@ impl ParserDBInner {
             "({})",
             columns.iter().map(|ident| ident.column.to_string()).collect::<Vec<_>>().join(", ")
         );
-        Parser::new(&sqlparser::dialect::GenericDialect {})
+        Parser::new(&GenericDialect)
             .try_with_sql(expression_string.as_str())
             .expect("Failed to parse index constraint expression")
             .parse_expr()
@@ -338,8 +230,6 @@ impl ParserDBInner {
                     builder = builder.add_unique_index(unique_index, unique_index_metadata);
                 }
                 ColumnOption::PrimaryKey(_) => {
-                    // From the primary key constraint we also create an associated unique index,
-                    // since primary keys also have an associated unique index.
                     let primary_key_unique_constraint = UniqueConstraint {
                         name: None,
                         index_name: None,
@@ -380,7 +270,6 @@ impl ParserDBInner {
         table_metadata: &mut TableMetadata<CreateTable>,
         builder: ParserDBBuilder,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        // Validate host columns exist
         for col_ident in &fk.columns {
             let column_exists = table_metadata
                 .column_rcs()
@@ -394,7 +283,6 @@ impl ParserDBInner {
             }
         }
 
-        // Validate referenced table exists or is current table (self-referential)
         let referenced_table_name = fk.foreign_table.to_string();
 
         let Some(referenced_table) = builder
@@ -410,7 +298,6 @@ impl ParserDBInner {
             });
         };
 
-        // Validate referenced columns exist
         for ref_col_ident in &fk.referred_columns {
             let column_exists = referenced_table
                 .columns
@@ -495,8 +382,6 @@ impl ParserDBInner {
                         );
                     }
 
-                    // From the primary key constraint we also create an associated unique index,
-                    // since primary keys also have an associated unique index.
                     let primary_key_unique_constraint = UniqueConstraint {
                         name: pk.name.clone(),
                         index_name: None,
@@ -533,17 +418,17 @@ impl ParserDBInner {
     ///
     /// # Panics
     ///
-    /// Panics if a statement other than `CREATE TABLE` or `CREATE FUNCTION` is
-    /// encountered, or if the builder fails to build the database.
+    /// Panics if an unsupported statement is encountered.
     ///
     /// # Errors
     ///
-    /// Returns an error if a check constraint references an unknown column.
+    /// Returns an error if validation fails (e.g., foreign key references
+    /// non-existent tables or columns).
     ///
-    /// # Examples
+    /// # Example
     ///
     /// ```
-    /// use sql_traits::prelude::GenericParserDB;
+    /// use sql_traits::prelude::ParserDB;
     /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
     ///
     /// let sql = r#"
@@ -551,156 +436,29 @@ impl ParserDBInner {
     ///     id INTEGER PRIMARY KEY,
     ///     name VARCHAR(100)
     /// );
-    /// CREATE TABLE posts (
-    ///     id INTEGER PRIMARY KEY,
-    ///     user_id INTEGER REFERENCES users(id),
-    ///     title VARCHAR(200)
-    /// );
     /// "#;
     ///
     /// let dialect = PostgreSqlDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
-    /// let db = GenericParserDB::from_statements(statements, "test".to_string()).unwrap();
+    /// let db = ParserDB::from_statements(statements, "test".to_string()).unwrap();
     /// assert_eq!(db.catalog_name(), "test");
-    /// ```
-    ///
-    /// # Error Examples
-    ///
-    /// This will fail if a foreign key references a non-existent column:
-    ///
-    /// ```
-    /// use sql_traits::prelude::GenericParserDB;
-    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
-    ///
-    /// let sql = r#"
-    /// CREATE TABLE users (
-    ///     id INTEGER PRIMARY KEY,
-    ///     name VARCHAR(100)
-    /// );
-    /// CREATE TABLE posts (
-    ///     id INTEGER PRIMARY KEY,
-    ///     user_id INTEGER,
-    ///     title VARCHAR(200),
-    ///     FOREIGN KEY (user_id) REFERENCES users(nonexistent_column)
-    /// );
-    /// "#;
-    ///
-    /// let dialect = PostgreSqlDialect {};
-    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
-    /// // This should fail with HostColumnNotFoundForForeignKey
-    /// assert!(GenericParserDB::from_statements(statements, "test".to_string()).is_err());
-    /// ```
-    ///
-    /// This will fail if a foreign key references a non-existent table:
-    ///
-    /// ```
-    /// use sql_traits::prelude::GenericParserDB;
-    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
-    ///
-    /// let sql = r#"
-    /// CREATE TABLE posts (
-    ///     id INTEGER PRIMARY KEY,
-    ///     user_id INTEGER,
-    ///     title VARCHAR(200),
-    ///     FOREIGN KEY (user_id) REFERENCES nonexistent_table(id)
-    /// );
-    /// "#;
-    ///
-    /// let dialect = PostgreSqlDialect {};
-    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
-    /// // This should fail with ReferencedTableNotFoundForForeignKey
-    /// assert!(GenericParserDB::from_statements(statements, "test".to_string()).is_err());
-    /// ```
-    ///
-    /// This will fail if a trigger references a non-existent table:
-    ///
-    /// ```
-    /// use sql_traits::prelude::GenericParserDB;
-    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
-    ///
-    /// let sql = r#"
-    /// CREATE TRIGGER my_trigger
-    /// AFTER INSERT ON nonexistent_table
-    /// FOR EACH ROW
-    /// EXECUTE FUNCTION my_function();
-    /// "#;
-    ///
-    /// let dialect = PostgreSqlDialect {};
-    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
-    /// // This should fail with TableNotFoundForTrigger
-    /// assert!(GenericParserDB::from_statements(statements, "test".to_string()).is_err());
-    /// ```
-    ///
-    /// This will fail if a trigger references a non-existent function:
-    ///
-    /// ```
-    /// use sql_traits::prelude::GenericParserDB;
-    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
-    ///
-    /// let sql = r#"
-    /// CREATE TABLE my_table (id INT);
-    /// CREATE TRIGGER my_trigger
-    /// AFTER INSERT ON my_table
-    /// FOR EACH ROW
-    /// EXECUTE FUNCTION nonexistent_function();
-    /// "#;
-    ///
-    /// let dialect = PostgreSqlDialect {};
-    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
-    /// // This should fail with FunctionNotFoundForTrigger
-    /// assert!(GenericParserDB::from_statements(statements, "test".to_string()).is_err());
-    /// ```
-    ///
-    /// Supports SET TIME ZONE statements:
-    ///
-    /// ```
-    /// use sql_traits::prelude::GenericParserDB;
-    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
-    ///
-    /// let sql = r#"
-    /// SET TIME ZONE 'UTC';
-    /// CREATE TABLE users (
-    ///     id INTEGER PRIMARY KEY,
-    ///     name VARCHAR(100)
-    /// );
-    /// "#;
-    ///
-    /// let dialect = PostgreSqlDialect {};
-    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
-    /// let db = GenericParserDB::from_statements(statements, "test".to_string()).unwrap();
-    /// assert_eq!(db.catalog_name(), "test");
-    /// ```
-    ///
-    /// Panics on unsupported statements:
-    ///
-    /// ```should_panic
-    /// use sql_traits::prelude::GenericParserDB;
-    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
-    ///
-    /// let sql = "SELECT 1;";
-    /// let dialect = PostgreSqlDialect {};
-    /// let statements = Parser::parse_sql(&dialect, sql).unwrap();
-    /// // This should panic
-    /// let _ = GenericParserDB::from_statements(statements, "test".to_string());
     /// ```
     #[allow(clippy::too_many_lines)]
     pub fn from_statements(
         statements: Vec<Statement>,
         catalog_name: String,
     ) -> Result<Self, crate::errors::Error> {
-        let mut builder: ParserDBBuilder = GenericDBBuilder::new(catalog_name);
+        let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name);
 
         let any_type = DataType::Custom(
             ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
             vec![],
         );
 
-        // Helper to create a standard argument
         let arg = |data_type: DataType| {
             OperateFunctionArg { mode: None, name: None, data_type, default_expr: None }
         };
 
-        // Helper to create a VARIADIC argument
         let variadic_arg = |data_type: DataType| {
             OperateFunctionArg {
                 mode: None,
@@ -711,23 +469,19 @@ impl ParserDBInner {
         };
 
         let builtins = vec![
-            // String functions
             ("length", vec![arg(DataType::Text)], DataType::Int(None)),
             ("len", vec![arg(DataType::Text)], DataType::Int(None)),
             ("char_length", vec![arg(DataType::Text)], DataType::Int(None)),
             ("character_length", vec![arg(DataType::Text)], DataType::Int(None)),
             ("octet_length", vec![arg(DataType::Text)], DataType::Int(None)),
-            // Conditional functions
             ("coalesce", vec![variadic_arg(any_type.clone())], any_type.clone()),
             ("nullif", vec![arg(any_type.clone()), arg(any_type.clone())], any_type.clone()),
-            // Date/Time functions
             ("now", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
             ("current_timestamp", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
             ("current_date", vec![], DataType::Date),
             ("current_time", vec![], DataType::Time(None, TimezoneInfo::WithTimeZone)),
             ("localtimestamp", vec![], DataType::Timestamp(None, TimezoneInfo::None)),
             ("localtime", vec![], DataType::Time(None, TimezoneInfo::None)),
-            // UUID functions
             ("gen_random_uuid", vec![], DataType::Uuid),
             ("uuidv4", vec![], DataType::Uuid),
             ("uuidv7", vec![], DataType::Uuid),
@@ -736,13 +490,11 @@ impl ParserDBInner {
                 vec![arg(DataType::Interval { fields: None, precision: None })],
                 DataType::Uuid,
             ),
-            // Aggregate functions
             ("count", vec![arg(any_type.clone())], DataType::BigInt(None)),
             ("sum", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
             ("avg", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
             ("min", vec![arg(any_type.clone())], any_type.clone()),
             ("max", vec![arg(any_type.clone())], any_type.clone()),
-            // System functions
             ("current_user", vec![], DataType::Text),
             ("session_user", vec![], DataType::Text),
             ("user", vec![], DataType::Text),
@@ -853,13 +605,11 @@ impl ParserDBInner {
                     let create_table = Rc::new(create_table);
                     let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
 
-                    // Add all columns to metadata
                     for column in create_table.columns.clone() {
                         let column_rc = Rc::new(TableAttribute::new(create_table.clone(), column));
                         table_metadata.add_column(column_rc.clone());
                     }
 
-                    // Process column options and add columns to builder
                     for column in table_metadata.clone().column_rcs() {
                         builder = Self::process_column_options(
                             column,
@@ -870,7 +620,6 @@ impl ParserDBInner {
                         builder = builder.add_column(column.clone(), ());
                     }
 
-                    // Process table constraints
                     builder = Self::process_table_constraints(
                         &create_table.constraints,
                         &create_table,
@@ -906,7 +655,6 @@ impl ParserDBInner {
                     builder = builder.add_role(Rc::new(create_role), ());
                 }
                 Statement::Set(sqlparser::ast::Set::SetTimeZone { local, value }) => {
-                    // We currently ignore SET TIME ZONE statements.
                     if local {
                         builder = builder.timezone("LOCAL".to_string());
                     } else if let Expr::Value(ValueWithSpan {
@@ -927,7 +675,7 @@ impl ParserDBInner {
                 | Statement::CreateType { .. }
                 | Statement::CreateExtension(_)
                 | Statement::Insert(_) => {
-                    // At the moment, we ignore these CREATE statements.
+                    // Ignored statements
                 }
                 _ => {
                     unimplemented!("Unsupported statement found: {statement:?}");
@@ -937,76 +685,41 @@ impl ParserDBInner {
 
         Ok(builder.into())
     }
-}
 
-impl<D: Dialect + Default> ParserDB<D> {
-    /// Constructs a `ParserDB` from a git URL.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use sql_traits::prelude::GenericParserDB;
-    ///
-    /// let url = "https://github.com/earth-metabolome-initiative/asset-procedure-schema.git";
-    /// let db = GenericParserDB::from_git_url(url).unwrap();
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if the repository cannot be cloned or
-    /// if the SQL files cannot be parsed.
-    pub fn from_git_url(url: &str) -> Result<Self, crate::errors::Error> {
-        let dir = tempfile::tempdir()?;
-        Repository::clone(url, dir.path())?;
-        Self::try_from(dir.path())
-    }
-
-    /// Parses SQL using the dialect `D` and returns a `ParserDB<D>`.
+    /// Parses SQL using the specified dialect.
     ///
     /// # Arguments
     ///
     /// * `sql` - The SQL string to parse.
+    /// * `dialect` - The SQL dialect to use for parsing.
     ///
     /// # Errors
     ///
     /// Returns an error if the SQL cannot be parsed or if there are
-    /// validation errors (e.g., foreign key references to non-existent tables).
+    /// validation errors.
     ///
     /// # Example
     ///
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::{GenericDialect, PostgreSqlDialect};
     ///
-    /// let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
-    /// let db = GenericParserDB::parse(sql)?;
-    /// let table = db.table(None, "users").unwrap();
-    /// assert_eq!(table.table_name(), "users");
+    /// // Using GenericDialect
+    /// let db = ParserDB::parse("CREATE TABLE users (id INT PRIMARY KEY);", &GenericDialect {})?;
+    /// assert_eq!(db.table(None, "users").unwrap().table_name(), "users");
+    ///
+    /// // Using PostgreSqlDialect
+    /// let db = ParserDB::parse("CREATE ROLE admin SUPERUSER;", &PostgreSqlDialect {})?;
+    /// assert!(db.role("admin").unwrap().is_superuser());
     /// # Ok(())
     /// # }
     /// ```
-    ///
-    /// # Using a specific dialect
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use sql_traits::prelude::*;
-    ///
-    /// let sql = "CREATE ROLE admin SUPERUSER LOGIN;";
-    /// let db = ParserPG::parse(sql)?;
-    /// let role = db.role("admin").unwrap();
-    /// assert!(role.is_superuser());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn parse(sql: &str) -> Result<Self, crate::errors::Error> {
-        let dialect = D::default();
-        let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
+    pub fn parse(sql: &str, dialect: &impl Dialect) -> Result<Self, crate::errors::Error> {
+        let mut parser = Parser::new(dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
-        let mut db = ParserDBInner::from_statements(statements, "unknown_catalog".to_string())?;
-        // Try to extract documentation - this may fail with non-GenericDialect SQL
-        // since SqlDoc uses GenericDialect internally.
-        // TODO: @Alex - Improve SqlDoc to support other dialects.
+        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+
         if let Ok(documentation) = SqlDoc::builder_from_str(sql).build() {
             for (table, metadata) in db.tables_metadata_mut() {
                 if let Ok(table_doc) = documentation.table(table.table_name(), table.table_schema())
@@ -1015,56 +728,94 @@ impl<D: Dialect + Default> ParserDB<D> {
                 }
             }
         }
-        Ok(Self::new(db))
+        Ok(db)
     }
-}
 
-impl<D: Dialect + Default> TryFrom<&str> for ParserDB<D> {
-    type Error = crate::errors::Error;
-
-    fn try_from(sql: &str) -> Result<Self, Self::Error> {
-        Self::parse(sql)
+    /// Constructs a `ParserDB` from a git URL.
+    ///
+    /// Uses `GenericDialect` for parsing.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use sql_traits::prelude::ParserDB;
+    ///
+    /// let url = "https://github.com/earth-metabolome-initiative/asset-procedure-schema.git";
+    /// let db = ParserDB::from_git_url(url).unwrap();
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repository cannot be cloned or if the SQL files
+    /// cannot be parsed.
+    pub fn from_git_url(url: &str) -> Result<Self, crate::errors::Error> {
+        let dir = tempfile::tempdir()?;
+        Repository::clone(url, dir.path())?;
+        Self::from_path(dir.path(), &GenericDialect {})
     }
-}
 
-fn search_sql_documents(path: &Path) -> Vec<std::path::PathBuf> {
-    let mut sql_files = Vec::new();
-    if path.is_dir() {
-        for entry in std::fs::read_dir(path).expect("Failed to read directory") {
-            let entry = entry.expect("Failed to read directory entry");
-            let path = entry.path();
-            if path.is_dir() {
-                sql_files.extend(search_sql_documents(&path));
-            } else if let Some(extension) = path.extension()
-                && extension == "sql"
-                && path.file_name().unwrap() != "down.sql"
-            {
-                sql_files.push(path);
-            }
-        }
-    } else if let Some(extension) = path.extension()
-        && extension == "sql"
-    {
-        sql_files.push(path.to_path_buf());
+    /// Constructs a `ParserDB` from a git URL using a specific dialect.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repository cannot be cloned or if the SQL files
+    /// cannot be parsed.
+    pub fn from_git_url_with_dialect(
+        url: &str,
+        dialect: &impl Dialect,
+    ) -> Result<Self, crate::errors::Error> {
+        let dir = tempfile::tempdir()?;
+        Repository::clone(url, dir.path())?;
+        Self::from_path(dir.path(), dialect)
     }
-    sql_files
-}
 
-impl<D: Dialect + Default> TryFrom<&Path> for ParserDB<D> {
-    type Error = crate::errors::Error;
-
-    fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        Self::try_from(&[path] as &[&Path])
+    /// Parses SQL from a file or directory path.
+    ///
+    /// If the path is a directory, all `.sql` files (except `down.sql`) will be
+    /// parsed recursively.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to a SQL file or directory containing SQL files.
+    /// * `dialect` - The SQL dialect to use for parsing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path doesn't exist, files can't be read, or
+    /// parsing fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::from_path(Path::new("migrations/"), &PostgreSqlDialect {}).unwrap();
+    /// ```
+    pub fn from_path(path: &Path, dialect: &impl Dialect) -> Result<Self, crate::errors::Error> {
+        Self::from_paths(&[path], dialect)
     }
-}
 
-impl<D: Dialect + Default> TryFrom<&[&Path]> for ParserDB<D> {
-    type Error = crate::errors::Error;
-
-    fn try_from(paths: &[&Path]) -> Result<Self, Self::Error> {
-        let dialect = D::default();
+    /// Parses SQL from multiple file or directory paths.
+    ///
+    /// # Arguments
+    ///
+    /// * `paths` - A slice of paths to SQL files or directories.
+    /// * `dialect` - The SQL dialect to use for parsing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any path doesn't exist, files can't be read, or
+    /// parsing fails.
+    pub fn from_paths(
+        paths: &[&Path],
+        dialect: &impl Dialect,
+    ) -> Result<Self, crate::errors::Error> {
         let mut statements = Vec::new();
         let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
+
         for path in paths {
             if !path.exists() {
                 return Err(ParserError::TokenizerError(format!(
@@ -1087,7 +838,7 @@ impl<D: Dialect + Default> TryFrom<&[&Path]> for ParserDB<D> {
                         }
                     })?;
 
-                let mut parser = Parser::new(&dialect).try_with_sql(&sql_content).map_err(|e| {
+                let mut parser = Parser::new(dialect).try_with_sql(&sql_content).map_err(|e| {
                     crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
                 })?;
                 statements.extend(parser.parse_statements().map_err(|e| {
@@ -1096,9 +847,9 @@ impl<D: Dialect + Default> TryFrom<&[&Path]> for ParserDB<D> {
                 sql_str.push((sql_content, sql_path));
             }
         }
-        let mut db = ParserDBInner::from_statements(statements, "unknown_catalog".to_string())?;
-        // Try to extract documentation - this may fail with non-GenericDialect SQL
-        // since SqlDoc uses GenericDialect internally.
+
+        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+
         if let Ok(documentation) = SqlDoc::builder_from_strs_with_paths(&sql_str).build() {
             for (table, metadata) in db.tables_metadata_mut() {
                 if let Ok(table_doc) = documentation.table(table.table_name(), table.table_schema())
@@ -1107,6 +858,29 @@ impl<D: Dialect + Default> TryFrom<&[&Path]> for ParserDB<D> {
                 }
             }
         }
-        Ok(Self::new(db))
+        Ok(db)
     }
+}
+
+fn search_sql_documents(path: &Path) -> Vec<PathBuf> {
+    let mut sql_files = Vec::new();
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path).expect("Failed to read directory") {
+            let entry = entry.expect("Failed to read directory entry");
+            let path = entry.path();
+            if path.is_dir() {
+                sql_files.extend(search_sql_documents(&path));
+            } else if let Some(extension) = path.extension()
+                && extension == "sql"
+                && path.file_name().unwrap() != "down.sql"
+            {
+                sql_files.push(path);
+            }
+        }
+    } else if let Some(extension) = path.extension()
+        && extension == "sql"
+    {
+        sql_files.push(path.to_path_buf());
+    }
+    sql_files
 }

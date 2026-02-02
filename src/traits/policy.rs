@@ -28,11 +28,12 @@ pub trait PolicyLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -50,11 +51,12 @@ pub trait PolicyLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -80,7 +82,7 @@ pub trait PolicyLike:
     /// CREATE POLICY select_policy ON my_table FOR SELECT USING (true);
     /// CREATE POLICY all_policy ON my_table USING (true);
     /// "#;
-    /// let db = GenericParserDB::parse(sql)?;
+    /// let db = ParserDB::parse(sql, &GenericDialect {})?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
     /// let select_policy = table.policies(&db).find(|p| p.name() == "select_policy").unwrap();
@@ -107,7 +109,7 @@ pub trait PolicyLike:
     /// CREATE POLICY my_policy ON my_table TO user1, user2 USING (true);
     /// CREATE POLICY public_policy ON my_table TO PUBLIC USING (true);
     /// "#;
-    /// let db = GenericParserDB::parse(sql)?;
+    /// let db = ParserDB::parse(sql, &GenericDialect {})?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
     /// let policy = table.policies(&db).find(|p| p.name() == "my_policy").unwrap();
@@ -131,11 +133,12 @@ pub trait PolicyLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -155,12 +158,13 @@ pub trait PolicyLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE FUNCTION my_func() RETURNS BOOLEAN AS 'SELECT true';
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (my_func());
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -183,11 +187,12 @@ pub trait PolicyLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table WITH CHECK (id < 10);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -207,12 +212,13 @@ pub trait PolicyLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE FUNCTION check_func() RETURNS BOOLEAN AS 'SELECT true';
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table WITH CHECK (check_func());
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -287,11 +293,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use sqlparser::ast::CreatePolicyCommand;
+    use sqlparser::{ast::CreatePolicyCommand, dialect::GenericDialect};
 
     use super::*;
     use crate::{
-        structs::GenericParserDB,
+        structs::ParserDB,
         traits::{DatabaseLike, FunctionLike, TableLike},
     };
 
@@ -307,7 +313,7 @@ mod tests {
                 USING (id > 0 AND my_func())
                 WITH CHECK (id < 10 AND check_func());
         ";
-        let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
+        let db = ParserDB::parse(sql, &GenericDialect {}).expect("Failed to parse SQL");
         let table = db.table(None, "my_table").expect("Table not found");
         let policy = table.policies(&db).next().expect("Policy not found");
 

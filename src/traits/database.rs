@@ -44,7 +44,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
+    /// let db = ParserDB::parse("CREATE TABLE t (id INT);", &GenericDialect {})?;
     /// assert_eq!(db.catalog_name(), "unknown_catalog");
     /// # Ok(())
     /// # }
@@ -59,11 +59,12 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE t1 (id INT);
     /// CREATE TABLE t2 (id INT);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// assert_eq!(db.number_of_tables(), 2);
     /// # Ok(())
@@ -79,10 +80,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse("SET TIME ZONE 'UTC';")?;
+    /// let db = ParserDB::parse("SET TIME ZONE 'UTC';", &GenericDialect {})?;
     /// assert_eq!(db.timezone(), Some("UTC"));
     ///
-    /// let db_no_tz = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
+    /// let db_no_tz = ParserDB::parse("CREATE TABLE t (id INT);", &GenericDialect {})?;
     /// assert_eq!(db_no_tz.timezone(), None);
     /// # Ok(())
     /// # }
@@ -97,12 +98,13 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT);
     /// CREATE TABLE table2 (name TEXT);
     /// CREATE TABLE table3 (score DECIMAL);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table_names: Vec<&str> = db.tables().map(|t| t.table_name()).collect();
     /// assert_eq!(table_names, vec!["table1", "table2", "table3"]);
@@ -119,12 +121,13 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END;' LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let triggers: Vec<&str> = db.triggers().map(|t| t.name()).collect();
     /// assert_eq!(triggers, vec!["my_trigger"]);
@@ -141,17 +144,19 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db_with_tables = GenericParserDB::parse(
+    /// let db_with_tables = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// assert!(db_with_tables.has_tables());
     ///
-    /// let db_without_tables = GenericParserDB::parse(
+    /// let db_without_tables = ParserDB::parse(
     ///     r#"
     /// -- No tables defined
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// assert!(!db_without_tables.has_tables());
     /// # Ok(())
@@ -173,13 +178,14 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE base_table (id INT PRIMARY KEY);
     /// CREATE TABLE extended_table1 (id INT PRIMARY KEY REFERENCES base_table(id));
     /// CREATE TABLE extended_table2 (id INT PRIMARY KEY REFERENCES base_table(id));
     /// CREATE TABLE independent_table (id INT PRIMARY KEY);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     ///
     /// let root_table_names: Vec<&str> = db.root_tables().map(|t| t.table_name()).collect();
@@ -200,11 +206,12 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT, name TEXT);
     /// CREATE TABLE table2 (score DECIMAL, level INT, active BOOLEAN);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// assert_eq!(db.maximum_number_of_columns(), 3);
     /// # Ok(())
@@ -223,7 +230,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE users (
     ///    id SERIAL PRIMARY KEY,
@@ -239,6 +246,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// extra_info TEXT
     /// );
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let user_table = db.table(None, "users").unwrap();
     /// let comment_table = db.table(None, "comments").unwrap();
@@ -304,11 +312,12 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT "Hello, " || name;';
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let function_names: Vec<&str> = db.functions().map(|f| f.name()).collect();
     ///
@@ -340,11 +349,12 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table_with_schema = db.table(Some("my_schema"), "my_table_with_schema").unwrap();
     /// assert_eq!(table_with_schema.table_name(), "my_table_with_schema");
@@ -371,12 +381,13 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT);
     /// CREATE TABLE table2 (name TEXT);
     /// CREATE TABLE table3 (score DECIMAL);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let table2 = db.table(None, "table2").expect("Table 'table2' should exist");
     /// let table2_id = db.table_id(table2).expect("Table ID for 'table2' should exist");
@@ -398,10 +409,11 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let add_one = db.function("add_one").expect("Function 'add_one' should exist");
     /// assert_eq!(add_one.name(), "add_one");
@@ -420,11 +432,12 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// CREATE POLICY my_policy ON t USING (id > 0);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// let policies: Vec<&str> = db.policies().map(|p| p.name()).collect();
     /// assert_eq!(policies, vec!["my_policy"]);
@@ -441,18 +454,20 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db_with_policies = GenericParserDB::parse(
+    /// let db_with_policies = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// CREATE POLICY my_policy ON t USING (id > 0);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// assert!(db_with_policies.has_policies());
     ///
-    /// let db_without_policies = GenericParserDB::parse(
+    /// let db_without_policies = ParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     /// assert!(!db_without_policies.has_policies());
     /// # Ok(())
@@ -471,11 +486,12 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = GenericParserDB::parse(
+    /// let db = ParserDB::parse(
     ///     r#"
     /// CREATE ROLE admin;
     /// CREATE ROLE user1;
     /// "#,
+    ///     &GenericDialect,
     /// )?;
     ///
     /// let roles: Vec<_> = db.roles().collect();
@@ -492,8 +508,9 @@ pub trait DatabaseLike: Clone + Debug {
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserPG::parse("CREATE ROLE admin SUPERUSER;")?;
+    /// let db = ParserDB::parse("CREATE ROLE admin SUPERUSER;", &PostgreSqlDialect {})?;
     ///
     /// let admin = db.role("admin");
     /// assert!(admin.is_some());
@@ -516,10 +533,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db_with_roles = GenericParserDB::parse("CREATE ROLE admin;")?;
+    /// let db_with_roles = ParserDB::parse("CREATE ROLE admin;", &GenericDialect {})?;
     /// assert!(db_with_roles.has_roles());
     ///
-    /// let db_without_roles = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
+    /// let db_without_roles = ParserDB::parse("CREATE TABLE t (id INT);", &GenericDialect {})?;
     /// assert!(!db_without_roles.has_roles());
     /// # Ok(())
     /// # }
