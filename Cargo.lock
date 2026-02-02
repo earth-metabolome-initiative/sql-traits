@@ -528,16 +528,18 @@ dependencies = [
 
 [[package]]
 name = "sql_docs"
-version = "1.0.11"
-source = "git+https://github.com/LucaCappelletti94/sql-docs?branch=main#db34474b99836bb9291a4bebc5d0633cb1af64c7"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86e7c90e6971089172f376550b7675ecd4313a52922ff72efa4de0636810f67b"
 dependencies = [
- "sqlparser 0.60.0 (git+https://github.com/apache/datafusion-sqlparser-rs?branch=main)",
+ "sqlparser 0.60.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "sqlparser"
 version = "0.60.0"
-source = "git+https://github.com/LucaCappelletti94/sqlparser-rs?branch=externalize-statements#cd2d7f035703cb81af1d7864c2f6f82f105f31d9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "505aa16b045c4c1375bf5f125cce3813d0176325bfe9ffc4a903f423de7774ff"
 dependencies = [
  "log",
  "recursive",
@@ -546,7 +548,7 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.60.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#c8b7f7cf4281cdfff3e08e9827928662b8be8095"
+source = "git+https://github.com/LucaCappelletti94/sqlparser-rs?branch=externalize-statements#cd2d7f035703cb81af1d7864c2f6f82f105f31d9"
 dependencies = [
  "log",
  "recursive",

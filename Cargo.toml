@@ -16,7 +16,8 @@ geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geome
 thiserror = "2.0"
 git2 = "0.20.3"
 tempfile = "3.10"
-sql_docs = { version = "1.0.11", git = "https://github.com/LucaCappelletti94/sql-docs", branch = "main" }
+sql_docs = "1.1.0"
+
 
 [lints.rust]
 missing_docs = "forbid"
