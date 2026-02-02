@@ -28,7 +28,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -57,7 +57,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -91,7 +91,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -127,7 +127,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -162,7 +162,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE host_table (
@@ -201,7 +201,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -255,7 +255,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE parent_table (id INT, FOREIGN KEY (id) REFERENCES grandparent_table(id));
@@ -309,7 +309,7 @@ pub trait ForeignKeyLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE host_table (
@@ -344,7 +344,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE single_fk_table (
@@ -382,7 +382,7 @@ pub trait ForeignKeyLike:
     /// use sql_traits::prelude::*;
     /// use sqlparser::ast::ConstraintReferenceMatchKind;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -407,7 +407,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE full_match_table (
@@ -449,7 +449,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE nullable_host_table (
@@ -503,7 +503,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE nullable_fk_table (
@@ -559,7 +559,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE host_table (
@@ -599,7 +599,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -653,7 +653,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE self_ref_table (
     ///     id INT PRIMARY KEY,
@@ -696,7 +696,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent (id INT PRIMARY KEY);
     /// CREATE TABLE parent (id INT PRIMARY KEY, FOREIGN KEY (id) REFERENCES grandparent(id));
@@ -756,7 +756,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE pk_ref_table (
@@ -811,7 +811,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE referenced_table_with_unique (id INT PRIMARY KEY, name TEXT, UNIQUE(name), UNIQUE(id, name));
@@ -876,7 +876,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE pk_host_table (
@@ -929,7 +929,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE composite_pk_table (
@@ -974,7 +974,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE full_ref_table (
@@ -1022,7 +1022,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE extension_table (
@@ -1077,7 +1077,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1138,7 +1138,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT, UNIQUE(id, name));
     /// CREATE TABLE host_table (

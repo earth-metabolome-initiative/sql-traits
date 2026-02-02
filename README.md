@@ -33,7 +33,7 @@ use sql_traits::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse SQL DDL into a database model
-    let db = ParserDB::try_from(
+    let db = GenericParserDB::parse(
         r#"
         CREATE TABLE users (
             id INT PRIMARY KEY,

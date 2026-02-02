@@ -29,7 +29,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE mytable (id INT);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE mytable (id INT);")?;
     /// let table = db.table(None, "mytable").unwrap();
     /// assert_eq!(table.table_name(), "mytable");
     /// # Ok(())
@@ -45,7 +45,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE TABLE MyTable (id INT);
@@ -75,7 +75,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT, name TEXT);
     /// CREATE FUNCTION my_func() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -111,7 +111,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     "
     ///     CREATE TABLE my_table (id INT);
     ///     -- the next table to create
@@ -136,7 +136,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);"#,
     /// )?;
@@ -161,7 +161,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from("CREATE TABLE my_table (id INT, name TEXT);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let column_names: Vec<&str> = table.columns(&db).map(|col| col.column_name()).collect();
     /// assert_eq!(column_names, vec!["id", "name"]);
@@ -188,7 +188,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_other_table (id INT PRIMARY KEY, name TEXT);
@@ -220,7 +220,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert_eq!(table.number_of_columns(&db), 3);
     /// # Ok(())
@@ -243,7 +243,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from("CREATE TABLE my_table (id INT, name TEXT);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
     /// assert_eq!(id_column.column_name(), "id");
@@ -278,7 +278,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT, name TEXT);
     /// CREATE TABLE table2 (id INT, description TEXT);
@@ -313,7 +313,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
@@ -358,7 +358,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE composite_pk (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
@@ -398,7 +398,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_no_gen_pk_table (id INT PRIMARY KEY, name TEXT);
@@ -429,7 +429,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 BIGSERIAL, name TEXT, PRIMARY KEY (id1, id2));
@@ -462,7 +462,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// "#,
@@ -494,7 +494,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_no_pk_table (id INT, name TEXT);
@@ -524,7 +524,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, age INT);
     /// "#,
@@ -561,7 +561,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_pk_only_table (id INT PRIMARY KEY);
@@ -589,7 +589,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
@@ -619,7 +619,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT, CHECK (length(name) > 0));
     /// "#,
@@ -651,7 +651,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT CHECK (TRUE), name TEXT, CHECK (length(name) > 0));
     /// "#,
@@ -687,7 +687,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table_with_cc (id INT CHECK (id > 0), name TEXT);
     /// CREATE TABLE my_table_without_cc (id INT, name TEXT);
@@ -718,7 +718,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table_with_non_tautological_cc (id INT CHECK (id > 0), name TEXT);
     /// CREATE TABLE my_table_with_only_tautological_cc (id INT CHECK (TRUE), name TEXT);
@@ -751,7 +751,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, age INT CHECK (age > 0));
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id), salary INT);
@@ -789,7 +789,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT, name TEXT);
     /// CREATE INDEX my_index ON my_table (name);
@@ -820,7 +820,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT UNIQUE, name TEXT, UNIQUE (name));
     /// "#,
@@ -851,7 +851,7 @@ pub trait TableLike:
     /// ```
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT, name TEXT, FOREIGN KEY (id) REFERENCES referenced_table(id));
@@ -882,7 +882,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table_with_fk (id INT, name TEXT, FOREIGN KEY (id) REFERENCES referenced_table(id));
@@ -915,7 +915,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, parent_id INT REFERENCES parent_table(id));
@@ -949,7 +949,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
@@ -1000,7 +1000,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table1 (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE referenced_table2 (id INT PRIMARY KEY, name TEXT);
@@ -1047,7 +1047,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1088,7 +1088,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT PRIMARY KEY REFERENCES referenced_table(id), name TEXT);
@@ -1123,7 +1123,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE extended_table (id INT PRIMARY KEY);
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
@@ -1165,7 +1165,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
@@ -1210,7 +1210,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY);
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
@@ -1248,7 +1248,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY);
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
@@ -1280,7 +1280,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE father_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
@@ -1340,7 +1340,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE father_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
@@ -1390,7 +1390,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1441,7 +1441,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1501,7 +1501,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT, name TEXT,
@@ -1554,7 +1554,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
@@ -1587,7 +1587,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
@@ -1622,7 +1622,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1677,7 +1677,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT UNIQUE, name TEXT,
@@ -1712,7 +1712,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1754,7 +1754,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT UNIQUE, name TEXT,
@@ -1783,7 +1783,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1819,7 +1819,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1868,7 +1868,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT, ancestor_id INT REFERENCES grandparent_table(id));
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1913,7 +1913,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1953,7 +1953,7 @@ pub trait TableLike:
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
@@ -1985,7 +1985,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -2064,7 +2064,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE root (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE spouse_table (
@@ -2126,7 +2126,7 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);
     ///      CREATE TABLE no_snake_prefix_table (user_id INT, username TEXT);",
     /// )?;
@@ -2161,7 +2161,7 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);
     ///      CREATE TABLE other_table (id INT, name TEXT);
     ///      CREATE TABLE another_table (user_id INT, username TEXT, email TEXT);",
@@ -2200,7 +2200,7 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);
     ///      CREATE TABLE other_table (userid INT, group_id INT, id_team INT);",
     /// )?;
@@ -2235,7 +2235,7 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);
     ///      CREATE TABLE other_table (user_id INT, groupid INT, teamid INT);
     ///      CREATE TABLE another_table (id INT, name TEXT);",
@@ -2272,7 +2272,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// ALTER TABLE my_table ENABLE ROW LEVEL SECURITY;
@@ -2305,7 +2305,7 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     /// use sqlparser::ast::CreatePolicyCommand;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY select_policy ON my_table FOR SELECT USING (id > 0);
@@ -2450,7 +2450,7 @@ mod tests {
                     UNIQUE(name)
                 );
             ";
-            let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+            let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
             let table = db.table(None, "users").expect("Table not found");
 
             let table_ref = &table;
@@ -2487,7 +2487,7 @@ mod tests {
                 CREATE TABLE parent (id INT PRIMARY KEY);
                 CREATE TABLE child (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));
             ";
-            let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+            let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
             let parent = db.table(None, "parent").expect("Parent not found");
             let child = db.table(None, "child").expect("Child not found");
 

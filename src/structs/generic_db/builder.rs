@@ -6,12 +6,12 @@ use crate::{
     structs::GenericDB,
     traits::{
         CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike,
-        TableLike, TriggerLike, UniqueIndexLike,
+        RoleLike, TableLike, TriggerLike, UniqueIndexLike,
     },
 };
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>
+pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -22,6 +22,7 @@ where
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
     P: PolicyLike,
+    R: RoleLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -43,11 +44,13 @@ where
     triggers: Vec<(Rc<Tr>, Tr::Meta)>,
     /// List of policies created in the database.
     policies: Vec<(Rc<P>, P::Meta)>,
-    /// Phantom data for check constraints.
+    /// List of check constraints in the database.
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
+    /// List of roles in the database.
+    roles: Vec<(Rc<R>, R::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -58,6 +61,7 @@ where
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
     P: PolicyLike,
+    R: RoleLike,
 {
     /// Returns a mutable reference to the tables list.
     pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Rc<T>, T::Meta)> {
@@ -79,11 +83,12 @@ where
             triggers: Vec::new(),
             policies: Vec::new(),
             check_constraints: Vec::new(),
+            roles: Vec::new(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -94,6 +99,7 @@ where
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
     P: PolicyLike,
+    R: RoleLike,
 {
     /// Sets the timezone for the database.
     #[must_use]
@@ -245,10 +251,26 @@ where
         self.check_constraints.push((constraint, metadata));
         self
     }
+
+    /// Adds a role with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_role(mut self, role: Rc<R>, metadata: R::Meta) -> Self {
+        self.roles.push((role, metadata));
+        self
+    }
+
+    /// Adds multiple roles with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_roles(mut self, roles: impl IntoIterator<Item = (Rc<R>, R::Meta)>) -> Self {
+        self.roles.extend(roles);
+        self
+    }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P> From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>>
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R> From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>>
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -259,8 +281,9 @@ where
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
     P: PolicyLike,
+    R: RoleLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P>) -> Self {
+    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -278,6 +301,7 @@ where
         builder.triggers.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+        builder.roles.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
 
         GenericDB {
             catalog_name,
@@ -291,6 +315,7 @@ where
             triggers: builder.triggers,
             policies: builder.policies,
             check_constraints: builder.check_constraints,
+            roles: builder.roles,
         }
     }
 }

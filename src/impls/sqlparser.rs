@@ -6,6 +6,7 @@ mod column_def;
 mod create_function;
 mod create_index;
 mod create_policy;
+mod create_role;
 mod create_table;
 mod create_trigger;
 mod foreign_key_constraint;

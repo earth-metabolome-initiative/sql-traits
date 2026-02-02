@@ -11,7 +11,7 @@ keywords = ["sql", "traits", "parser", "geometry"]
 categories = ["database", "parsing", "geometry"]
 
 [dependencies]
-sqlparser = { git = "https://github.com/LucaCappelletti94/sqlparser-rs", branch = "externalize-statements" }
+sqlparser = { git = "https://github.com/LucaCappelletti94/sqlparser-rs", branch = "dialect-derives" }
 geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geometric-traits", branch = "main" }
 thiserror = "2.0"
 git2 = "0.20.3"

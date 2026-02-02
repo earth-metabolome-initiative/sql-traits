@@ -7,15 +7,15 @@ mod sqlparser;
 use std::{fmt::Debug, rc::Rc};
 
 pub use builder::GenericDBBuilder;
-pub use sqlparser::ParserDB;
+pub use sqlparser::{GenericParserDB, ParserDB, ParserDBInner, ParserPG};
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike,
     TableLike, TriggerLike, UniqueIndexLike,
 };
 
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
+pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -26,6 +26,7 @@ where
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
     P: PolicyLike,
+    R: RoleLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -47,11 +48,13 @@ where
     triggers: Vec<(Rc<Tr>, Tr::Meta)>,
     /// List of policies created in the database.
     policies: Vec<(Rc<P>, P::Meta)>,
-    /// Phantom data for check constraints.
+    /// List of check constraints in the database.
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
+    /// List of roles in the database.
+    roles: Vec<(Rc<R>, R::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P> Debug for GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R> Debug for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -62,6 +65,7 @@ where
     Ch: CheckConstraintLike,
     P: PolicyLike,
     Tr: TriggerLike,
+    R: RoleLike,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericDB")
@@ -76,11 +80,12 @@ where
             .field("triggers", &self.triggers.len())
             .field("policies", &self.policies.len())
             .field("check_constraints", &self.check_constraints.len())
+            .field("roles", &self.roles.len())
             .finish()
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P> Clone for GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R> Clone for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -91,6 +96,7 @@ where
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
     P: PolicyLike,
+    R: RoleLike,
 {
     fn clone(&self) -> Self {
         Self {
@@ -105,11 +111,12 @@ where
             triggers: self.triggers.clone(),
             policies: self.policies.clone(),
             check_constraints: self.check_constraints.clone(),
+            roles: self.roles.clone(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P> GenericDB<T, C, I, U, F, Func, Ch, Tr, P>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R> GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
 where
     T: TableLike,
     C: ColumnLike,
@@ -120,10 +127,11 @@ where
     Ch: CheckConstraintLike,
     Tr: TriggerLike,
     P: PolicyLike,
+    R: RoleLike,
 {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
-    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P> {
+    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R> {
         GenericDBBuilder::new(catalog_name)
     }
 
@@ -136,7 +144,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     ///     -- This is a test table
     ///     CREATE TABLE test_table (id INT);
@@ -175,7 +183,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
     /// let table = db.table(None, "t").unwrap();
     /// let column = table.column("id", &db).unwrap();
     /// // The metadata for columns in ParserDB is currently unit ()
@@ -199,7 +207,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE t (id INT UNIQUE);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE t (id INT UNIQUE);")?;
     /// let table = db.table(None, "t").unwrap();
     /// let index = table.unique_indices(&db).next().unwrap();
     /// // The metadata for unique indices in ParserDB is currently unit ()
@@ -224,7 +232,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE t (id INT CHECK (id > 0));")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE t (id INT CHECK (id > 0));")?;
     /// let table = db.table(None, "t").unwrap();
     /// let check = table.check_constraints(&db).next().unwrap();
     /// assert!(db.check_constraint_metadata(check).is_some());
@@ -247,7 +255,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     ///     CREATE TABLE parent (id INT PRIMARY KEY);
     ///     CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
@@ -287,7 +295,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
+    /// let db = GenericParserDB::parse("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
     /// let func = db.function("my_func").unwrap();
     /// assert_eq!(func.name(), "my_func");
     /// assert!(db.function("non_existent").is_none());
@@ -315,7 +323,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
+    /// let db = GenericParserDB::parse("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
     /// let func = db.function("my_func").unwrap();
     /// assert!(db.function_metadata(func).is_some());
     /// # Ok(())
@@ -340,7 +348,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     ///     CREATE TABLE t (id INT);
     ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
@@ -374,7 +382,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     ///     CREATE TABLE t (id INT);
     ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
@@ -402,6 +410,61 @@ where
             .map(|index| &self.policies[index].1)
     }
 
+    /// Returns a reference of the role by name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the role to retrieve.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserPG::parse("CREATE ROLE admin SUPERUSER;")?;
+    /// let role = db.role("admin").unwrap();
+    /// assert_eq!(role.name(), "admin");
+    /// assert!(role.is_superuser());
+    /// assert!(db.role("non_existent").is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn role(&self, name: &str) -> Option<&R> {
+        self.roles
+            .binary_search_by(|(r, _)| r.name().cmp(name))
+            .ok()
+            .map(|index| self.roles[index].0.as_ref())
+    }
+
+    /// Returns a reference to the metadata of the specified role, if it
+    /// exists in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - The role to retrieve metadata for.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = GenericParserDB::parse("CREATE ROLE admin;")?;
+    /// let role = db.role("admin").unwrap();
+    /// assert!(db.role_metadata(role).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn role_metadata(&self, role: &R) -> Option<&R::Meta> {
+        self.roles
+            .binary_search_by(|(r, _)| r.name().cmp(role.name()))
+            .ok()
+            .map(|index| &self.roles[index].1)
+    }
+
     /// Returns a reference to the catalog name.
     ///
     /// # Example
@@ -410,11 +473,8 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
     /// assert_eq!(db.catalog_name(), "unknown_catalog");
-    ///
-    /// let db_custom: ParserDB = ParserDB::new("my_catalog".to_string()).into();
-    /// assert_eq!(db_custom.catalog_name(), "my_catalog");
     /// # Ok(())
     /// # }
     /// ```
@@ -432,7 +492,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     "
     /// -- table b
     /// CREATE TABLE b (id INT);
@@ -461,7 +521,7 @@ where
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let mut db = ParserDB::try_from(
+    /// let mut db = GenericParserDB::parse(
     ///     r#"
     ///     -- original doc a
     ///     CREATE TABLE a (id INT);

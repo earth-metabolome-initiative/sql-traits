@@ -22,6 +22,8 @@ pub mod trigger;
 pub use trigger::TriggerLike;
 pub mod policy;
 pub use policy::PolicyLike;
+pub mod role;
+pub use role::RoleLike;
 
 /// Trait for associating a metadata struct to a given type.
 pub trait Metadata {

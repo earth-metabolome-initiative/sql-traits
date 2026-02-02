@@ -267,10 +267,10 @@ impl Iterator for MaintenanceBodyIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{structs::ParserDB, traits::DatabaseLike};
+    use crate::{structs::GenericParserDB, traits::DatabaseLike};
 
     fn parse(schema_sql: &str, body: &str) -> Result<usize, ()> {
-        let db = ParserDB::try_from(schema_sql).expect("Failed to create DB from schema");
+        let db = GenericParserDB::parse(schema_sql).expect("Failed to create DB from schema");
         let table = db.table(None, "t").expect("Failed to find table 't'");
         parse_maintenance_body(body, &table, &db).map(|v| v.len())
     }

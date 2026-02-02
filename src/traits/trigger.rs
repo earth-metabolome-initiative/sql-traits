@@ -20,7 +20,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -55,7 +55,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
-    /// let db = ParserDB::from_statements(statements, "test".to_string())?;
+    /// let db = GenericParserDB::from_statements(statements, "test".to_string())?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert_eq!(trigger.name(), "my_trigger");
     /// # Ok(())
@@ -76,7 +76,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -112,7 +112,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
-    /// let db = ParserDB::from_statements(statements, "test".to_string())?;
+    /// let db = GenericParserDB::from_statements(statements, "test".to_string())?;
     /// let trigger = db.triggers().next().unwrap();
     /// let table = trigger.table(&db);
     /// assert_eq!(table.table_name(), "my_table");
@@ -131,7 +131,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -169,7 +169,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
-    /// let db = ParserDB::from_statements(statements, "test".to_string())?;
+    /// let db = GenericParserDB::from_statements(statements, "test".to_string())?;
     /// let trigger = db.triggers().next().unwrap();
     /// let events = trigger.events();
     /// assert_eq!(events.len(), 1);
@@ -187,7 +187,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -222,7 +222,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
-    /// let db = ParserDB::from_statements(statements, "test".to_string())?;
+    /// let db = GenericParserDB::from_statements(statements, "test".to_string())?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert!(matches!(trigger.timing(), Some(sqlparser::ast::TriggerPeriod::Before)));
     /// # Ok(())
@@ -238,7 +238,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -276,7 +276,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
-    /// let db = ParserDB::from_statements(statements, "test".to_string())?;
+    /// let db = GenericParserDB::from_statements(statements, "test".to_string())?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert!(matches!(
     ///     trigger.orientation(),
@@ -300,7 +300,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -336,7 +336,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
-    /// let db = ParserDB::from_statements(statements, "test".to_string())?;
+    /// let db = GenericParserDB::from_statements(statements, "test".to_string())?;
     /// let trigger = db.triggers().next().unwrap();
     /// // SQLite triggers do not call a function object.
     /// assert!(trigger.function(&db).is_none());
@@ -363,7 +363,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// // Example of a maintenance trigger
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE brands (id INT, edited_at TIMESTAMP);
     /// CREATE OR REPLACE FUNCTION update_brands_edited_at() RETURNS TRIGGER AS $$
@@ -383,7 +383,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// assert!(trigger.is_maintenance_trigger(&db));
     ///
     /// // Example of a non-maintenance trigger (extra logic)
-    /// let db2 = ParserDB::try_from(
+    /// let db2 = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE brands (id INT);
     /// CREATE OR REPLACE FUNCTION complex_trigger() RETURNS TRIGGER AS $$
@@ -428,7 +428,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE brands (id INT, edited_at TIMESTAMP, name TEXT);
     /// CREATE OR REPLACE FUNCTION update_stuff() RETURNS TRIGGER AS $$
@@ -528,7 +528,7 @@ impl<T: TriggerLike> TriggerLike for &T {
 mod tests {
     use super::*;
     use crate::{
-        structs::ParserDB,
+        structs::GenericParserDB,
         traits::{ColumnLike, DatabaseLike, FunctionLike, TableLike},
     };
 
@@ -548,7 +548,7 @@ mod tests {
             EXECUTE FUNCTION update_timestamp();
         ";
 
-        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
         let trigger = db.triggers().next().expect("No trigger found");
 
         // Use reference to trigger
@@ -575,7 +575,7 @@ mod tests {
 
         assert!(trigger_ref.is_maintenance_trigger(&db));
 
-        let assignments: Vec<_> = trigger_ref.maintenance_assignments(&db).collect();
+        let assignments = trigger_ref.maintenance_assignments(&db).collect::<Vec<_>>();
         assert_eq!(assignments.len(), 1);
 
         let (col, expr) = &assignments[0];
@@ -602,7 +602,8 @@ mod tests {
         };
 
         // Create a separate DB that doesn't have the function
-        let db = ParserDB::try_from("CREATE TABLE users (id INT);").expect("Failed to create DB");
+        let db =
+            GenericParserDB::parse("CREATE TABLE users (id INT);").expect("Failed to create DB");
 
         // function() should return None because "non_existent_function" is not in db
         assert!(trigger.function(&db).is_none());
@@ -625,7 +626,7 @@ mod tests {
             EXECUTE FUNCTION atomic_calc();
         ";
 
-        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
         let trigger = db.triggers().next().expect("No trigger found");
         let trigger_ref = &trigger;
 

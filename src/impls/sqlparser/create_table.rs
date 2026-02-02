@@ -5,7 +5,7 @@ use ::sqlparser::ast::{CreateTable, Ident};
 use sql_docs::docs::TableDoc;
 
 use crate::{
-    structs::{TableMetadata, generic_db::ParserDB},
+    structs::{TableMetadata, generic_db::ParserDBInner},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, TableLike},
     utils::last_str,
 };
@@ -19,7 +19,7 @@ impl DocumentationMetadata for CreateTable {
 }
 
 impl TableLike for CreateTable {
-    type DB = ParserDB;
+    type DB = ParserDBInner;
 
     #[inline]
     fn table_name(&self) -> &str {

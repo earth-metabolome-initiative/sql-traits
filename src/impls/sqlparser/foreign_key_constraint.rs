@@ -3,7 +3,7 @@
 use sqlparser::ast::{ConstraintReferenceMatchKind, CreateTable, ForeignKeyConstraint};
 
 use crate::{
-    structs::{TableAttribute, generic_db::ParserDB},
+    structs::{TableAttribute, generic_db::ParserDBInner},
     traits::{ForeignKeyLike, Metadata, database::DatabaseLike, table::TableLike},
     utils::last_str,
 };
@@ -13,7 +13,7 @@ impl Metadata for TableAttribute<CreateTable, ForeignKeyConstraint> {
 }
 
 impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
-    type DB = ParserDB;
+    type DB = ParserDBInner;
 
     #[inline]
     fn foreign_key_name(&self) -> Option<&str> {

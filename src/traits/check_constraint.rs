@@ -508,7 +508,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
@@ -534,7 +534,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(r#"CREATE TABLE my_table (id INT, CHECK (id > 0));"#)?;
+    /// let db = GenericParserDB::parse(r#"CREATE TABLE my_table (id INT, CHECK (id > 0));"#)?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
     /// let cc = check_constraints[0];
@@ -558,7 +558,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (id INT, name TEXT, CHECK ((id, name) = (1, 'test')), CHECK (length(name) > 0), CHECK (id BETWEEN 1 AND 10), CHECK (id IS NOT NULL));"#,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
@@ -595,7 +595,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
@@ -627,7 +627,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
     /// )?;
     ///
@@ -668,7 +668,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)));"#,
     /// )?;
@@ -702,7 +702,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));"#,
     /// )?;
@@ -738,7 +738,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));"#,
     /// )?;
@@ -771,7 +771,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
@@ -821,7 +821,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (
     ///         col1 INT NOT NULL,
     ///         col2 INT,
@@ -885,7 +885,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (
     ///         col1 INT NOT NULL,
     ///         col2 INT,
@@ -951,7 +951,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (
     ///         col1 INT,
     ///         col2 INT,
@@ -1017,7 +1017,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (
     ///         text_col TEXT CHECK (text_col <> ''),
     ///         int_col INT CHECK (int_col <> 0),
@@ -1063,7 +1063,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (
     ///         s1 TEXT CHECK (length(s1) < 10),
     ///         s2 TEXT CHECK (length(s2) <= 10),
@@ -1133,7 +1133,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (
     ///         s1 TEXT CHECK (length(s1) > 10),
     ///         s2 TEXT CHECK (length(s2) >= 10),
@@ -1187,7 +1187,7 @@ mod tests {
                 col2 TEXT CHECK (len(col2) > 0)
             );
         ";
-        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
         let table = db.table(None, "t").expect("Table 't' not found");
         let constraints: Vec<_> = table.check_constraints(&db).collect();
 
@@ -1218,7 +1218,7 @@ mod tests {
                 c3 INT CHECK (c3 > 0)
             );
         ";
-        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
         let table = db.table(None, "t").expect("Table 't' not found");
         let constraints: Vec<_> = table.check_constraints(&db).collect();
 
@@ -1242,7 +1242,7 @@ mod tests {
                 c4 UUID CHECK (c4 = uuidv7('10 minutes'::INTERVAL))
             );
         ";
-        let db = ParserDB::try_from(sql).expect("Failed to parse SQL");
+        let db = GenericParserDB::parse(sql).expect("Failed to parse SQL");
         let table = db.table(None, "t").expect("Table 't' not found");
         let constraints: Vec<_> = table.check_constraints(&db).collect();
         assert_eq!(constraints.len(), 4);

@@ -3,7 +3,7 @@
 use sqlparser::ast::{CheckConstraint, CreateTable, Expr};
 
 use crate::{
-    structs::{ParserDB, TableAttribute, metadata::CheckMetadata},
+    structs::{ParserDBInner, TableAttribute, metadata::CheckMetadata},
     traits::{CheckConstraintLike, DatabaseLike, Metadata},
 };
 
@@ -12,7 +12,7 @@ impl Metadata for TableAttribute<CreateTable, CheckConstraint> {
 }
 
 impl CheckConstraintLike for TableAttribute<CreateTable, CheckConstraint> {
-    type DB = ParserDB;
+    type DB = ParserDBInner;
 
     #[inline]
     fn expression<'db>(&'db self, _database: &'db Self::DB) -> &'db Expr {

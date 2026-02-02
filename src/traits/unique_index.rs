@@ -15,7 +15,7 @@ pub trait UniqueIndexLike: IndexLike {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, UNIQUE (name));"#,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();

@@ -9,7 +9,7 @@ use geometric_traits::{
 };
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike,
     TableLike, TriggerLike, UniqueIndexLike,
 };
 
@@ -33,6 +33,8 @@ pub trait DatabaseLike: Clone + Debug {
     type CheckConstraint: CheckConstraintLike<DB = Self>;
     /// Type of the policies in the schema.
     type Policy: PolicyLike<DB = Self>;
+    /// Type of the roles in the schema.
+    type Role: RoleLike<DB = Self>;
 
     /// Returns the name of the database.
     ///
@@ -42,7 +44,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// let db = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
     /// assert_eq!(db.catalog_name(), "unknown_catalog");
     /// # Ok(())
     /// # }
@@ -57,7 +59,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE t1 (id INT);
     /// CREATE TABLE t2 (id INT);
@@ -77,10 +79,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from("SET TIME ZONE 'UTC';")?;
+    /// let db = GenericParserDB::parse("SET TIME ZONE 'UTC';")?;
     /// assert_eq!(db.timezone(), Some("UTC"));
     ///
-    /// let db_no_tz = ParserDB::try_from("CREATE TABLE t (id INT);")?;
+    /// let db_no_tz = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
     /// assert_eq!(db_no_tz.timezone(), None);
     /// # Ok(())
     /// # }
@@ -95,7 +97,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT);
     /// CREATE TABLE table2 (name TEXT);
@@ -117,7 +119,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END;' LANGUAGE plpgsql;
@@ -139,14 +141,14 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db_with_tables = ParserDB::try_from(
+    /// let db_with_tables = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT);
     /// "#,
     /// )?;
     /// assert!(db_with_tables.has_tables());
     ///
-    /// let db_without_tables = ParserDB::try_from(
+    /// let db_without_tables = GenericParserDB::parse(
     ///     r#"
     /// -- No tables defined
     /// "#,
@@ -171,7 +173,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE base_table (id INT PRIMARY KEY);
     /// CREATE TABLE extended_table1 (id INT PRIMARY KEY REFERENCES base_table(id));
@@ -198,7 +200,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT, name TEXT);
     /// CREATE TABLE table2 (score DECIMAL, level INT, active BOOLEAN);
@@ -221,7 +223,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE users (
     ///    id SERIAL PRIMARY KEY,
@@ -302,7 +304,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT "Hello, " || name;';
@@ -338,7 +340,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);
@@ -369,7 +371,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE table1 (id INT);
     /// CREATE TABLE table2 (name TEXT);
@@ -396,7 +398,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// "#,
@@ -418,7 +420,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::try_from(
+    /// let db = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// CREATE POLICY my_policy ON t USING (id > 0);
@@ -439,7 +441,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db_with_policies = ParserDB::try_from(
+    /// let db_with_policies = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// CREATE POLICY my_policy ON t USING (id > 0);
@@ -447,7 +449,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// )?;
     /// assert!(db_with_policies.has_policies());
     ///
-    /// let db_without_policies = ParserDB::try_from(
+    /// let db_without_policies = GenericParserDB::parse(
     ///     r#"
     /// CREATE TABLE t (id INT);
     /// "#,
@@ -459,5 +461,71 @@ pub trait DatabaseLike: Clone + Debug {
     #[inline]
     fn has_policies(&self) -> bool {
         self.policies().next().is_some()
+    }
+
+    /// Iterates over the roles defined in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = GenericParserDB::parse(
+    ///     r#"
+    /// CREATE ROLE admin;
+    /// CREATE ROLE user1;
+    /// "#,
+    /// )?;
+    ///
+    /// let roles: Vec<_> = db.roles().collect();
+    /// assert_eq!(roles.len(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn roles(&self) -> impl Iterator<Item = &Self::Role>;
+
+    /// Returns a role by name, if it exists.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserPG::parse("CREATE ROLE admin SUPERUSER;")?;
+    ///
+    /// let admin = db.role("admin");
+    /// assert!(admin.is_some());
+    /// assert!(admin.unwrap().is_superuser());
+    ///
+    /// let nonexistent = db.role("nonexistent");
+    /// assert!(nonexistent.is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn role(&self, name: &str) -> Option<&Self::Role> {
+        self.roles().find(|r| r.name() == name)
+    }
+
+    /// Returns whether the database has any roles defined.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db_with_roles = GenericParserDB::parse("CREATE ROLE admin;")?;
+    /// assert!(db_with_roles.has_roles());
+    ///
+    /// let db_without_roles = GenericParserDB::parse("CREATE TABLE t (id INT);")?;
+    /// assert!(!db_without_roles.has_roles());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_roles(&self) -> bool {
+        self.roles().next().is_some()
     }
 }

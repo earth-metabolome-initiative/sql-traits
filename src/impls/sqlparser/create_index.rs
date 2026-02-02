@@ -3,7 +3,7 @@
 use sqlparser::ast::{CreateIndex, CreateTable, Expr};
 
 use crate::{
-    structs::{TableAttribute, generic_db::ParserDB, metadata::IndexMetadata},
+    structs::{TableAttribute, generic_db::ParserDBInner, metadata::IndexMetadata},
     traits::{DatabaseLike, IndexLike, Metadata},
 };
 
@@ -12,7 +12,7 @@ impl Metadata for TableAttribute<CreateTable, CreateIndex> {
 }
 
 impl IndexLike for TableAttribute<CreateTable, CreateIndex> {
-    type DB = ParserDB;
+    type DB = ParserDBInner;
 
     #[inline]
     fn table<'db>(&'db self, _database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table

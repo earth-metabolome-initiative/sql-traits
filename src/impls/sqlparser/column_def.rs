@@ -4,7 +4,7 @@
 use sqlparser::ast::{ColumnDef, CreateTable};
 
 use crate::{
-    structs::{generic_db::ParserDB, metadata::TableAttribute},
+    structs::{generic_db::ParserDBInner, metadata::TableAttribute},
     traits::{ColumnLike, DatabaseLike, Metadata},
     utils::normalize_sqlparser_type,
 };
@@ -16,7 +16,7 @@ impl Metadata for TableAttribute<CreateTable, ColumnDef> {
 }
 
 impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
-    type DB = ParserDB;
+    type DB = ParserDBInner;
 
     #[inline]
     fn column_name(&self) -> &str {

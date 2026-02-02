@@ -130,11 +130,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        structs::{ParserDB, TableAttribute},
+        structs::{ParserDBInner, TableAttribute},
         traits::DatabaseLike,
     };
 
-    fn create_column(name: &str) -> <ParserDB as DatabaseLike>::Column {
+    fn create_column(name: &str) -> <ParserDBInner as DatabaseLike>::Column {
         let sql = format!("CREATE TABLE t ({name} INT)");
         let dialect = GenericDialect {};
         let ast = Parser::parse_sql(&dialect, &sql).expect("Failed to parse SQL");
@@ -153,7 +153,7 @@ mod tests {
         let columns = vec![col_a.clone()];
         let expr = Expr::Identifier(Ident::new("a"));
 
-        let result: Vec<<ParserDB as DatabaseLike>::Column> =
+        let result: Vec<<ParserDBInner as DatabaseLike>::Column> =
             columns_in_expression(&expr, "t", &columns).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].column_name(), "a");
@@ -165,7 +165,7 @@ mod tests {
         let columns = vec![col_a.clone()];
         let expr = Expr::CompoundIdentifier(vec![Ident::new("t"), Ident::new("a")]);
 
-        let result: Vec<<ParserDB as DatabaseLike>::Column> =
+        let result: Vec<<ParserDBInner as DatabaseLike>::Column> =
             columns_in_expression(&expr, "t", &columns).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].column_name(), "a");
@@ -182,7 +182,7 @@ mod tests {
             right: Box::new(Expr::Identifier(Ident::new("b"))),
         };
 
-        let result: Vec<<ParserDB as DatabaseLike>::Column> =
+        let result: Vec<<ParserDBInner as DatabaseLike>::Column> =
             columns_in_expression(&expr, "t", &columns).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].column_name(), "a");
@@ -200,7 +200,7 @@ mod tests {
             right: Box::new(Expr::Identifier(Ident::new("a"))),
         };
 
-        let result: Vec<<ParserDB as DatabaseLike>::Column> =
+        let result: Vec<<ParserDBInner as DatabaseLike>::Column> =
             columns_in_expression(&expr, "t", &columns).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].column_name(), "a");
@@ -228,7 +228,7 @@ mod tests {
             uses_odbc_syntax: false,
         });
 
-        let result: Vec<<ParserDB as DatabaseLike>::Column> =
+        let result: Vec<<ParserDBInner as DatabaseLike>::Column> =
             columns_in_expression(&expr, "t", &columns).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].column_name(), "a");
@@ -248,7 +248,7 @@ mod tests {
             high: Box::new(Expr::Identifier(Ident::new("c"))),
         };
 
-        let result: Vec<<ParserDB as DatabaseLike>::Column> =
+        let result: Vec<<ParserDBInner as DatabaseLike>::Column> =
             columns_in_expression(&expr, "t", &columns).unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].column_name(), "a");
@@ -268,7 +268,7 @@ mod tests {
             negated: false,
         };
 
-        let result: Vec<<ParserDB as DatabaseLike>::Column> =
+        let result: Vec<<ParserDBInner as DatabaseLike>::Column> =
             columns_in_expression(&expr, "t", &columns).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].column_name(), "a");

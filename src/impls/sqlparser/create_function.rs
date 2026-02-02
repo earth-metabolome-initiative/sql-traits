@@ -4,7 +4,7 @@
 use sqlparser::ast::{CreateFunction, CreateFunctionBody, Expr, Value, ValueWithSpan};
 
 use crate::{
-    structs::ParserDB,
+    structs::ParserDBInner,
     traits::{FunctionLike, Metadata},
     utils::{last_str, normalize_sqlparser_type},
 };
@@ -14,7 +14,7 @@ impl Metadata for CreateFunction {
 }
 
 impl FunctionLike for CreateFunction {
-    type DB = ParserDB;
+    type DB = ParserDBInner;
 
     #[inline]
     fn name(&self) -> &str {
