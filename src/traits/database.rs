@@ -430,4 +430,34 @@ pub trait DatabaseLike: Clone + Debug {
     /// # }
     /// ```
     fn policies(&self) -> impl Iterator<Item = &Self::Policy>;
+
+    /// Returns whether the datavase has policies defined.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db_with_policies = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE t (id INT);
+    /// CREATE POLICY my_policy ON t USING (id > 0);
+    /// "#,
+    /// )?;
+    /// assert!(db_with_policies.has_policies());
+    ///
+    /// let db_without_policies = ParserDB::try_from(
+    ///     r#"
+    /// CREATE TABLE t (id INT);
+    /// "#,
+    /// )?;
+    /// assert!(!db_without_policies.has_policies());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_policies(&self) -> bool {
+        self.policies().next().is_some()
+    }
 }
