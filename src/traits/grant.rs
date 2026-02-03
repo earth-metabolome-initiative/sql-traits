@@ -332,32 +332,39 @@ pub trait GrantLike:
         database: &Self::DB,
     ) -> bool;
 
-    /// Returns whether this grant applies to a specific grantee by name.
+    /// Returns whether this grant applies to a specific role.
     ///
     /// # Arguments
     ///
-    /// * `grantee_name` - The name of the grantee to check.
+    /// * `role` - The role to check against.
     ///
     /// # Example
     ///
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::parse::<GenericDialect>(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "
     /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE app_user;
+    /// CREATE ROLE admin;
+    /// CREATE ROLE other_user;
     /// GRANT SELECT ON my_table TO app_user, admin;
     /// ",
     /// )?;
     /// let grant = db.grants().next().unwrap();
-    /// assert!(grant.applies_to_grantee("app_user"));
-    /// assert!(grant.applies_to_grantee("admin"));
-    /// assert!(!grant.applies_to_grantee("other_user"));
+    /// let app_user = db.role("app_user").unwrap();
+    /// let admin = db.role("admin").unwrap();
+    /// let other_user = db.role("other_user").unwrap();
+    /// assert!(grant.applies_to_role(app_user));
+    /// assert!(grant.applies_to_role(admin));
+    /// assert!(!grant.applies_to_role(other_user));
     /// # Ok(())
     /// # }
     /// ```
-    fn applies_to_grantee(&self, grantee_name: &str) -> bool;
+    fn applies_to_role(&self, role: &<Self::DB as DatabaseLike>::Role) -> bool;
 }
 
 impl<T: GrantLike> GrantLike for &T
@@ -423,8 +430,8 @@ where
         (*self).applies_to_table(table, database)
     }
 
-    fn applies_to_grantee(&self, grantee_name: &str) -> bool {
-        (*self).applies_to_grantee(grantee_name)
+    fn applies_to_role(&self, role: &<Self::DB as DatabaseLike>::Role) -> bool {
+        (*self).applies_to_role(role)
     }
 }
 
@@ -439,6 +446,7 @@ mod tests {
     fn test_grant_ref_implementation() {
         let sql = r"
             CREATE TABLE my_table (id INT);
+            CREATE ROLE app_user;
             GRANT SELECT, INSERT ON my_table TO app_user WITH GRANT OPTION;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
@@ -457,6 +465,7 @@ mod tests {
 
         let table = db.table(None, "my_table").expect("Table not found");
         assert!(grant_ref.applies_to_table(table, &db));
-        assert!(grant_ref.applies_to_grantee("app_user"));
+        let app_user = db.role("app_user").expect("Role not found");
+        assert!(grant_ref.applies_to_role(app_user));
     }
 }

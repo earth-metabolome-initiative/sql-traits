@@ -3,8 +3,8 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::traits::{
-    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, Metadata, PolicyLike,
-    TriggerLike, check_constraint::CheckConstraintLike,
+    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
+    PolicyLike, TriggerLike, check_constraint::CheckConstraintLike,
 };
 
 /// A trait for types that can be treated as SQL tables.
@@ -2385,6 +2385,249 @@ pub trait TableLike:
         Self: 'db,
     {
         database.policies().filter(move |policy| policy.table(database).borrow() == self.borrow())
+    }
+
+    /// Returns an iterator over the grants that apply to this table.
+    ///
+    /// This includes both direct table grants (`GRANT ... ON table_name`)
+    /// and schema-wide grants (`GRANT ... ON ALL TABLES IN SCHEMA`).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE TABLE other_table (id INT);
+    /// GRANT SELECT ON my_table TO reader;
+    /// GRANT INSERT ON my_table TO writer;
+    /// GRANT DELETE ON other_table TO admin;
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let grants: Vec<_> = table.grants(&db).collect();
+    /// assert_eq!(grants.len(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn grants<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Grant>
+    where
+        Self: 'db,
+    {
+        database.grants().filter(move |grant| grant.applies_to_table(self.borrow(), database))
+    }
+
+    /// Returns whether the given role can read (SELECT) from this table.
+    ///
+    /// A role can read if there's a grant that:
+    /// - Applies to this table (directly or via ALL TABLES IN SCHEMA)
+    /// - Applies to this role as a grantee
+    /// - Includes SELECT privilege or ALL PRIVILEGES
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE reader;
+    /// CREATE ROLE writer;
+    /// GRANT SELECT ON my_table TO reader;
+    /// GRANT INSERT ON my_table TO writer;
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let reader = db.role("reader").unwrap();
+    /// let writer = db.role("writer").unwrap();
+    ///
+    /// assert!(table.can_select(reader, &db));
+    /// assert!(!table.can_select(writer, &db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn can_select(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+        use sqlparser::ast::Action;
+        self.grants(database).any(|grant| {
+            grant.applies_to_role(role)
+                && (grant.is_all_privileges()
+                    || grant.privileges().any(|p| matches!(p, Action::Select { .. })))
+        })
+    }
+
+    /// Returns whether the given role can insert into this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE writer;
+    /// GRANT INSERT ON my_table TO writer;
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let writer = db.role("writer").unwrap();
+    ///
+    /// assert!(table.can_insert(writer, &db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn can_insert(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+        use sqlparser::ast::Action;
+        self.grants(database).any(|grant| {
+            grant.applies_to_role(role)
+                && (grant.is_all_privileges()
+                    || grant.privileges().any(|p| matches!(p, Action::Insert { .. })))
+        })
+    }
+
+    /// Returns whether the given role can update this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE updater;
+    /// GRANT UPDATE ON my_table TO updater;
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let updater = db.role("updater").unwrap();
+    ///
+    /// assert!(table.can_update(updater, &db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn can_update(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+        use sqlparser::ast::Action;
+        self.grants(database).any(|grant| {
+            grant.applies_to_role(role)
+                && (grant.is_all_privileges()
+                    || grant.privileges().any(|p| matches!(p, Action::Update { .. })))
+        })
+    }
+
+    /// Returns whether the given role can delete from this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE deleter;
+    /// GRANT DELETE ON my_table TO deleter;
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let deleter = db.role("deleter").unwrap();
+    ///
+    /// assert!(table.can_delete(deleter, &db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn can_delete(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+        use sqlparser::ast::Action;
+        self.grants(database).any(|grant| {
+            grant.applies_to_role(role)
+                && (grant.is_all_privileges()
+                    || grant.privileges().any(|p| matches!(p, Action::Delete)))
+        })
+    }
+
+    /// Returns whether the given role can write to this table (INSERT, UPDATE,
+    /// or DELETE).
+    ///
+    /// This is a convenience method that checks if the role has any write
+    /// permission.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE reader;
+    /// CREATE ROLE writer;
+    /// GRANT SELECT ON my_table TO reader;
+    /// GRANT INSERT ON my_table TO writer;
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let reader = db.role("reader").unwrap();
+    /// let writer = db.role("writer").unwrap();
+    ///
+    /// assert!(!table.can_write(reader, &db));
+    /// assert!(table.can_write(writer, &db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn can_write(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+        self.can_insert(role, database)
+            || self.can_update(role, database)
+            || self.can_delete(role, database)
+    }
+
+    /// Returns whether the given role can truncate this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE truncator;
+    /// GRANT TRUNCATE ON my_table TO truncator;
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let truncator = db.role("truncator").unwrap();
+    ///
+    /// assert!(table.can_truncate(truncator, &db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn can_truncate(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+        use sqlparser::ast::Action;
+        self.grants(database).any(|grant| {
+            grant.applies_to_role(role)
+                && (grant.is_all_privileges()
+                    || grant.privileges().any(|p| matches!(p, Action::Truncate)))
+        })
     }
 }
 

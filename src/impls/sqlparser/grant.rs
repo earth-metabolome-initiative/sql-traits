@@ -182,15 +182,15 @@ impl GrantLike for Grant {
         }
     }
 
-    fn applies_to_grantee(&self, grantee_name: &str) -> bool {
+    fn applies_to_role(&self, role: &<Self::DB as DatabaseLike>::Role) -> bool {
+        use crate::traits::RoleLike;
+        let role_name = role.name();
         self.grantees.iter().any(|g| {
             match &g.name {
-                Some(sqlparser::ast::GranteeName::ObjectName(name)) => {
-                    last_str(name) == grantee_name
-                }
+                Some(sqlparser::ast::GranteeName::ObjectName(name)) => last_str(name) == role_name,
                 _ => {
                     // Handle PUBLIC and other special cases
-                    format!("{g}").to_uppercase() == grantee_name.to_uppercase()
+                    format!("{g}").to_uppercase() == role_name.to_uppercase()
                 }
             }
         })
