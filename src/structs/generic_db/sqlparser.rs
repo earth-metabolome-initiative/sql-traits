@@ -431,12 +431,12 @@ impl ParserDB {
     /// use sql_traits::prelude::ParserDB;
     /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE users (
     ///     id INTEGER PRIMARY KEY,
     ///     name VARCHAR(100)
     /// );
-    /// "#;
+    /// ";
     ///
     /// let dialect = PostgreSqlDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql).unwrap();

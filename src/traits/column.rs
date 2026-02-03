@@ -102,8 +102,8 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE parent (id SERIAL, name TEXT, age INT, bigg_id BIGSERIAL);
-    ///     CREATE TABLE child (parent_id INT PRIMARY KEY REFERENCES parent(id), other TEXT);"#,
+    ///     "CREATE TABLE parent (id SERIAL, name TEXT, age INT, bigg_id BIGSERIAL);
+    ///     CREATE TABLE child (parent_id INT PRIMARY KEY REFERENCES parent(id), other TEXT);",
     /// )?;
     /// let table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
@@ -409,14 +409,14 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
     ///     id INT,
     ///     name TEXT,
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
-    /// "#,
+    /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
@@ -457,7 +457,7 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE parent (id INT PRIMARY KEY);
     /// CREATE TABLE child (
     ///     id INT PRIMARY KEY REFERENCES parent(id)
@@ -466,7 +466,7 @@ pub trait ColumnLike:
     ///     id INT PRIMARY KEY,
     ///     child_id INT REFERENCES child(id)
     /// );
-    /// "#,
+    /// ",
     /// )?;
     /// let parent_table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
@@ -515,12 +515,12 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE parent (id INT PRIMARY KEY);
     /// CREATE TABLE child (
     ///     parent_id INT PRIMARY KEY REFERENCES parent(id)
     /// );
-    /// "#,
+    /// ",
     /// )?;
     /// let parent_table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
@@ -559,13 +559,13 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
     ///    id INT REFERENCES referenced_table(id),
     ///    name TEXT
     /// );
-    /// "#,
+    /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).unwrap();
@@ -594,14 +594,14 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
     ///    id INT,
     ///    name TEXT,
     ///    FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
-    /// "#,
+    /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
@@ -646,7 +646,7 @@ pub trait ColumnLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE another_referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT PRIMARY KEY, name TEXT,
@@ -660,7 +660,7 @@ pub trait ColumnLike:
     /// CREATE TABLE non_fk_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE serial_table_one (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE serial_table_two (id SERIAL PRIMARY KEY, name TEXT);
-    /// "#,
+    /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");

@@ -29,10 +29,10 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
-    /// "#,
+    /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -51,10 +51,10 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
-    /// "#,
+    /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -75,11 +75,11 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     /// use sqlparser::ast::CreatePolicyCommand;
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY select_policy ON my_table FOR SELECT USING (true);
     /// CREATE POLICY all_policy ON my_table USING (true);
-    /// "#;
+    /// ";
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
@@ -102,11 +102,11 @@ pub trait PolicyLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table TO user1, user2 USING (true);
     /// CREATE POLICY public_policy ON my_table TO PUBLIC USING (true);
-    /// "#;
+    /// ";
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
@@ -132,10 +132,10 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
-    /// "#,
+    /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -156,11 +156,11 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE FUNCTION my_func() RETURNS BOOLEAN AS 'SELECT true';
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table USING (my_func());
-    /// "#,
+    /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -184,10 +184,10 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table WITH CHECK (id < 10);
-    /// "#,
+    /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();
@@ -208,11 +208,11 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE FUNCTION check_func() RETURNS BOOLEAN AS 'SELECT true';
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table WITH CHECK (check_func());
-    /// "#,
+    /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let policy = table.policies(&db).next().unwrap();

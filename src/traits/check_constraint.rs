@@ -509,7 +509,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
+    ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> =
@@ -534,8 +534,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db =
-    ///     ParserDB::parse::<GenericDialect>(r#"CREATE TABLE my_table (id INT, CHECK (id > 0));"#)?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, CHECK (id > 0));")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
     /// let cc = check_constraints[0];
@@ -559,7 +558,7 @@ pub trait CheckConstraintLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse::<GenericDialect>(r#"CREATE TABLE my_table (id INT, name TEXT, CHECK ((id, name) = (1, 'test')), CHECK (length(name) > 0), CHECK (id BETWEEN 1 AND 10), CHECK (id IS NOT NULL));"#)?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, CHECK ((id, name) = (1, 'test')), CHECK (length(name) > 0), CHECK (id BETWEEN 1 AND 10), CHECK (id IS NOT NULL));")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let columns = table.columns(&db).collect::<Vec<_>>();
     /// let [id, name] = &columns.as_slice() else {
@@ -595,7 +594,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
+    ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -627,7 +626,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
+    ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -668,8 +667,8 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
-    ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)));"#,
+    ///     "CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
+    ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -702,8 +701,8 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
-    ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));"#,
+    ///     "CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
+    ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -738,8 +737,8 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
-    ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));"#,
+    ///     "CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
+    ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -771,7 +770,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));"#,
+    ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let columns = table.columns(&db).collect::<Vec<_>>();
@@ -821,7 +820,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (
+    ///     "CREATE TABLE my_table (
     ///         col1 INT NOT NULL,
     ///         col2 INT,
     ///         CHECK (col1 IS NOT NULL),
@@ -831,7 +830,7 @@ pub trait CheckConstraintLike:
     ///         CHECK (col2 IS NOT NULL),
     ///         CHECK (col2 IS NULL OR col2 IS NOT NULL),
     ///         CHECK (col1 IS NULL OR col2 IS NOT NULL)
-    ///     );"#,
+    ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -885,7 +884,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (
+    ///     "CREATE TABLE my_table (
     ///         col1 INT NOT NULL,
     ///         col2 INT,
     ///         s1 TEXT CHECK (length(s1) < 5 AND length(s1) > 10),
@@ -895,7 +894,7 @@ pub trait CheckConstraintLike:
     ///         CHECK (1 = 0),
     ///         CHECK (NOT TRUE),
     ///         CHECK (col2 IS NULL)
-    ///     );"#,
+    ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -951,7 +950,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (
+    ///     "CREATE TABLE my_table (
     ///         col1 INT,
     ///         col2 INT,
     ///         col3 INT,
@@ -961,7 +960,7 @@ pub trait CheckConstraintLike:
     ///         CHECK (col1 IS NOT NULL),
     ///         CHECK (col1 > 0),
     ///         CHECK (col2 < 100)
-    ///     );"#,
+    ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -1017,13 +1016,13 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (
+    ///     "CREATE TABLE my_table (
     ///         text_col TEXT CHECK (text_col <> ''),
     ///         int_col INT CHECK (int_col <> 0),
     ///         desc TEXT CHECK (desc != ''),
     ///         chained TEXT CHECK (chained <> '' AND chained IS NOT NULL),
     ///         chained_or TEXT CHECK (chained_or <> '' OR chained_or = 'default')
-    ///     );"#,
+    ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -1063,7 +1062,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (
+    ///     "CREATE TABLE my_table (
     ///         s1 TEXT CHECK (length(s1) < 10),
     ///         s2 TEXT CHECK (length(s2) <= 10),
     ///         s3 TEXT CHECK (10 > length(s3)),
@@ -1077,7 +1076,7 @@ pub trait CheckConstraintLike:
     ///         s11 TEXT CHECK (length(s11) < length(s12)),
     ///         s12 TEXT CHECK (length(s12) < length(s13)),
     ///         s13 TEXT CHECK (length(s13) < 10)
-    ///     );"#,
+    ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
@@ -1133,7 +1132,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"CREATE TABLE my_table (
+    ///     "CREATE TABLE my_table (
     ///         s1 TEXT CHECK (length(s1) > 10),
     ///         s2 TEXT CHECK (length(s2) >= 10),
     ///         s3 TEXT CHECK (10 < length(s3)),
@@ -1142,7 +1141,7 @@ pub trait CheckConstraintLike:
     ///         s6 INT CHECK (s6 > 10),
     ///         s7 TEXT CHECK (length(s7) > length(s1)),
     ///         s8 TEXT CHECK (length(s8) > 10 OR length(s8) > 5)
-    ///     );"#,
+    ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();

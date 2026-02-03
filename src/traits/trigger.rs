@@ -21,14 +21,14 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
-    /// "#,
+    /// ",
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert_eq!(trigger.name(), "my_trigger");
@@ -43,7 +43,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::{dialect::SQLiteDialect, parser::Parser};
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT);
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
@@ -51,7 +51,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEGIN
     ///     UPDATE my_table SET id = id + 1;
     /// END;
-    /// "#;
+    /// ";
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
@@ -77,14 +77,14 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
-    /// "#,
+    /// ",
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// let table = trigger.table(&db);
@@ -100,7 +100,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::{dialect::SQLiteDialect, parser::Parser};
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT);
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
@@ -108,7 +108,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEGIN
     ///     UPDATE my_table SET id = id + 1;
     /// END;
-    /// "#;
+    /// ";
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
@@ -132,14 +132,14 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT OR UPDATE ON my_table
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
-    /// "#,
+    /// ",
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// let events = trigger.events();
@@ -157,7 +157,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::{dialect::SQLiteDialect, parser::Parser};
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT, col1 INT);
     /// CREATE TRIGGER my_trigger
     /// AFTER UPDATE OF col1 ON my_table
@@ -165,7 +165,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEGIN
     ///     UPDATE my_table SET id = id + 1;
     /// END;
-    /// "#;
+    /// ";
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
@@ -188,14 +188,14 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
-    /// "#,
+    /// ",
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert!(matches!(trigger.timing(), Some(sqlparser::ast::TriggerPeriod::After)));
@@ -210,7 +210,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::{dialect::SQLiteDialect, parser::Parser};
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT);
     /// CREATE TRIGGER my_trigger
     /// BEFORE INSERT ON my_table
@@ -218,7 +218,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEGIN
     ///     UPDATE my_table SET id = id + 1;
     /// END;
-    /// "#;
+    /// ";
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
@@ -239,14 +239,14 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
-    /// "#,
+    /// ",
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert!(matches!(
@@ -264,7 +264,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::{dialect::SQLiteDialect, parser::Parser};
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT);
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
@@ -272,7 +272,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEGIN
     ///     UPDATE my_table SET id = id + 1;
     /// END;
-    /// "#;
+    /// ";
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
@@ -301,14 +301,14 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
-    /// "#,
+    /// ",
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// let function = trigger.function(&db).unwrap();
@@ -324,7 +324,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::{dialect::SQLiteDialect, parser::Parser};
     ///
-    /// let sql = r#"
+    /// let sql = "
     /// CREATE TABLE my_table (id INT);
     /// CREATE TRIGGER my_trigger
     /// AFTER INSERT ON my_table
@@ -332,7 +332,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEGIN
     ///     UPDATE my_table SET id = id + 1;
     /// END;
-    /// "#;
+    /// ";
     ///
     /// let dialect = SQLiteDialect {};
     /// let statements = Parser::parse_sql(&dialect, sql)?;
@@ -364,7 +364,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// // Example of a maintenance trigger
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE brands (id INT, edited_at TIMESTAMP);
     /// CREATE OR REPLACE FUNCTION update_brands_edited_at() RETURNS TRIGGER AS $$
     /// BEGIN
@@ -376,7 +376,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// CREATE TRIGGER trigger_update_brands_edited_at
     /// BEFORE UPDATE ON brands
     /// FOR EACH ROW EXECUTE FUNCTION update_brands_edited_at();
-    /// "#,
+    /// ",
     /// )?;
     ///
     /// let trigger = db.triggers().next().unwrap();
@@ -384,7 +384,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     ///
     /// // Example of a non-maintenance trigger (extra logic)
     /// let db2 = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE brands (id INT);
     /// CREATE OR REPLACE FUNCTION complex_trigger() RETURNS TRIGGER AS $$
     /// BEGIN
@@ -397,7 +397,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// CREATE TRIGGER complex
     /// BEFORE UPDATE ON brands
     /// FOR EACH ROW EXECUTE FUNCTION complex_trigger();
-    /// "#,
+    /// ",
     /// )?;
     /// let complex = db2.triggers().next().unwrap();
     /// assert!(!complex.is_maintenance_trigger(&db2));
@@ -429,7 +429,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE brands (id INT, edited_at TIMESTAMP, name TEXT);
     /// CREATE OR REPLACE FUNCTION update_stuff() RETURNS TRIGGER AS $$
     /// BEGIN
@@ -442,7 +442,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// CREATE TRIGGER trigger_update
     /// BEFORE UPDATE ON brands
     /// FOR EACH ROW EXECUTE FUNCTION update_stuff();
-    /// "#,
+    /// ",
     /// )?;
     ///
     /// let trigger = db.triggers().next().unwrap();

@@ -60,10 +60,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE t1 (id INT);
     /// CREATE TABLE t2 (id INT);
-    /// "#,
+    /// ",
     /// )?;
     /// assert_eq!(db.number_of_tables(), 2);
     /// # Ok(())
@@ -98,11 +98,11 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE table1 (id INT);
     /// CREATE TABLE table2 (name TEXT);
     /// CREATE TABLE table3 (score DECIMAL);
-    /// "#,
+    /// ",
     /// )?;
     /// let table_names: Vec<&str> = db.tables().map(|t| t.table_name()).collect();
     /// assert_eq!(table_names, vec!["table1", "table2", "table3"]);
@@ -120,11 +120,11 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE t (id INT);
     /// CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END;' LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
-    /// "#,
+    /// ",
     /// )?;
     /// let triggers: Vec<&str> = db.triggers().map(|t| t.name()).collect();
     /// assert_eq!(triggers, vec!["my_trigger"]);
@@ -142,16 +142,16 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db_with_tables = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE table1 (id INT);
-    /// "#,
+    /// ",
     /// )?;
     /// assert!(db_with_tables.has_tables());
     ///
     /// let db_without_tables = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// -- No tables defined
-    /// "#,
+    /// ",
     /// )?;
     /// assert!(!db_without_tables.has_tables());
     /// # Ok(())
@@ -174,12 +174,12 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE base_table (id INT PRIMARY KEY);
     /// CREATE TABLE extended_table1 (id INT PRIMARY KEY REFERENCES base_table(id));
     /// CREATE TABLE extended_table2 (id INT PRIMARY KEY REFERENCES base_table(id));
     /// CREATE TABLE independent_table (id INT PRIMARY KEY);
-    /// "#,
+    /// ",
     /// )?;
     ///
     /// let root_table_names: Vec<&str> = db.root_tables().map(|t| t.table_name()).collect();
@@ -201,10 +201,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE table1 (id INT, name TEXT);
     /// CREATE TABLE table2 (score DECIMAL, level INT, active BOOLEAN);
-    /// "#,
+    /// ",
     /// )?;
     /// assert_eq!(db.maximum_number_of_columns(), 3);
     /// # Ok(())
@@ -224,7 +224,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE users (
     ///    id SERIAL PRIMARY KEY,
     ///   name TEXT NOT NULL
@@ -238,7 +238,7 @@ pub trait DatabaseLike: Clone + Debug {
     ///  id INT PRIMARY KEY REFERENCES comments(id),
     /// extra_info TEXT
     /// );
-    /// "#,
+    /// ",
     /// )?;
     /// let user_table = db.table(None, "users").unwrap();
     /// let comment_table = db.table(None, "comments").unwrap();
@@ -305,10 +305,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
-    /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT "Hello, " || name;';
-    /// "#,
+    /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT \"Hello, \" || name;';
+    /// ",
     /// )?;
     /// let function_names: Vec<&str> = db.functions().map(|f| f.name()).collect();
     ///
@@ -341,10 +341,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);
-    /// "#,
+    /// ",
     /// )?;
     /// let table_with_schema = db.table(Some("my_schema"), "my_table_with_schema").unwrap();
     /// assert_eq!(table_with_schema.table_name(), "my_table_with_schema");
@@ -372,11 +372,11 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE table1 (id INT);
     /// CREATE TABLE table2 (name TEXT);
     /// CREATE TABLE table3 (score DECIMAL);
-    /// "#,
+    /// ",
     /// )?;
     /// let table2 = db.table(None, "table2").expect("Table 'table2' should exist");
     /// let table2_id = db.table_id(table2).expect("Table ID for 'table2' should exist");
@@ -399,9 +399,9 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
-    /// "#,
+    /// ",
     /// )?;
     /// let add_one = db.function("add_one").expect("Function 'add_one' should exist");
     /// assert_eq!(add_one.name(), "add_one");
@@ -421,10 +421,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE t (id INT);
     /// CREATE POLICY my_policy ON t USING (id > 0);
-    /// "#,
+    /// ",
     /// )?;
     /// let policies: Vec<&str> = db.policies().map(|p| p.name()).collect();
     /// assert_eq!(policies, vec!["my_policy"]);
@@ -442,17 +442,17 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db_with_policies = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE t (id INT);
     /// CREATE POLICY my_policy ON t USING (id > 0);
-    /// "#,
+    /// ",
     /// )?;
     /// assert!(db_with_policies.has_policies());
     ///
     /// let db_without_policies = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE t (id INT);
-    /// "#,
+    /// ",
     /// )?;
     /// assert!(!db_without_policies.has_policies());
     /// # Ok(())
@@ -472,10 +472,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE ROLE admin;
     /// CREATE ROLE user1;
-    /// "#,
+    /// ",
     /// )?;
     ///
     /// let roles: Vec<_> = db.roles().collect();
@@ -541,14 +541,14 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE rls_table (id INT);
     /// ALTER TABLE rls_table ENABLE ROW LEVEL SECURITY;
     /// CREATE TABLE forced_rls_table (id INT);
     /// ALTER TABLE forced_rls_table ENABLE ROW LEVEL SECURITY;
     /// ALTER TABLE forced_rls_table FORCE ROW LEVEL SECURITY;
     /// CREATE TABLE no_rls_table (id INT);
-    /// "#,
+    /// ",
     /// )?;
     ///
     /// let rls_table_names: Vec<&str> = db.rls_tables().map(|t| t.table_name()).collect();
@@ -574,14 +574,14 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE rls_table (id INT);
     /// ALTER TABLE rls_table ENABLE ROW LEVEL SECURITY;
     /// CREATE TABLE forced_rls_table (id INT);
     /// ALTER TABLE forced_rls_table ENABLE ROW LEVEL SECURITY;
     /// ALTER TABLE forced_rls_table FORCE ROW LEVEL SECURITY;
     /// CREATE TABLE no_rls_table (id INT);
-    /// "#,
+    /// ",
     /// )?;
     ///
     /// let forced_rls_table_names: Vec<&str> =
@@ -605,10 +605,10 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db_with_rls = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE t (id INT);
     /// ALTER TABLE t ENABLE ROW LEVEL SECURITY;
-    /// "#,
+    /// ",
     /// )?;
     /// assert!(db_with_rls.has_rls_tables());
     ///
@@ -631,13 +631,13 @@ pub trait DatabaseLike: Clone + Debug {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     /// CREATE TABLE t1 (id INT);
     /// ALTER TABLE t1 ENABLE ROW LEVEL SECURITY;
     /// CREATE TABLE t2 (id INT);
     /// ALTER TABLE t2 ENABLE ROW LEVEL SECURITY;
     /// CREATE TABLE t3 (id INT);
-    /// "#,
+    /// ",
     /// )?;
     /// assert_eq!(db.number_of_rls_tables(), 2);
     /// # Ok(())

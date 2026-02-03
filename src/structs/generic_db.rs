@@ -145,10 +145,10 @@ where
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     ///     -- This is a test table
     ///     CREATE TABLE test_table (id INT);
-    ///     "#,
+    ///     ",
     /// )?;
     /// let table = db.table(None, "test_table").unwrap();
     /// let metadata = db.table_metadata(table).unwrap();
@@ -256,10 +256,10 @@ where
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     ///     CREATE TABLE parent (id INT PRIMARY KEY);
     ///     CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
-    ///     "#,
+    ///     ",
     /// )?;
     /// let child = db.table(None, "child").unwrap();
     /// let fk = child.foreign_keys(&db).next().unwrap();
@@ -351,11 +351,11 @@ where
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     ///     CREATE TABLE t (id INT);
     ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
     ///     CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
-    ///     "#,
+    ///     ",
     /// )?;
     /// let trigger = db.trigger("my_trigger").unwrap();
     /// assert_eq!(trigger.name(), "my_trigger");
@@ -385,11 +385,11 @@ where
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     ///     CREATE TABLE t (id INT);
     ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
     ///     CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
-    ///     "#,
+    ///     ",
     /// )?;
     /// let trigger = db.trigger("my_trigger").unwrap();
     /// assert!(db.trigger_metadata(trigger).is_some());
@@ -524,12 +524,12 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// let mut db = ParserDB::parse::<GenericDialect>(
-    ///     r#"
+    ///     "
     ///     -- original doc a
     ///     CREATE TABLE a (id INT);
     ///     -- original doc b
     ///     CREATE TABLE b (id INT);
-    ///     "#,
+    ///     ",
     /// )?;
     /// let metadata = db.tables_metadata_mut().collect::<Vec<_>>();
     /// assert_eq!(metadata.len(), db.number_of_tables());
