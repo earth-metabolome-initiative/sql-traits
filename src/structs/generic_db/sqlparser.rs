@@ -6,7 +6,7 @@ use std::{
 };
 
 use git2::Repository;
-use sql_docs::SqlDoc;
+use sql_docs::{GenericDialect, PostgreSqlDialect as PostGres, SqlDoc};
 use sqlparser::{
     ast::{
         AlterTableOperation, CheckConstraint, ColumnDef, ColumnOption, CreateFunction,
@@ -824,8 +824,7 @@ impl TryFrom<&str> for ParserDB {
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
         let documentation = SqlDoc::builder_from_str(sql)
             .collect_all_leading()
-            .dialect(sql_docs::dialects::Dialects::Generic)
-            .build()?;
+            .build::<GenericDialect>()?;
         for (table, metadata) in db.tables_metadata_mut() {
             let table_doc = documentation.table(table.table_name(), table.table_schema())?;
             metadata.set_doc(table_doc.to_owned());
@@ -909,8 +908,7 @@ impl TryFrom<&[&Path]> for ParserDB {
         }
         let documentation = SqlDoc::builder_from_strs_with_paths(&sql_str)
             .collect_all_leading()
-            .dialect(sql_docs::dialects::Dialects::PostgreSql)
-            .build()?;
+            .build::<PostGres>()?;
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
         assert_eq!(
             db.number_of_tables(),
