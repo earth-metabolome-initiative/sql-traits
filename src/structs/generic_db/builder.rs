@@ -256,6 +256,12 @@ where
         &self.tables
     }
 
+    /// Returns a slice of role Rc references with their metadata.
+    #[must_use]
+    pub fn roles(&self) -> &[(Rc<R>, R::Meta)] {
+        &self.roles
+    }
+
     /// Adds a check constraint with its metadata to the builder.
     #[must_use]
     pub fn add_check_constraint(mut self, constraint: Rc<Ch>, metadata: Ch::Meta) -> Self {

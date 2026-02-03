@@ -93,6 +93,18 @@ pub enum Error {
     /// statement.
     #[error("Revoke not found: {0}")]
     RevokeNotFound(String),
+    #[error("Role `{role_name}` not found for grant.")]
+    /// Error indicating that a grant references a role that does not exist.
+    RoleNotFoundForGrant {
+        /// Name of the undefined role.
+        role_name: String,
+    },
+    #[error("Table `{table_name}` not found for grant.")]
+    /// Error indicating that a grant references a table that does not exist.
+    TableNotFoundForGrant {
+        /// Name of the undefined table.
+        table_name: String,
+    },
 }
 
 impl From<ParserError> for Error {

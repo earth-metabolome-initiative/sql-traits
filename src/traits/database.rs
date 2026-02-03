@@ -661,6 +661,8 @@ pub trait DatabaseLike: Clone + Debug {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE users (id INT);
+    /// CREATE ROLE app_user;
+    /// CREATE ROLE admin;
     /// GRANT SELECT ON users TO app_user;
     /// GRANT INSERT, UPDATE ON users TO admin;
     /// ",
@@ -683,6 +685,7 @@ pub trait DatabaseLike: Clone + Debug {
     /// let db_with_grants = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE t (id INT);
+    /// CREATE ROLE app_user;
     /// GRANT SELECT ON t TO app_user;
     /// ",
     /// )?;

@@ -2403,6 +2403,9 @@ pub trait TableLike:
     ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE TABLE other_table (id INT);
+    /// CREATE ROLE reader;
+    /// CREATE ROLE writer;
+    /// CREATE ROLE admin;
     /// GRANT SELECT ON my_table TO reader;
     /// GRANT INSERT ON my_table TO writer;
     /// GRANT DELETE ON other_table TO admin;

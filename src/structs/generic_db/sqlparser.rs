@@ -675,6 +675,44 @@ impl ParserDB {
                     builder = builder.add_role(Rc::new(create_role), ());
                 }
                 Statement::Grant(grant) => {
+                    // Validate grantees exist (closed world assumption)
+                    for grantee in &grant.grantees {
+                        let grantee_name = match &grantee.name {
+                            Some(sqlparser::ast::GranteeName::ObjectName(name)) => {
+                                Some(last_str(name))
+                            }
+                            _ => None,
+                        };
+
+                        if let Some(name) = grantee_name {
+                            // Skip PUBLIC pseudo-role
+                            if name.to_uppercase() != "PUBLIC" {
+                                let role_exists = builder.roles().iter().any(|(r, ())| {
+                                    r.names.first().is_some_and(|n| last_str(n) == name)
+                                });
+                                if !role_exists {
+                                    return Err(crate::errors::Error::RoleNotFoundForGrant {
+                                        role_name: name.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Validate tables exist (for table grants)
+                    if let Some(sqlparser::ast::GrantObjects::Tables(tables)) = &grant.objects {
+                        for table_obj in tables {
+                            let table_name = last_str(table_obj);
+                            let table_exists =
+                                builder.tables().iter().any(|(t, _)| t.table_name() == table_name);
+                            if !table_exists {
+                                return Err(crate::errors::Error::TableNotFoundForGrant {
+                                    table_name: table_name.to_string(),
+                                });
+                            }
+                        }
+                    }
+
                     builder = builder.add_grant(Rc::new(grant), ());
                 }
                 Statement::Revoke(revoke) => {

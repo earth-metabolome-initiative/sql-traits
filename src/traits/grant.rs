@@ -35,6 +35,7 @@ pub trait GrantLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE my_role;
     /// GRANT SELECT, INSERT ON my_table TO my_role;
     /// ",
     /// )?;
@@ -60,6 +61,8 @@ pub trait GrantLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE admin;
+    /// CREATE ROLE reader;
     /// GRANT ALL PRIVILEGES ON my_table TO admin;
     /// GRANT SELECT ON my_table TO reader;
     /// ",
@@ -93,6 +96,7 @@ pub trait GrantLike:
     ///     "
     /// CREATE TABLE users (id INT);
     /// CREATE TABLE posts (id INT);
+    /// CREATE ROLE reader;
     /// GRANT SELECT ON users, posts TO reader;
     /// ",
     /// )?;
@@ -117,6 +121,7 @@ pub trait GrantLike:
     /// CREATE TABLE public.users (id INT);
     /// CREATE TABLE public.posts (id INT);
     /// CREATE TABLE other_schema.data (id INT);
+    /// CREATE ROLE reader;
     /// GRANT SELECT ON ALL TABLES IN SCHEMA public TO reader;
     /// ",
     /// )?;
@@ -146,7 +151,12 @@ pub trait GrantLike:
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::parse::<PostgreSqlDialect>("GRANT USAGE ON SCHEMA public TO app_user;")?;
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE ROLE app_user;
+    /// GRANT USAGE ON SCHEMA public TO app_user;
+    /// ",
+    /// )?;
     /// let grant = db.grants().next().unwrap();
     /// assert!(grant.schemas().is_some());
     /// # Ok(())
@@ -172,6 +182,7 @@ pub trait GrantLike:
     ///     "
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// CREATE FUNCTION double_it(x INT) RETURNS INT AS 'SELECT x * 2;';
+    /// CREATE ROLE app_user;
     /// GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO app_user;
     /// ",
     /// )?;
@@ -198,6 +209,8 @@ pub trait GrantLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE role1;
+    /// CREATE ROLE role2;
     /// GRANT SELECT ON my_table TO role1, role2;
     /// ",
     /// )?;
@@ -222,6 +235,8 @@ pub trait GrantLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE my_table (id INT);
+    /// CREATE ROLE role1;
+    /// CREATE ROLE role2;
     /// GRANT SELECT ON my_table TO role1 WITH GRANT OPTION;
     /// GRANT INSERT ON my_table TO role2;
     /// ",
@@ -252,6 +267,7 @@ pub trait GrantLike:
     ///     "
     /// CREATE TABLE my_table (id INT);
     /// CREATE ROLE admin;
+    /// CREATE ROLE app_user;
     /// GRANT SELECT ON my_table TO app_user GRANTED BY admin;
     /// ",
     /// )?;
@@ -282,6 +298,7 @@ pub trait GrantLike:
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "
     /// CREATE TABLE my_table (id INT, name TEXT, secret TEXT);
+    /// CREATE ROLE app_user;
     /// GRANT SELECT (id, name) ON my_table TO app_user;
     /// ",
     /// )?;
@@ -315,6 +332,7 @@ pub trait GrantLike:
     ///     "
     /// CREATE TABLE table1 (id INT);
     /// CREATE TABLE table2 (id INT);
+    /// CREATE ROLE app_user;
     /// GRANT SELECT ON table1 TO app_user;
     /// ",
     /// )?;
