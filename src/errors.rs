@@ -89,6 +89,10 @@ pub enum Error {
     /// Wrapper around sql_doc errors
     #[error("Table Doc Error: {0}")]
     TableDocError(#[from] sql_docs::error::DocError),
+    /// Error indicating that no matching grant was found for a REVOKE
+    /// statement.
+    #[error("Revoke not found: {0}")]
+    RevokeNotFound(String),
 }
 
 impl From<ParserError> for Error {

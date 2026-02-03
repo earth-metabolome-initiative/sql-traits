@@ -2,3 +2,5 @@
 //! module.
 
 mod sqlparser;
+
+pub use sqlparser::grant_matches_revoke;

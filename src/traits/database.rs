@@ -9,8 +9,8 @@ use geometric_traits::{
 };
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike,
-    TableLike, TriggerLike, UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, GrantLike, IndexLike,
+    PolicyLike, RoleLike, TableLike, TriggerLike, UniqueIndexLike,
 };
 
 /// A trait for types that can be treated as SQL databases.
@@ -35,6 +35,8 @@ pub trait DatabaseLike: Clone + Debug {
     type Policy: PolicyLike<DB = Self>;
     /// Type of the roles in the schema.
     type Role: RoleLike<DB = Self>;
+    /// Type of the grants in the schema.
+    type Grant: GrantLike<DB = Self>;
 
     /// Returns the name of the database.
     ///
@@ -646,5 +648,53 @@ pub trait DatabaseLike: Clone + Debug {
     #[inline]
     fn number_of_rls_tables(&self) -> usize {
         self.rls_tables().count()
+    }
+
+    /// Iterates over the grants defined in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE users (id INT);
+    /// GRANT SELECT ON users TO app_user;
+    /// GRANT INSERT, UPDATE ON users TO admin;
+    /// ",
+    /// )?;
+    /// let grants: Vec<_> = db.grants().collect();
+    /// assert_eq!(grants.len(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn grants(&self) -> impl Iterator<Item = &Self::Grant>;
+
+    /// Returns whether the database has any grants defined.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db_with_grants = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE t (id INT);
+    /// GRANT SELECT ON t TO app_user;
+    /// ",
+    /// )?;
+    /// assert!(db_with_grants.has_grants());
+    ///
+    /// let db_without_grants = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
+    /// assert!(!db_without_grants.has_grants());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_grants(&self) -> bool {
+        self.grants().next().is_some()
     }
 }

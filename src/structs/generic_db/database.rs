@@ -3,13 +3,13 @@
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, DatabaseLike, ForeignKeyLike, FunctionLike, IndexLike,
-        PolicyLike, RoleLike, TableLike, TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnLike, DatabaseLike, ForeignKeyLike, FunctionLike, GrantLike,
+        IndexLike, PolicyLike, RoleLike, TableLike, TriggerLike, UniqueIndexLike,
     },
 };
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R> DatabaseLike
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> DatabaseLike
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike<DB = Self>,
     C: ColumnLike<DB = Self>,
@@ -21,6 +21,7 @@ where
     Tr: TriggerLike<DB = Self>,
     P: PolicyLike<DB = Self>,
     R: RoleLike<DB = Self>,
+    G: GrantLike<DB = Self>,
 {
     type Table = T;
     type Column = C;
@@ -32,6 +33,7 @@ where
     type Trigger = Tr;
     type Policy = P;
     type Role = R;
+    type Grant = G;
 
     #[inline]
     fn catalog_name(&self) -> &str {
@@ -93,5 +95,9 @@ where
 
     fn roles(&self) -> impl Iterator<Item = &Self::Role> {
         self.roles.iter().map(|(r, _)| r.as_ref())
+    }
+
+    fn grants(&self) -> impl Iterator<Item = &Self::Grant> {
+        self.grants.iter().map(|(g, _)| g.as_ref())
     }
 }

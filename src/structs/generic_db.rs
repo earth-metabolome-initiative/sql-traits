@@ -10,12 +10,12 @@ pub use builder::GenericDBBuilder;
 pub use sqlparser::{ParserDB, ParserDBBuilder};
 
 use crate::traits::{
-    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike,
-    TableLike, TriggerLike, UniqueIndexLike,
+    CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, GrantLike, IndexLike,
+    PolicyLike, RoleLike, TableLike, TriggerLike, UniqueIndexLike,
 };
 
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
+pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -27,6 +27,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    G: GrantLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -52,9 +53,11 @@ where
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
     /// List of roles in the database.
     roles: Vec<(Rc<R>, R::Meta)>,
+    /// List of grants in the database.
+    grants: Vec<(Rc<G>, G::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R> Debug for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> Debug for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -66,6 +69,7 @@ where
     P: PolicyLike,
     Tr: TriggerLike,
     R: RoleLike,
+    G: GrantLike,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericDB")
@@ -81,11 +85,12 @@ where
             .field("policies", &self.policies.len())
             .field("check_constraints", &self.check_constraints.len())
             .field("roles", &self.roles.len())
+            .field("grants", &self.grants.len())
             .finish()
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R> Clone for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> Clone for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -97,6 +102,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    G: GrantLike,
 {
     fn clone(&self) -> Self {
         Self {
@@ -112,11 +118,12 @@ where
             policies: self.policies.clone(),
             check_constraints: self.check_constraints.clone(),
             roles: self.roles.clone(),
+            grants: self.grants.clone(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R> GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -128,10 +135,11 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    G: GrantLike,
 {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
-    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R> {
+    pub fn new(catalog_name: String) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G> {
         GenericDBBuilder::new(catalog_name)
     }
 

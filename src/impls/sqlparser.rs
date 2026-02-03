@@ -10,4 +10,7 @@ mod create_role;
 mod create_table;
 mod create_trigger;
 mod foreign_key_constraint;
+mod grant;
 mod unique_constraint;
+
+pub use grant::grant_matches_revoke;

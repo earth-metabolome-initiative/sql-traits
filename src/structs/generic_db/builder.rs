@@ -5,13 +5,13 @@ use std::rc::Rc;
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike, PolicyLike,
-        RoleLike, TableLike, TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, GrantLike, IndexLike,
+        PolicyLike, RoleLike, TableLike, TriggerLike, UniqueIndexLike,
     },
 };
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>
+pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -23,6 +23,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    G: GrantLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -48,9 +49,11 @@ where
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
     /// List of roles in the database.
     roles: Vec<(Rc<R>, R::Meta)>,
+    /// List of grants in the database.
+    grants: Vec<(Rc<G>, G::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -62,10 +65,16 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    G: GrantLike,
 {
     /// Returns a mutable reference to the tables list.
     pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Rc<T>, T::Meta)> {
         &mut self.tables
+    }
+
+    /// Returns a mutable reference to the grants list.
+    pub(crate) fn grants_mut(&mut self) -> &mut Vec<(Rc<G>, G::Meta)> {
+        &mut self.grants
     }
 
     #[must_use]
@@ -84,11 +93,12 @@ where
             policies: Vec::new(),
             check_constraints: Vec::new(),
             roles: Vec::new(),
+            grants: Vec::new(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -100,6 +110,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    G: GrantLike,
 {
     /// Sets the timezone for the database.
     #[must_use]
@@ -267,10 +278,27 @@ where
         self.roles.extend(roles);
         self
     }
+
+    /// Adds a grant with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_grant(mut self, grant: Rc<G>, metadata: G::Meta) -> Self {
+        self.grants.push((grant, metadata));
+        self
+    }
+
+    /// Adds multiple grants with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_grants(mut self, grants: impl IntoIterator<Item = (Rc<G>, G::Meta)>) -> Self {
+        self.grants.extend(grants);
+        self
+    }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R> From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>>
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, G>
+    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>>
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
 where
     T: TableLike,
     C: ColumnLike,
@@ -282,8 +310,9 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    G: GrantLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R>) -> Self {
+    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -302,6 +331,7 @@ where
         builder.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
         builder.roles.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        // Grants are not sorted as their order may be significant
 
         GenericDB {
             catalog_name,
@@ -316,6 +346,7 @@ where
             policies: builder.policies,
             check_constraints: builder.check_constraints,
             roles: builder.roles,
+            grants: builder.grants,
         }
     }
 }

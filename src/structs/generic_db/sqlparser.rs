@@ -11,8 +11,8 @@ use sqlparser::{
     ast::{
         AlterTableOperation, CheckConstraint, ColumnDef, ColumnOption, CreateFunction,
         CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger,
-        DataType, ExactNumberInfo, Expr, ForeignKeyConstraint, Ident, IndexColumn, ObjectName,
-        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Statement,
+        DataType, ExactNumberInfo, Expr, ForeignKeyConstraint, Grant, Ident, IndexColumn,
+        ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Statement,
         TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::{Dialect, GenericDialect},
@@ -44,6 +44,7 @@ pub type ParserDBBuilder = super::GenericDBBuilder<
     CreateTrigger,
     CreatePolicy,
     CreateRole,
+    Grant,
 >;
 
 /// A type alias for the result of processing check constraints.
@@ -101,6 +102,7 @@ pub type ParserDB = GenericDB<
     CreateTrigger,
     CreatePolicy,
     CreateRole,
+    Grant,
 >;
 
 impl ParserDB {
@@ -671,6 +673,22 @@ impl ParserDB {
                 }
                 Statement::CreateRole(create_role) => {
                     builder = builder.add_role(Rc::new(create_role), ());
+                }
+                Statement::Grant(grant) => {
+                    builder = builder.add_grant(Rc::new(grant), ());
+                }
+                Statement::Revoke(revoke) => {
+                    // Find and remove matching grants
+                    let grants = builder.grants_mut();
+                    let original_len = grants.len();
+                    grants.retain(|(grant, ())| {
+                        !crate::impls::grant_matches_revoke(grant.as_ref(), &revoke)
+                    });
+                    if grants.len() == original_len {
+                        return Err(crate::errors::Error::RevokeNotFound(format!(
+                            "No matching grant found for REVOKE: {revoke}"
+                        )));
+                    }
                 }
                 Statement::Set(sqlparser::ast::Set::SetTimeZone { local, value }) => {
                     if local {
