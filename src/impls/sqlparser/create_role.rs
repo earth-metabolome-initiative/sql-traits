@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_basic_role() {
-        let db = ParserDB::parse("CREATE ROLE test_role;", &PostgreSqlDialect {}).unwrap();
+        let db = ParserDB::parse::<PostgreSqlDialect>("CREATE ROLE test_role;").unwrap();
         let role = db.role("test_role").unwrap();
 
         assert_eq!(role.name(), "test_role");

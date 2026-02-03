@@ -144,12 +144,11 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     ///     -- This is a test table
     ///     CREATE TABLE test_table (id INT);
     ///     "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "test_table").unwrap();
     /// let metadata = db.table_metadata(table).unwrap();
@@ -184,7 +183,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse("CREATE TABLE t (id INT);", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
     /// let table = db.table(None, "t").unwrap();
     /// let column = table.column("id", &db).unwrap();
     /// // The metadata for columns in ParserDB is currently unit ()
@@ -208,7 +207,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse("CREATE TABLE t (id INT UNIQUE);", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT UNIQUE);")?;
     /// let table = db.table(None, "t").unwrap();
     /// let index = table.unique_indices(&db).next().unwrap();
     /// // The metadata for unique indices in ParserDB is currently unit ()
@@ -233,7 +232,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse("CREATE TABLE t (id INT CHECK (id > 0));", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT CHECK (id > 0));")?;
     /// let table = db.table(None, "t").unwrap();
     /// let check = table.check_constraints(&db).next().unwrap();
     /// assert!(db.check_constraint_metadata(check).is_some());
@@ -256,12 +255,11 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     ///     CREATE TABLE parent (id INT PRIMARY KEY);
     ///     CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
     ///     "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child = db.table(None, "child").unwrap();
     /// let fk = child.foreign_keys(&db).next().unwrap();
@@ -297,10 +295,8 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
-    ///     "CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';",
-    ///     &GenericDialect {},
-    /// )?;
+    /// let db =
+    ///     ParserDB::parse::<GenericDialect>("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
     /// let func = db.function("my_func").unwrap();
     /// assert_eq!(func.name(), "my_func");
     /// assert!(db.function("non_existent").is_none());
@@ -328,10 +324,8 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
-    ///     "CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';",
-    ///     &GenericDialect {},
-    /// )?;
+    /// let db =
+    ///     ParserDB::parse::<GenericDialect>("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
     /// let func = db.function("my_func").unwrap();
     /// assert!(db.function_metadata(func).is_some());
     /// # Ok(())
@@ -356,13 +350,12 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     ///     CREATE TABLE t (id INT);
     ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
     ///     CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
     ///     "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.trigger("my_trigger").unwrap();
     /// assert_eq!(trigger.name(), "my_trigger");
@@ -391,13 +384,12 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     ///     CREATE TABLE t (id INT);
     ///     CREATE FUNCTION f() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
     ///     CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE PROCEDURE f();
     ///     "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.trigger("my_trigger").unwrap();
     /// assert!(db.trigger_metadata(trigger).is_some());
@@ -433,7 +425,7 @@ where
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::parse("CREATE ROLE admin SUPERUSER;", &PostgreSqlDialect {})?;
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE ROLE admin SUPERUSER;")?;
     /// let role = db.role("admin").unwrap();
     /// assert_eq!(role.name(), "admin");
     /// assert!(role.is_superuser());
@@ -462,7 +454,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse("CREATE ROLE admin;", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE ROLE admin;")?;
     /// let role = db.role("admin").unwrap();
     /// assert!(db.role_metadata(role).is_some());
     /// # Ok(())
@@ -483,7 +475,7 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse("CREATE TABLE t (id INT);", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
     /// assert_eq!(db.catalog_name(), "unknown_catalog");
     /// # Ok(())
     /// # }
@@ -502,13 +494,12 @@ where
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// -- table b
     /// CREATE TABLE b (id INT);
     /// -- table a
     /// CREATE TABLE a (id INT);",
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let mut parsed: Vec<(&str, Option<&str>)> = db
@@ -532,14 +523,13 @@ where
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let mut db = ParserDB::parse(
+    /// let mut db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     ///     -- original doc a
     ///     CREATE TABLE a (id INT);
     ///     -- original doc b
     ///     CREATE TABLE b (id INT);
     ///     "#,
-    ///     &GenericDialect,
     /// )?;
     /// let metadata = db.tables_metadata_mut().collect::<Vec<_>>();
     /// assert_eq!(metadata.len(), db.number_of_tables());

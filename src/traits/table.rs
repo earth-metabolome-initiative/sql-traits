@@ -29,7 +29,7 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse("CREATE TABLE mytable (id INT);", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE mytable (id INT);")?;
     /// let table = db.table(None, "mytable").unwrap();
     /// assert_eq!(table.table_name(), "mytable");
     /// # Ok(())
@@ -45,12 +45,11 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE TABLE MyTable (id INT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let snake_case_table = db.table(None, "my_table").unwrap();
     /// assert!(snake_case_table.is_snake_case());
@@ -76,13 +75,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT, name TEXT);
     /// CREATE FUNCTION my_func() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger BEFORE INSERT ON my_table FOR EACH ROW EXECUTE FUNCTION my_func();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let triggers: Vec<&str> = table.triggers(&db).map(|t| t.name()).collect();
@@ -113,13 +111,12 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     ///     CREATE TABLE my_table (id INT);
     ///     -- the next table to create
     ///     CREATE TABLE my_next_table (id INT);
     /// ",
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let table_next = db.table(None, "my_next_table").unwrap();
@@ -139,10 +136,9 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);"#,
-    ///     &GenericDialect,
     /// )?;
     /// let table_no_schema = db.table(None, "my_table").unwrap();
     /// assert_eq!(table_no_schema.table_schema(), None);
@@ -165,7 +161,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let column_names: Vec<&str> = table.columns(&db).map(|col| col.column_name()).collect();
     /// assert_eq!(column_names, vec!["id", "name"]);
@@ -192,12 +188,11 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_other_table (id INT PRIMARY KEY, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -226,7 +221,7 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db =
-    ///     ParserDB::parse("CREATE TABLE my_table (id INT, name TEXT, age INT);", &GenericDialect {})?;
+    ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert_eq!(table.number_of_columns(&db), 3);
     /// # Ok(())
@@ -249,7 +244,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse("CREATE TABLE my_table (id INT, name TEXT);", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
     /// assert_eq!(id_column.column_name(), "id");
@@ -284,12 +279,11 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE table1 (id INT, name TEXT);
     /// CREATE TABLE table2 (id INT, description TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table1 = db.table(None, "table1").unwrap();
     /// let table2 = db.table(None, "table2").unwrap();
@@ -320,13 +314,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE my_no_pk_table (id INT, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let pk_columns: Vec<&str> =
@@ -366,12 +359,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE composite_pk (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let pk_column = table.primary_key_column(&db).unwrap();
@@ -407,12 +399,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_no_gen_pk_table (id INT PRIMARY KEY, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert!(table.has_surrogate_primary_key(&db));
@@ -439,12 +430,11 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 BIGSERIAL, name TEXT, PRIMARY KEY (id1, id2));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let pk_types = table.primary_key_type(&db);
@@ -473,11 +463,10 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
@@ -506,12 +495,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_no_pk_table (id INT, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert!(table.has_primary_key(&db));
@@ -537,11 +525,10 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, age INT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let non_pk_columns: Vec<&str> =
@@ -575,12 +562,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_pk_only_table (id INT PRIMARY KEY);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert!(table.has_non_primary_key_columns(&db));
@@ -604,12 +590,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert!(!table.has_composite_primary_key(&db));
@@ -635,11 +620,10 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT, CHECK (length(name) > 0));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> =
@@ -668,11 +652,10 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT CHECK (TRUE), name TEXT, CHECK (length(name) > 0));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let non_tautological_ccs: Vec<_> = table
@@ -705,12 +688,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table_with_cc (id INT CHECK (id > 0), name TEXT);
     /// CREATE TABLE my_table_without_cc (id INT, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table_with_cc = db.table(None, "my_table_with_cc").unwrap();
     /// assert!(table_with_cc.has_check_constraints(&db));
@@ -737,12 +719,11 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table_with_non_tautological_cc (id INT CHECK (id > 0), name TEXT);
     /// CREATE TABLE my_table_with_only_tautological_cc (id INT CHECK (TRUE), name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table_with_non_tautological_cc =
     ///     db.table(None, "my_table_with_non_tautological_cc").unwrap();
@@ -771,13 +752,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, age INT CHECK (age > 0));
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id), salary INT);
     /// CREATE TABLE another_table (id INT PRIMARY KEY, value INT CHECK (TRUE));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// assert!(parent_table.has_non_tautological_check_constraints_in_hierarchy(&db));
@@ -810,12 +790,11 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT, name TEXT);
     /// CREATE INDEX my_index ON my_table (name);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let indices: Vec<_> = table.indices(&db).collect();
@@ -842,11 +821,10 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT UNIQUE, name TEXT, UNIQUE (name));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let unique_indices: Vec<_> = table
@@ -874,12 +852,11 @@ pub trait TableLike:
     /// ```
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT, name TEXT, FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_keys = host_table.foreign_keys(&db).collect::<Vec<_>>();
@@ -906,13 +883,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table_with_fk (id INT, name TEXT, FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// CREATE TABLE host_table_without_fk (id INT, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let referenced_table = db.table(None, "referenced_table").unwrap();
     /// assert!(!referenced_table.has_foreign_keys(&db));
@@ -940,13 +916,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, parent_id INT REFERENCES parent_table(id));
     /// CREATE TABLE self_ref_table (id INT PRIMARY KEY, parent_id INT REFERENCES self_ref_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// assert!(child_table.has_non_self_referential_foreign_keys(&db));
@@ -975,7 +950,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
@@ -988,7 +963,6 @@ pub trait TableLike:
     ///     other_id INT REFERENCES other_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let host_table = db.table(None, "host_table").unwrap();
@@ -1027,7 +1001,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table1 (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE referenced_table2 (id INT PRIMARY KEY, name TEXT);
@@ -1035,7 +1009,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table1(id),
     ///     FOREIGN KEY (id) REFERENCES referenced_table2(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let referenced_tables = host_table.referenced_tables(&db);
@@ -1075,7 +1048,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1084,7 +1057,6 @@ pub trait TableLike:
     ///     other_id INT REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let non_self_refs = host_table.non_self_referenced_tables(&db);
@@ -1117,12 +1089,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT PRIMARY KEY REFERENCES referenced_table(id), name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let extension_fks = host_table.extension_foreign_keys(&db).collect::<Vec<_>>();
@@ -1153,7 +1124,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE extended_table (id INT PRIMARY KEY);
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
@@ -1164,7 +1135,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES extended_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let extended_tables = host_table.extended_tables(&db);
@@ -1196,13 +1166,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let root_table = child_table.extension_root_table(&db).unwrap();
@@ -1242,12 +1211,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY);
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let extending_tables = parent_table.extending_tables(&db);
@@ -1281,12 +1249,11 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY);
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// assert!(parent_table.is_extended(&db));
@@ -1314,7 +1281,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE father_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
@@ -1325,7 +1292,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES mother_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let father_table = db.table(None, "father_table").unwrap();
@@ -1375,7 +1341,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE father_table (id INT PRIMARY KEY REFERENCES grandparent_table(id));
@@ -1386,7 +1352,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES mother_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let father_table = db.table(None, "father_table").unwrap();
@@ -1426,7 +1391,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1434,7 +1399,6 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let ancestral_tables = child_table.ancestral_extended_tables(&db);
@@ -1478,7 +1442,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1486,7 +1450,6 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
@@ -1539,13 +1502,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
@@ -1593,13 +1555,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
@@ -1627,13 +1588,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
@@ -1663,7 +1623,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1672,7 +1632,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// CREATE TABLE unrelated_table (id INT PRIMARY KEY, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
@@ -1719,13 +1678,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT UNIQUE, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let singleton_fks = host_table.singleton_foreign_keys(&db).collect::<Vec<_>>();
@@ -1755,7 +1713,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1765,7 +1723,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES host_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let non_self_referential_singleton_fks =
@@ -1798,13 +1755,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (id INT UNIQUE, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// assert!(host_table.has_singleton_foreign_keys(&db));
@@ -1828,7 +1784,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1838,7 +1794,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES host_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let referenced_table = db.table(None, "referenced_table").unwrap();
     /// assert!(!referenced_table.has_non_self_referential_singleton_foreign_keys(&db));
@@ -1865,7 +1820,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1873,7 +1828,6 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
@@ -1915,7 +1869,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT, ancestor_id INT REFERENCES grandparent_table(id));
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1923,7 +1877,6 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
@@ -1961,7 +1914,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -1969,7 +1922,6 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
     /// let dependent_tables: Vec<&str> =
@@ -2002,13 +1954,12 @@ pub trait TableLike:
     /// ```rust
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE child_table (id INT PRIMARY KEY, name TEXT,
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let child_table = db.table(None, "child_table").unwrap();
@@ -2035,7 +1986,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT,
@@ -2046,7 +1997,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// CREATE TABLE unrelated_table (id INT PRIMARY KEY, name TEXT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table1 = db.table(None, "child_table1").unwrap();
     /// let child_table2 = db.table(None, "child_table2").unwrap();
@@ -2115,7 +2065,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE root (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE spouse_table (
@@ -2132,7 +2082,6 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES spouse_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let root = db.table(None, "root").unwrap();
     /// let child_table = db.table(None, "child_table").unwrap();
@@ -2178,10 +2127,9 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);
     ///      CREATE TABLE no_snake_prefix_table (user_id INT, username TEXT);",
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -2214,11 +2162,10 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (user_id INT, user_name TEXT, user_email TEXT);
     ///      CREATE TABLE other_table (id INT, name TEXT);
     ///      CREATE TABLE another_table (user_id INT, username TEXT, email TEXT);",
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let my_table = db.table(None, "my_table").unwrap();
@@ -2254,10 +2201,9 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);
     ///      CREATE TABLE other_table (userid INT, group_id INT, id_team INT);",
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -2290,11 +2236,10 @@ pub trait TableLike:
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (user_id INT, group_id INT, team_id INT);
     ///      CREATE TABLE other_table (user_id INT, groupid INT, teamid INT);
     ///      CREATE TABLE another_table (id INT, name TEXT);",
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let my_table = db.table(None, "my_table").unwrap();
@@ -2328,13 +2273,12 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// ALTER TABLE my_table ENABLE ROW LEVEL SECURITY;
     /// CREATE TABLE my_other_table (id INT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// assert!(table.has_row_level_security(&db));
@@ -2362,7 +2306,7 @@ pub trait TableLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE forced_table (id INT);
     /// ALTER TABLE forced_table ENABLE ROW LEVEL SECURITY;
@@ -2371,7 +2315,6 @@ pub trait TableLike:
     /// ALTER TABLE normal_rls_table ENABLE ROW LEVEL SECURITY;
     /// CREATE TABLE no_rls_table (id INT);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let forced = db.table(None, "forced_table").unwrap();
     /// assert!(forced.has_row_level_security(&db));
@@ -2403,7 +2346,7 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     /// use sqlparser::ast::CreatePolicyCommand;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY select_policy ON my_table FOR SELECT USING (id > 0);
@@ -2412,7 +2355,6 @@ pub trait TableLike:
     /// CREATE TABLE other_table (id INT);
     /// CREATE POLICY other_policy ON other_table USING (true);
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
@@ -2555,7 +2497,7 @@ mod tests {
                     UNIQUE(name)
                 );
             ";
-            let db = ParserDB::parse(sql, &GenericDialect {}).expect("Failed to parse SQL");
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
             let table = db.table(None, "users").expect("Table not found");
 
             let table_ref = &table;
@@ -2592,7 +2534,7 @@ mod tests {
                 CREATE TABLE parent (id INT PRIMARY KEY);
                 CREATE TABLE child (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));
             ";
-            let db = ParserDB::parse(sql, &GenericDialect {}).expect("Failed to parse SQL");
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
             let parent = db.table(None, "parent").expect("Parent not found");
             let child = db.table(None, "child").expect("Child not found");
 

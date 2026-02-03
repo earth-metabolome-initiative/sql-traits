@@ -25,10 +25,7 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone {
     /// use sql_traits::prelude::*;
     /// use sqlparser::ast::Expr;
     ///
-    /// let db = ParserDB::parse(
-    ///    "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
-    ///     &GenericDialect,
-    /// )?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);")?;
     /// let table = db.table(None, "users").unwrap();
     /// let index = table.indices(&db).next().unwrap();
     /// let expr = index.expression(&db);
@@ -52,9 +49,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "users").unwrap();
     /// let index = table.indices(&db).next().unwrap();
@@ -75,9 +71,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "users").unwrap();
     /// let index = table.indices(&db).next().unwrap();
@@ -103,9 +98,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
-    ///     &GenericDialect,
     /// )?;
     /// let table = db.table(None, "users").unwrap();
     /// let index = table.indices(&db).next().unwrap();

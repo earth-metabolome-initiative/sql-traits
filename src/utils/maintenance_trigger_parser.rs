@@ -272,8 +272,8 @@ mod tests {
     use crate::{structs::ParserDB, traits::DatabaseLike};
 
     fn parse(schema_sql: &str, body: &str) -> Result<usize, ()> {
-        let db = ParserDB::parse(schema_sql, &GenericDialect {})
-            .expect("Failed to create DB from schema");
+        let db =
+            ParserDB::parse::<GenericDialect>(schema_sql).expect("Failed to create DB from schema");
         let table = db.table(None, "t").expect("Failed to find table 't'");
         parse_maintenance_body(body, &table, &db).map(|v| v.len())
     }

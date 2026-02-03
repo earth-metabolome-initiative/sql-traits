@@ -28,7 +28,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -37,7 +37,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_keys: Vec<_> = host_table.foreign_keys(&db).collect();
@@ -58,7 +57,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -67,7 +66,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_keys: Vec<_> = host_table.foreign_keys(&db).collect();
@@ -93,7 +91,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -101,7 +99,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db).next().expect("Should have a foreign key");
@@ -130,7 +127,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -138,7 +135,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db).next().expect("Should have a foreign key");
@@ -166,7 +162,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE host_table (
@@ -175,7 +171,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_id1, ref_id2) REFERENCES referenced_table(id1, id2)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db).next().expect("Should have a foreign key");
@@ -206,7 +201,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -220,7 +215,6 @@ pub trait ForeignKeyLike:
     /// FOREIGN KEY (ref_id1, ref_id2) REFERENCES composite_fk_table(ref_id1, ref_id2)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let host_table = db.table(None, "host_table").unwrap();
@@ -261,7 +255,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
     /// CREATE TABLE parent_table (id INT, FOREIGN KEY (id) REFERENCES grandparent_table(id));
@@ -271,7 +265,6 @@ pub trait ForeignKeyLike:
     ///   FOREIGN KEY (id) REFERENCES grandparent_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let host_columns = host_table.foreign_keys(&db).collect::<Vec<_>>();
@@ -316,7 +309,7 @@ pub trait ForeignKeyLike:
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE host_table (
@@ -325,7 +318,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_id1, ref_id2) REFERENCES referenced_table(id1, id2)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db).next().expect("Should have a foreign key");
@@ -352,7 +344,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE single_fk_table (
@@ -365,7 +357,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_id1, ref_id2) REFERENCES referenced_table(id1, id2)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let single_fk_table = db.table(None, "single_fk_table").unwrap();
     /// let composite_fk_table = db.table(None, "composite_fk_table").unwrap();
@@ -391,7 +382,7 @@ pub trait ForeignKeyLike:
     /// use sql_traits::prelude::*;
     /// use sqlparser::ast::ConstraintReferenceMatchKind;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -399,7 +390,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id) MATCH FULL
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db).next().expect("Should have a foreign key");
@@ -417,7 +407,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE full_match_table (
@@ -429,7 +419,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let full_match_table = db.table(None, "full_match_table").unwrap();
     /// let normal_table = db.table(None, "normal_table").unwrap();
@@ -460,7 +449,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE nullable_host_table (
@@ -472,7 +461,6 @@ pub trait ForeignKeyLike:
     /// FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let nullable_host_table = db.table(None, "nullable_host_table").unwrap();
     /// let not_null_host_table = db.table(None, "not_null_host_table").unwrap();
@@ -515,7 +503,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE nullable_fk_table (
@@ -531,7 +519,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id) MATCH FULL
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let nullable_fk_table = db.table(None, "nullable_fk_table").unwrap();
     /// let not_null_fk_table = db.table(None, "not_null_fk_table").unwrap();
@@ -572,7 +559,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE host_table (
@@ -581,7 +568,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_id1, ref_id2) REFERENCES referenced_table(id1, id2)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db).next().expect("Should have a foreign key");
@@ -613,7 +599,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE host_table (
@@ -627,7 +613,6 @@ pub trait ForeignKeyLike:
     ///   FOREIGN KEY (ref_id1, ref_id2) REFERENCES composite_fk_table(ref_id1, ref_id2)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let host_table = db.table(None, "host_table").unwrap();
@@ -668,7 +653,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE self_ref_table (
     ///     id INT PRIMARY KEY,
@@ -682,7 +667,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (other_id) REFERENCES other_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let self_ref_table = db.table(None, "self_ref_table").unwrap();
     /// let normal_ref_table = db.table(None, "normal_ref_table").unwrap();
@@ -712,7 +696,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE grandparent (id INT PRIMARY KEY);
     /// CREATE TABLE parent (id INT PRIMARY KEY, FOREIGN KEY (id) REFERENCES grandparent(id));
@@ -730,7 +714,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (other_id) REFERENCES other(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let child_table = db.table(None, "child").unwrap();
     /// let foreign_keys: Vec<_> = child_table.foreign_keys(&db).collect();
@@ -773,7 +756,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE pk_ref_table (
@@ -785,7 +768,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_name) REFERENCES referenced_table(name)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let pk_ref_table = db.table(None, "pk_ref_table").unwrap();
     /// let non_pk_ref_table = db.table(None, "non_pk_ref_table").unwrap();
@@ -829,7 +811,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE referenced_table_with_unique (id INT PRIMARY KEY, name TEXT, UNIQUE(name), UNIQUE(id, name));
@@ -844,7 +826,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (referenced_table_with_unique_id, ref_name) REFERENCES referenced_table_with_unique(id, name)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let pk_ref_table = db.table(None, "pk_ref_table").unwrap();
     /// let non_pk_ref_table = db.table(None, "non_pk_ref_table").unwrap();
@@ -895,7 +876,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE pk_host_table (
@@ -908,7 +889,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let pk_host_table = db.table(None, "pk_host_table").unwrap();
     /// let non_pk_host_table = db.table(None, "non_pk_host_table").unwrap();
@@ -949,7 +929,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
     /// CREATE TABLE composite_pk_table (
@@ -963,7 +943,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let composite_pk_table = db.table(None, "composite_pk_table").unwrap();
     /// let single_pk_table = db.table(None, "single_pk_table").unwrap();
@@ -995,7 +974,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// CREATE TABLE full_ref_table (
@@ -1008,7 +987,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_id1) REFERENCES referenced_composite_pk_table(id1)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let full_ref_table = db.table(None, "full_ref_table").unwrap();
     /// let partial_ref_table = db.table(None, "partial_ref_table").unwrap();
@@ -1044,7 +1022,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE parent_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE extension_table (
@@ -1062,7 +1040,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES self_ref_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let extension_table = db.table(None, "extension_table").unwrap();
     /// let reference_table = db.table(None, "reference_table").unwrap();
@@ -1100,7 +1077,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
     /// CREATE TABLE host_table (
@@ -1114,7 +1091,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let singleton_table = db.table(None, "singleton_table").unwrap();
@@ -1162,7 +1138,7 @@ pub trait ForeignKeyLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT, UNIQUE(id, name));
     /// CREATE TABLE host_table (
@@ -1171,7 +1147,6 @@ pub trait ForeignKeyLike:
     ///     FOREIGN KEY (ref_id, ref_name) REFERENCES referenced_table(id, name)
     /// );
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db).next().expect("Should have a foreign key");

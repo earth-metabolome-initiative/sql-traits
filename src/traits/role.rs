@@ -21,7 +21,7 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::parse("CREATE ROLE admin;", &PostgreSqlDialect {})?;
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE ROLE admin;")?;
     /// let role = db.role("admin").unwrap();
     /// assert_eq!(role.name(), "admin");
     /// # Ok(())
@@ -37,12 +37,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE super_admin SUPERUSER;
     /// CREATE ROLE normal_user;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let super_role = db.role("super_admin").unwrap();
@@ -63,12 +62,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE db_creator CREATEDB;
     /// CREATE ROLE normal_user;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let creator = db.role("db_creator").unwrap();
@@ -89,12 +87,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE role_manager CREATEROLE;
     /// CREATE ROLE normal_user;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let manager = db.role("role_manager").unwrap();
@@ -116,12 +113,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE inheriting_role INHERIT;
     /// CREATE ROLE non_inheriting NOINHERIT;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let inheriting = db.role("inheriting_role").unwrap();
@@ -142,12 +138,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE login_user LOGIN;
     /// CREATE ROLE nologin_role NOLOGIN;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let login = db.role("login_user").unwrap();
@@ -168,12 +163,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE bypass_role BYPASSRLS;
     /// CREATE ROLE normal_role;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let bypass = db.role("bypass_role").unwrap();
@@ -194,12 +188,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE repl_role REPLICATION;
     /// CREATE ROLE normal_role;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let repl = db.role("repl_role").unwrap();
@@ -223,12 +216,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE limited_role CONNECTION LIMIT 5;
     /// CREATE ROLE unlimited_role;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let limited = db.role("limited_role").unwrap();
@@ -249,12 +241,11 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE parent_role;
     /// CREATE ROLE child_role IN ROLE parent_role;
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let child = db.role("child_role").unwrap();
@@ -278,13 +269,12 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     r#"
     /// CREATE ROLE my_role;
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table TO my_role USING (true);
     /// "#,
-    ///     &PostgreSqlDialect {},
     /// )?;
     ///
     /// let role = db.role("my_role").unwrap();

@@ -20,7 +20,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -29,7 +29,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert_eq!(trigger.name(), "my_trigger");
@@ -77,7 +76,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -86,7 +85,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// let table = trigger.table(&db);
@@ -133,7 +131,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -142,7 +140,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// let events = trigger.events();
@@ -190,7 +187,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -199,7 +196,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert!(matches!(trigger.timing(), Some(sqlparser::ast::TriggerPeriod::After)));
@@ -242,7 +238,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -251,7 +247,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// assert!(matches!(
@@ -305,7 +300,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE my_table (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -314,7 +309,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
     /// let function = trigger.function(&db).unwrap();
@@ -369,7 +363,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// use sql_traits::prelude::*;
     ///
     /// // Example of a maintenance trigger
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE brands (id INT, edited_at TIMESTAMP);
     /// CREATE OR REPLACE FUNCTION update_brands_edited_at() RETURNS TRIGGER AS $$
@@ -383,14 +377,13 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEFORE UPDATE ON brands
     /// FOR EACH ROW EXECUTE FUNCTION update_brands_edited_at();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let trigger = db.triggers().next().unwrap();
     /// assert!(trigger.is_maintenance_trigger(&db));
     ///
     /// // Example of a non-maintenance trigger (extra logic)
-    /// let db2 = ParserDB::parse(
+    /// let db2 = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE brands (id INT);
     /// CREATE OR REPLACE FUNCTION complex_trigger() RETURNS TRIGGER AS $$
@@ -405,7 +398,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEFORE UPDATE ON brands
     /// FOR EACH ROW EXECUTE FUNCTION complex_trigger();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let complex = db2.triggers().next().unwrap();
     /// assert!(!complex.is_maintenance_trigger(&db2));
@@ -436,7 +428,7 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE TABLE brands (id INT, edited_at TIMESTAMP, name TEXT);
     /// CREATE OR REPLACE FUNCTION update_stuff() RETURNS TRIGGER AS $$
@@ -451,7 +443,6 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     /// BEFORE UPDATE ON brands
     /// FOR EACH ROW EXECUTE FUNCTION update_stuff();
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     ///
     /// let trigger = db.triggers().next().unwrap();
@@ -559,7 +550,7 @@ mod tests {
             EXECUTE FUNCTION update_timestamp();
         ";
 
-        let db = ParserDB::parse(sql, &GenericDialect {}).expect("Failed to parse SQL");
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let trigger = db.triggers().next().expect("No trigger found");
 
         // Use reference to trigger
@@ -613,7 +604,7 @@ mod tests {
         };
 
         // Create a separate DB that doesn't have the function
-        let db = ParserDB::parse("CREATE TABLE users (id INT);", &GenericDialect {})
+        let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT);")
             .expect("Failed to create DB");
 
         // function() should return None because "non_existent_function" is not in db
@@ -637,7 +628,7 @@ mod tests {
             EXECUTE FUNCTION atomic_calc();
         ";
 
-        let db = ParserDB::parse(sql, &GenericDialect {}).expect("Failed to parse SQL");
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let trigger = db.triggers().next().expect("No trigger found");
         let trigger_ref = &trigger;
 

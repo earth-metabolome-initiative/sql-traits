@@ -69,7 +69,7 @@ type UniqueConstraintResult = (
 /// use sql_traits::prelude::*;
 /// use sqlparser::dialect::GenericDialect;
 ///
-/// let db = ParserDB::parse("CREATE TABLE users (id INT PRIMARY KEY);", &GenericDialect {})?;
+/// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY);")?;
 /// let table = db.table(None, "users").unwrap();
 /// assert_eq!(table.table_name(), "users");
 /// # Ok(())
@@ -84,7 +84,7 @@ type UniqueConstraintResult = (
 /// use sqlparser::dialect::PostgreSqlDialect;
 ///
 /// let sql = "CREATE ROLE admin SUPERUSER LOGIN;";
-/// let db = ParserDB::parse(sql, &PostgreSqlDialect {})?;
+/// let db = ParserDB::parse::<PostgreSqlDialect>(sql)?;
 /// let role = db.role("admin").unwrap();
 /// assert!(role.is_superuser());
 /// # Ok(())
@@ -706,10 +706,13 @@ impl ParserDB {
 
     /// Parses SQL using the specified dialect.
     ///
+    /// The dialect type parameter `D` must implement both `Dialect` and
+    /// `Default`. This allows calling the method with turbofish syntax to
+    /// specify the dialect.
+    ///
     /// # Arguments
     ///
     /// * `sql` - The SQL string to parse.
-    /// * `dialect` - The SQL dialect to use for parsing.
     ///
     /// # Errors
     ///
@@ -724,17 +727,18 @@ impl ParserDB {
     /// use sqlparser::dialect::{GenericDialect, PostgreSqlDialect};
     ///
     /// // Using GenericDialect
-    /// let db = ParserDB::parse("CREATE TABLE users (id INT PRIMARY KEY);", &GenericDialect {})?;
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY);")?;
     /// assert_eq!(db.table(None, "users").unwrap().table_name(), "users");
     ///
     /// // Using PostgreSqlDialect
-    /// let db = ParserDB::parse("CREATE ROLE admin SUPERUSER;", &PostgreSqlDialect {})?;
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE ROLE admin SUPERUSER;")?;
     /// assert!(db.role("admin").unwrap().is_superuser());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn parse(sql: &str, dialect: &impl Dialect) -> Result<Self, crate::errors::Error> {
-        let mut parser = Parser::new(dialect).try_with_sql(sql)?;
+    pub fn parse<D: Dialect + Default>(sql: &str) -> Result<Self, crate::errors::Error> {
+        let dialect = D::default();
+        let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
 

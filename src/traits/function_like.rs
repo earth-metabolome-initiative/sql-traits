@@ -20,11 +20,10 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let function = db.functions().next().expect("Function should exist");
     /// assert_eq!(function.name(), "add_one");
@@ -41,12 +40,11 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE FUNCTION add(x INT, y INT) RETURNS INT AS 'SELECT x + y;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT "Hello, " || name;';
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let add_fn = db.functions().find(|f| f.name() == "add").expect("Function should exist");
     /// let greet_fn = db.functions().find(|f| f.name() == "greet").expect("Function should exist");
@@ -69,12 +67,11 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE FUNCTION add(x INTEGER, y INT) RETURNS INT AS 'SELECT x + y;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT "Hello, " || name;';
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let add_fn = db.function("add").expect("Function should exist");
     /// let greet_fn = db.function("greet").expect("Function should exist");
@@ -95,13 +92,12 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT "Hello, " || name;';
     /// CREATE FUNCTION do_nothing() AS 'SELECT;';
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let add_one_fn = db.function("add_one").expect("Function should exist");
     /// let greet_fn = db.function("greet").expect("Function should exist");
@@ -122,11 +118,10 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let function = db.functions().next().expect("Function should exist");
     /// assert_eq!(function.body(), Some("SELECT x + 1;"));
@@ -143,13 +138,12 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse(
+    /// let db = ParserDB::parse::<GenericDialect>(
     ///     r#"
     /// CREATE FUNCTION add_one(x INT) RETURNS INTEGER AS 'SELECT x + 1;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT "Hello, " || name;';
     /// CREATE FUNCTION do_nothing() AS 'SELECT;';
     /// "#,
-    ///     &GenericDialect,
     /// )?;
     /// let add_one_fn = db.function("add_one").expect("Function should exist");
     /// let greet_fn = db.function("greet").expect("Function should exist");
