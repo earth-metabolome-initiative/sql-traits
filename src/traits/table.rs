@@ -2343,10 +2343,51 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
-    #[inline]
-    fn has_row_level_security(&self, _database: &Self::DB) -> bool {
-        false
-    }
+    fn has_row_level_security(&self, _database: &Self::DB) -> bool;
+
+    /// Returns whether the table has forced Row Level Security (RLS).
+    ///
+    /// When RLS is forced, the security policies apply even to the table owner,
+    /// who would normally bypass RLS policies. This is useful when the table
+    /// owner should also be subject to the same row-level restrictions as
+    /// other users.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse(
+    ///     r#"
+    /// CREATE TABLE forced_table (id INT);
+    /// ALTER TABLE forced_table ENABLE ROW LEVEL SECURITY;
+    /// ALTER TABLE forced_table FORCE ROW LEVEL SECURITY;
+    /// CREATE TABLE normal_rls_table (id INT);
+    /// ALTER TABLE normal_rls_table ENABLE ROW LEVEL SECURITY;
+    /// CREATE TABLE no_rls_table (id INT);
+    /// "#,
+    ///     &GenericDialect,
+    /// )?;
+    /// let forced = db.table(None, "forced_table").unwrap();
+    /// assert!(forced.has_row_level_security(&db));
+    /// assert!(forced.has_forced_row_level_security(&db));
+    ///
+    /// let normal_rls = db.table(None, "normal_rls_table").unwrap();
+    /// assert!(normal_rls.has_row_level_security(&db));
+    /// assert!(!normal_rls.has_forced_row_level_security(&db));
+    ///
+    /// let no_rls = db.table(None, "no_rls_table").unwrap();
+    /// assert!(!no_rls.has_row_level_security(&db));
+    /// assert!(!no_rls.has_forced_row_level_security(&db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn has_forced_row_level_security(&self, _database: &Self::DB) -> bool;
 
     /// Iterates over the policies associated with the table.
     ///
@@ -2438,6 +2479,10 @@ where
 
     fn has_row_level_security(&self, database: &Self::DB) -> bool {
         T::has_row_level_security(self, database)
+    }
+
+    fn has_forced_row_level_security(&self, database: &Self::DB) -> bool {
+        T::has_forced_row_level_security(self, database)
     }
 
     fn primary_key_columns<'db>(

@@ -545,4 +545,126 @@ pub trait DatabaseLike: Clone + Debug {
     fn has_roles(&self) -> bool {
         self.roles().next().is_some()
     }
+
+    /// Iterates over tables that have Row Level Security (RLS) enabled.
+    ///
+    /// This includes tables with either regular RLS or forced RLS.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse(
+    ///     r#"
+    /// CREATE TABLE rls_table (id INT);
+    /// ALTER TABLE rls_table ENABLE ROW LEVEL SECURITY;
+    /// CREATE TABLE forced_rls_table (id INT);
+    /// ALTER TABLE forced_rls_table ENABLE ROW LEVEL SECURITY;
+    /// ALTER TABLE forced_rls_table FORCE ROW LEVEL SECURITY;
+    /// CREATE TABLE no_rls_table (id INT);
+    /// "#,
+    ///     &GenericDialect,
+    /// )?;
+    ///
+    /// let rls_table_names: Vec<&str> = db.rls_tables().map(|t| t.table_name()).collect();
+    /// assert_eq!(rls_table_names.len(), 2);
+    /// assert!(rls_table_names.contains(&"rls_table"));
+    /// assert!(rls_table_names.contains(&"forced_rls_table"));
+    /// assert!(!rls_table_names.contains(&"no_rls_table"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn rls_tables(&self) -> impl Iterator<Item = &Self::Table> {
+        self.tables().filter(|table| table.has_row_level_security(self))
+    }
+
+    /// Iterates over tables that have forced Row Level Security (RLS) enabled.
+    ///
+    /// Forced RLS means that even the table owner is subject to RLS policies.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse(
+    ///     r#"
+    /// CREATE TABLE rls_table (id INT);
+    /// ALTER TABLE rls_table ENABLE ROW LEVEL SECURITY;
+    /// CREATE TABLE forced_rls_table (id INT);
+    /// ALTER TABLE forced_rls_table ENABLE ROW LEVEL SECURITY;
+    /// ALTER TABLE forced_rls_table FORCE ROW LEVEL SECURITY;
+    /// CREATE TABLE no_rls_table (id INT);
+    /// "#,
+    ///     &GenericDialect,
+    /// )?;
+    ///
+    /// let forced_rls_table_names: Vec<&str> =
+    ///     db.forced_rls_tables().map(|t| t.table_name()).collect();
+    /// assert_eq!(forced_rls_table_names.len(), 1);
+    /// assert_eq!(forced_rls_table_names[0], "forced_rls_table");
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn forced_rls_tables(&self) -> impl Iterator<Item = &Self::Table> {
+        self.tables().filter(|table| table.has_forced_row_level_security(self))
+    }
+
+    /// Returns whether the database has any tables with Row Level Security
+    /// enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db_with_rls = ParserDB::parse(
+    ///     r#"
+    /// CREATE TABLE t (id INT);
+    /// ALTER TABLE t ENABLE ROW LEVEL SECURITY;
+    /// "#,
+    ///     &GenericDialect,
+    /// )?;
+    /// assert!(db_with_rls.has_rls_tables());
+    ///
+    /// let db_without_rls = ParserDB::parse("CREATE TABLE t (id INT);", &GenericDialect {})?;
+    /// assert!(!db_without_rls.has_rls_tables());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn has_rls_tables(&self) -> bool {
+        self.rls_tables().next().is_some()
+    }
+
+    /// Returns the number of tables with Row Level Security enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse(
+    ///     r#"
+    /// CREATE TABLE t1 (id INT);
+    /// ALTER TABLE t1 ENABLE ROW LEVEL SECURITY;
+    /// CREATE TABLE t2 (id INT);
+    /// ALTER TABLE t2 ENABLE ROW LEVEL SECURITY;
+    /// CREATE TABLE t3 (id INT);
+    /// "#,
+    ///     &GenericDialect,
+    /// )?;
+    /// assert_eq!(db.number_of_rls_tables(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn number_of_rls_tables(&self) -> usize {
+        self.rls_tables().count()
+    }
 }

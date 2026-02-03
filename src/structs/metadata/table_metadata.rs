@@ -21,6 +21,9 @@ pub struct TableMetadata<T: TableLike> {
     primary_key: Vec<Rc<<T::DB as DatabaseLike>::Column>>,
     /// Whether Row Level Security is enabled for the table.
     rls_enabled: bool,
+    /// Whether Row Level Security is forced for the table (applies to table
+    /// owners too).
+    rls_forced: bool,
     /// The optional documentation associated with the table
     documentation: Option<<T as DocumentationMetadata>::Documentation>,
 }
@@ -35,6 +38,7 @@ impl<T: TableLike> Default for TableMetadata<T> {
             foreign_keys: Vec::new(),
             primary_key: Vec::new(),
             rls_enabled: false,
+            rls_forced: false,
             documentation: None,
         }
     }
@@ -55,6 +59,25 @@ impl<T: TableLike> TableMetadata<T> {
     #[inline]
     pub fn set_rls_enabled(&mut self, rls_enabled: bool) {
         self.rls_enabled = rls_enabled;
+    }
+
+    /// Returns whether Row Level Security is forced for the table.
+    ///
+    /// When RLS is forced, the policies apply even to the table owner,
+    /// unlike regular RLS where the owner bypasses policies.
+    #[inline]
+    pub fn rls_forced(&self) -> bool {
+        self.rls_forced
+    }
+
+    /// Sets whether Row Level Security is forced for the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `rls_forced` - Whether Row Level Security is forced.
+    #[inline]
+    pub fn set_rls_forced(&mut self, rls_forced: bool) {
+        self.rls_forced = rls_forced;
     }
 
     /// Returns an iterator over the references of columns of the table.

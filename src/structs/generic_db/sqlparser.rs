@@ -597,6 +597,24 @@ impl ParserDB {
                                     entry.1.set_rls_enabled(false);
                                 }
                             }
+                            AlterTableOperation::ForceRowLevelSecurity => {
+                                if let Some(entry) = builder
+                                    .tables_mut()
+                                    .iter_mut()
+                                    .find(|entry| entry.0.table_name() == table_name)
+                                {
+                                    entry.1.set_rls_forced(true);
+                                }
+                            }
+                            AlterTableOperation::NoForceRowLevelSecurity => {
+                                if let Some(entry) = builder
+                                    .tables_mut()
+                                    .iter_mut()
+                                    .find(|entry| entry.0.table_name() == table_name)
+                                {
+                                    entry.1.set_rls_forced(false);
+                                }
+                            }
                             _ => {}
                         }
                     }
