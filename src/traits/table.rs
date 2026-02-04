@@ -2464,7 +2464,7 @@ pub trait TableLike:
         self.grants(database).any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
-                    || grant.privileges().any(|p| matches!(p, Action::Select { .. })))
+                    || grant.privileges(database).any(|p| matches!(p, Action::Select { .. })))
         })
     }
 
@@ -2496,7 +2496,7 @@ pub trait TableLike:
         self.grants(database).any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
-                    || grant.privileges().any(|p| matches!(p, Action::Insert { .. })))
+                    || grant.privileges(database).any(|p| matches!(p, Action::Insert { .. })))
         })
     }
 
@@ -2528,7 +2528,7 @@ pub trait TableLike:
         self.grants(database).any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
-                    || grant.privileges().any(|p| matches!(p, Action::Update { .. })))
+                    || grant.privileges(database).any(|p| matches!(p, Action::Update { .. })))
         })
     }
 
@@ -2560,7 +2560,7 @@ pub trait TableLike:
         self.grants(database).any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
-                    || grant.privileges().any(|p| matches!(p, Action::Delete)))
+                    || grant.privileges(database).any(|p| matches!(p, Action::Delete)))
         })
     }
 
@@ -2629,7 +2629,7 @@ pub trait TableLike:
         self.grants(database).any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
-                    || grant.privileges().any(|p| matches!(p, Action::Truncate)))
+                    || grant.privileges(database).any(|p| matches!(p, Action::Truncate)))
         })
     }
 }

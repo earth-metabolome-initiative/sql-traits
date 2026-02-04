@@ -45,12 +45,14 @@ pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata {
     /// ",
     /// )?;
     /// let grant = db.table_grants().next().unwrap();
-    /// let privileges: Vec<_> = grant.privileges().collect();
+    /// let privileges: Vec<_> = grant.privileges(&db).collect();
     /// assert_eq!(privileges.len(), 2);
     /// # Ok(())
     /// # }
     /// ```
-    fn privileges(&self) -> impl Iterator<Item = &Action>;
+    fn privileges<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Action>
+    where
+        Self: 'db;
 
     /// Returns whether this grant represents ALL PRIVILEGES.
     ///
@@ -75,8 +77,8 @@ pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata {
     /// let grants: Vec<_> = db.table_grants().collect();
     /// let all_grant = grants.iter().find(|g| g.is_all_privileges()).unwrap();
     /// let select_grant = grants.iter().find(|g| !g.is_all_privileges()).unwrap();
-    /// assert!(all_grant.privileges().next().is_none()); // empty for ALL
-    /// assert!(select_grant.privileges().next().is_some());
+    /// assert!(all_grant.privileges(&db).next().is_none()); // empty for ALL
+    /// assert!(select_grant.privileges(&db).next().is_some());
     /// # Ok(())
     /// # }
     /// ```
@@ -99,11 +101,13 @@ pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata {
     /// ",
     /// )?;
     /// let grant = db.table_grants().next().unwrap();
-    /// assert_eq!(grant.grantees().count(), 2);
+    /// assert_eq!(grant.grantees(&db).count(), 2);
     /// # Ok(())
     /// # }
     /// ```
-    fn grantees(&self) -> impl Iterator<Item = &Grantee>;
+    fn grantees<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Grantee>
+    where
+        Self: 'db;
 
     /// Returns whether this grant includes the `WITH GRANT OPTION`.
     ///
@@ -204,16 +208,22 @@ pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata {
 impl<T: GrantLike> GrantLike for &T {
     type DB = T::DB;
 
-    fn privileges(&self) -> impl Iterator<Item = &Action> {
-        (*self).privileges()
+    fn privileges<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Action>
+    where
+        Self: 'db,
+    {
+        (*self).privileges(database)
     }
 
     fn is_all_privileges(&self) -> bool {
         (*self).is_all_privileges()
     }
 
-    fn grantees(&self) -> impl Iterator<Item = &Grantee> {
-        (*self).grantees()
+    fn grantees<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Grantee>
+    where
+        Self: 'db,
+    {
+        (*self).grantees(database)
     }
 
     fn with_grant_option(&self) -> bool {
@@ -467,12 +477,12 @@ mod tests {
         // Use reference to grant
         let grant_ref = &grant;
 
-        let privileges: Vec<_> = grant_ref.privileges().collect();
+        let privileges: Vec<_> = grant_ref.privileges(&db).collect();
         assert_eq!(privileges.len(), 2);
 
         assert!(grant_ref.with_grant_option());
 
-        let grantees: Vec<_> = grant_ref.grantees().collect();
+        let grantees: Vec<_> = grant_ref.grantees(&db).collect();
         assert_eq!(grantees.len(), 1);
 
         let table = db.table(None, "my_table").expect("Table not found");

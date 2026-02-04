@@ -37,7 +37,10 @@ impl Metadata for Grant {
 impl GrantLike for Grant {
     type DB = ParserDB;
 
-    fn privileges(&self) -> impl Iterator<Item = &Action> {
+    fn privileges<'db>(&'db self, _database: &'db Self::DB) -> impl Iterator<Item = &'db Action>
+    where
+        Self: 'db,
+    {
         match &self.privileges {
             Privileges::All { .. } => {
                 // Return an empty iterator for ALL privileges
@@ -52,7 +55,10 @@ impl GrantLike for Grant {
         matches!(&self.privileges, Privileges::All { .. })
     }
 
-    fn grantees(&self) -> impl Iterator<Item = &Grantee> {
+    fn grantees<'db>(&'db self, _database: &'db Self::DB) -> impl Iterator<Item = &'db Grantee>
+    where
+        Self: 'db,
+    {
         self.grantees.iter()
     }
 
