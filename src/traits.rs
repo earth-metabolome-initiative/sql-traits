@@ -25,7 +25,7 @@ pub use policy::PolicyLike;
 pub mod role;
 pub use role::RoleLike;
 pub mod grant;
-pub use grant::GrantLike;
+pub use grant::{ColumnGrantLike, GrantLike, TableGrantLike};
 
 /// Trait for associating a metadata struct to a given type.
 pub trait Metadata {

@@ -5,13 +5,13 @@ use std::rc::Rc;
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, ForeignKeyLike, FunctionLike, GrantLike, IndexLike,
-        PolicyLike, RoleLike, TableLike, TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
+        PolicyLike, RoleLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
     },
 };
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>
+pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -23,7 +23,8 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
-    G: GrantLike,
+    TG: TableGrantLike,
+    CG: ColumnGrantLike,
 {
     /// Catalog name of the database.
     catalog_name: String,
@@ -49,11 +50,14 @@ where
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
     /// List of roles in the database.
     roles: Vec<(Rc<R>, R::Meta)>,
-    /// List of grants in the database.
-    grants: Vec<(Rc<G>, G::Meta)>,
+    /// List of table grants in the database.
+    table_grants: Vec<(Rc<TG>, TG::Meta)>,
+    /// List of column grants in the database.
+    column_grants: Vec<(Rc<CG>, CG::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -65,16 +69,22 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
-    G: GrantLike,
+    TG: TableGrantLike,
+    CG: ColumnGrantLike,
 {
     /// Returns a mutable reference to the tables list.
     pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Rc<T>, T::Meta)> {
         &mut self.tables
     }
 
-    /// Returns a mutable reference to the grants list.
-    pub(crate) fn grants_mut(&mut self) -> &mut Vec<(Rc<G>, G::Meta)> {
-        &mut self.grants
+    /// Returns a mutable reference to the table grants list.
+    pub(crate) fn table_grants_mut(&mut self) -> &mut Vec<(Rc<TG>, TG::Meta)> {
+        &mut self.table_grants
+    }
+
+    /// Returns a mutable reference to the column grants list.
+    pub(crate) fn column_grants_mut(&mut self) -> &mut Vec<(Rc<CG>, CG::Meta)> {
+        &mut self.column_grants
     }
 
     #[must_use]
@@ -93,12 +103,14 @@ where
             policies: Vec::new(),
             check_constraints: Vec::new(),
             roles: Vec::new(),
-            grants: Vec::new(),
+            table_grants: Vec::new(),
+            column_grants: Vec::new(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -110,7 +122,8 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
-    G: GrantLike,
+    TG: TableGrantLike,
+    CG: ColumnGrantLike,
 {
     /// Sets the timezone for the database.
     #[must_use]
@@ -285,26 +298,48 @@ where
         self
     }
 
-    /// Adds a grant with its metadata to the builder.
+    /// Adds a table grant with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_grant(mut self, grant: Rc<G>, metadata: G::Meta) -> Self {
-        self.grants.push((grant, metadata));
+    pub fn add_table_grant(mut self, grant: Rc<TG>, metadata: TG::Meta) -> Self {
+        self.table_grants.push((grant, metadata));
         self
     }
 
-    /// Adds multiple grants with their metadata to the builder.
+    /// Adds multiple table grants with their metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_grants(mut self, grants: impl IntoIterator<Item = (Rc<G>, G::Meta)>) -> Self {
-        self.grants.extend(grants);
+    pub fn add_table_grants(
+        mut self,
+        grants: impl IntoIterator<Item = (Rc<TG>, TG::Meta)>,
+    ) -> Self {
+        self.table_grants.extend(grants);
+        self
+    }
+
+    /// Adds a column grant with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_column_grant(mut self, grant: Rc<CG>, metadata: CG::Meta) -> Self {
+        self.column_grants.push((grant, metadata));
+        self
+    }
+
+    /// Adds multiple column grants with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_column_grants(
+        mut self,
+        grants: impl IntoIterator<Item = (Rc<CG>, CG::Meta)>,
+    ) -> Self {
+        self.column_grants.extend(grants);
         self
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, G>
-    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>>
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>>
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -316,9 +351,10 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
-    G: GrantLike,
+    TG: TableGrantLike,
+    CG: ColumnGrantLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, G>) -> Self {
+    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -352,7 +388,8 @@ where
             policies: builder.policies,
             check_constraints: builder.check_constraints,
             roles: builder.roles,
-            grants: builder.grants,
+            table_grants: builder.table_grants,
+            column_grants: builder.column_grants,
         }
     }
 }

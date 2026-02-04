@@ -1,12 +1,16 @@
-//! Implementation of the `GrantLike` trait for sqlparser's `Grant` struct.
+//! Implementation of grant traits for sqlparser's `Grant` struct.
+//!
+//! In sqlparser, both table-level and column-level grants are represented
+//! by the same `Grant` struct. This module implements all grant traits
+//! on `Grant` to support both use cases.
 
-use sqlparser::ast::{
-    Action, Grant, GrantObjects, Grantee, Ident, ObjectName, ObjectNamePart, Privileges,
-};
+use sqlparser::ast::{Action, Grant, GrantObjects, Grantee, Ident, Privileges};
 
 use crate::{
     structs::ParserDB,
-    traits::{ColumnLike, DatabaseLike, GrantLike, Metadata, TableLike},
+    traits::{
+        ColumnGrantLike, ColumnLike, DatabaseLike, GrantLike, Metadata, TableGrantLike, TableLike,
+    },
     utils::last_str,
 };
 
@@ -14,7 +18,8 @@ use crate::{
 ///
 /// For a name like `schema.table`, returns `Some("schema")`.
 /// For a name like `table`, returns `None`.
-fn schema_from_object_name(obj: &ObjectName) -> Option<&str> {
+fn schema_from_object_name(obj: &sqlparser::ast::ObjectName) -> Option<&str> {
+    use sqlparser::ast::ObjectNamePart;
     if obj.0.len() > 1 {
         match &obj.0[obj.0.len() - 2] {
             ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
@@ -47,6 +52,37 @@ impl GrantLike for Grant {
         matches!(&self.privileges, Privileges::All { .. })
     }
 
+    fn grantees(&self) -> impl Iterator<Item = &Grantee> {
+        self.grantees.iter()
+    }
+
+    fn with_grant_option(&self) -> bool {
+        self.with_grant_option
+    }
+
+    fn granted_by<'a>(
+        &'a self,
+        database: &'a Self::DB,
+    ) -> Option<&'a <Self::DB as DatabaseLike>::Role> {
+        self.granted_by.as_ref().and_then(|ident| database.role(&ident.value))
+    }
+
+    fn applies_to_role(&self, role: &<Self::DB as DatabaseLike>::Role) -> bool {
+        use crate::traits::RoleLike;
+        let role_name = role.name();
+        self.grantees.iter().any(|g| {
+            match &g.name {
+                Some(sqlparser::ast::GranteeName::ObjectName(name)) => last_str(name) == role_name,
+                _ => {
+                    // Handle PUBLIC and other special cases
+                    format!("{g}").to_uppercase() == role_name.to_uppercase()
+                }
+            }
+        })
+    }
+}
+
+impl TableGrantLike for Grant {
     fn tables<'a>(
         &'a self,
         database: &'a Self::DB,
@@ -75,54 +111,33 @@ impl GrantLike for Grant {
         direct_tables
     }
 
-    fn schemas(&self) -> Option<impl Iterator<Item = &ObjectName>> {
+    fn applies_to_table(
+        &self,
+        table: &<Self::DB as DatabaseLike>::Table,
+        _database: &Self::DB,
+    ) -> bool {
         match &self.objects {
-            Some(GrantObjects::Schemas(schemas)) => Some(schemas.iter()),
-            _ => None,
+            Some(GrantObjects::Tables(tables)) => {
+                tables.iter().any(|t| {
+                    let grant_table_name = last_str(t);
+                    grant_table_name == table.table_name()
+                })
+            }
+            Some(GrantObjects::AllTablesInSchema { schemas }) => {
+                // Check if the table's schema matches any of the schemas
+                if let Some(table_schema) = table.table_schema() {
+                    schemas.iter().any(|s| last_str(s) == table_schema)
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
     }
+}
 
-    fn functions<'a>(
-        &'a self,
-        database: &'a Self::DB,
-    ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Function> {
-        // Note: sqlparser represents functions differently, there's no direct
-        // GrantObjects::Functions For ALL FUNCTIONS IN SCHEMA, we return
-        // functions that match the schema
-        let funcs: Box<dyn Iterator<Item = &<Self::DB as DatabaseLike>::Function> + 'a> =
-            match &self.objects {
-                Some(GrantObjects::AllFunctionsInSchema { schemas }) => {
-                    // Return all functions - functions don't have schema info in our current model
-                    // so we return all of them when ALL FUNCTIONS IN SCHEMA is used
-                    let schema_names: Vec<&str> = schemas.iter().map(last_str).collect();
-                    Box::new(database.functions().filter(move |_func| {
-                        // Since functions don't have schema info, we can't filter by schema
-                        // Return all functions when schema matches "public" or any common schema
-                        // This is a limitation - a future version could add schema to FunctionLike
-                        !schema_names.is_empty()
-                    }))
-                }
-                _ => Box::new(std::iter::empty()),
-            };
-        funcs
-    }
-
-    fn grantees(&self) -> impl Iterator<Item = &Grantee> {
-        self.grantees.iter()
-    }
-
-    fn with_grant_option(&self) -> bool {
-        self.with_grant_option
-    }
-
-    fn granted_by<'a>(
-        &'a self,
-        database: &'a Self::DB,
-    ) -> Option<&'a <Self::DB as DatabaseLike>::Role> {
-        self.granted_by.as_ref().and_then(|ident| database.role(&ident.value))
-    }
-
-    fn privilege_columns<'a>(
+impl ColumnGrantLike for Grant {
+    fn columns<'a>(
         &'a self,
         table: &'a <Self::DB as DatabaseLike>::Table,
         database: &'a Self::DB,
@@ -158,42 +173,21 @@ impl GrantLike for Grant {
             .filter(move |col| column_idents.iter().any(|ident| ident.value == col.column_name()))
     }
 
-    fn applies_to_table(
-        &self,
-        table: &<Self::DB as DatabaseLike>::Table,
-        _database: &Self::DB,
-    ) -> bool {
+    fn table<'a>(
+        &'a self,
+        database: &'a Self::DB,
+    ) -> Option<&'a <Self::DB as DatabaseLike>::Table> {
+        // For column grants, the table is specified in the objects
         match &self.objects {
             Some(GrantObjects::Tables(tables)) => {
-                tables.iter().any(|t| {
-                    let grant_table_name = last_str(t);
-                    grant_table_name == table.table_name()
+                tables.first().and_then(|t| {
+                    let table_name = last_str(t);
+                    let schema = schema_from_object_name(t);
+                    database.table(schema, table_name)
                 })
             }
-            Some(GrantObjects::AllTablesInSchema { schemas }) => {
-                // Check if the table's schema matches any of the schemas
-                if let Some(table_schema) = table.table_schema() {
-                    schemas.iter().any(|s| last_str(s) == table_schema)
-                } else {
-                    false
-                }
-            }
-            _ => false,
+            _ => None,
         }
-    }
-
-    fn applies_to_role(&self, role: &<Self::DB as DatabaseLike>::Role) -> bool {
-        use crate::traits::RoleLike;
-        let role_name = role.name();
-        self.grantees.iter().any(|g| {
-            match &g.name {
-                Some(sqlparser::ast::GranteeName::ObjectName(name)) => last_str(name) == role_name,
-                _ => {
-                    // Handle PUBLIC and other special cases
-                    format!("{g}").to_uppercase() == role_name.to_uppercase()
-                }
-            }
-        })
     }
 }
 

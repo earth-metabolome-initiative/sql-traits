@@ -3,13 +3,14 @@
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnLike, DatabaseLike, ForeignKeyLike, FunctionLike, GrantLike,
-        IndexLike, PolicyLike, RoleLike, TableLike, TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, DatabaseLike, ForeignKeyLike,
+        FunctionLike, IndexLike, PolicyLike, RoleLike, TableGrantLike, TableLike, TriggerLike,
+        UniqueIndexLike,
     },
 };
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, G> DatabaseLike
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, G>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG> DatabaseLike
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
 where
     T: TableLike<DB = Self>,
     C: ColumnLike<DB = Self>,
@@ -21,7 +22,8 @@ where
     Tr: TriggerLike<DB = Self>,
     P: PolicyLike<DB = Self>,
     R: RoleLike<DB = Self>,
-    G: GrantLike<DB = Self>,
+    TG: TableGrantLike<DB = Self>,
+    CG: ColumnGrantLike<DB = Self>,
 {
     type Table = T;
     type Column = C;
@@ -33,7 +35,8 @@ where
     type Trigger = Tr;
     type Policy = P;
     type Role = R;
-    type Grant = G;
+    type TableGrant = TG;
+    type ColumnGrant = CG;
 
     #[inline]
     fn catalog_name(&self) -> &str {
@@ -97,7 +100,11 @@ where
         self.roles.iter().map(|(r, _)| r.as_ref())
     }
 
-    fn grants(&self) -> impl Iterator<Item = &Self::Grant> {
-        self.grants.iter().map(|(g, _)| g.as_ref())
+    fn table_grants(&self) -> impl Iterator<Item = &Self::TableGrant> {
+        self.table_grants.iter().map(|(g, _)| g.as_ref())
+    }
+
+    fn column_grants(&self) -> impl Iterator<Item = &Self::ColumnGrant> {
+        self.column_grants.iter().map(|(g, _)| g.as_ref())
     }
 }

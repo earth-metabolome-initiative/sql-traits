@@ -45,6 +45,7 @@ pub type ParserDBBuilder = super::GenericDBBuilder<
     CreatePolicy,
     CreateRole,
     Grant,
+    Grant,
 >;
 
 /// A type alias for the result of processing check constraints.
@@ -102,6 +103,7 @@ pub type ParserDB = GenericDB<
     CreateTrigger,
     CreatePolicy,
     CreateRole,
+    Grant,
     Grant,
 >;
 
@@ -713,16 +715,24 @@ impl ParserDB {
                         }
                     }
 
-                    builder = builder.add_grant(Rc::new(grant), ());
+                    builder = builder.add_table_grant(Rc::new(grant.clone()), ());
+                    builder = builder.add_column_grant(Rc::new(grant), ());
                 }
                 Statement::Revoke(revoke) => {
-                    // Find and remove matching grants
-                    let grants = builder.grants_mut();
-                    let original_len = grants.len();
-                    grants.retain(|(grant, ())| {
+                    // Find and remove matching grants from both table and column grants
+                    let table_grants = builder.table_grants_mut();
+                    let original_len = table_grants.len();
+                    table_grants.retain(|(grant, ())| {
                         !crate::impls::grant_matches_revoke(grant.as_ref(), &revoke)
                     });
-                    if grants.len() == original_len {
+                    let table_grants_removed = table_grants.len() < original_len;
+
+                    let column_grants = builder.column_grants_mut();
+                    column_grants.retain(|(grant, ())| {
+                        !crate::impls::grant_matches_revoke(grant.as_ref(), &revoke)
+                    });
+
+                    if !table_grants_removed {
                         return Err(crate::errors::Error::RevokeNotFound(format!(
                             "No matching grant found for REVOKE: {revoke}"
                         )));

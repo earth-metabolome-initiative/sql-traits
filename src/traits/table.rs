@@ -4,7 +4,7 @@ use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::traits::{
     ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
-    PolicyLike, TriggerLike, check_constraint::CheckConstraintLike,
+    PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
 };
 
 /// A trait for types that can be treated as SQL tables.
@@ -2420,11 +2420,11 @@ pub trait TableLike:
     fn grants<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Grant>
+    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::TableGrant>
     where
         Self: 'db,
     {
-        database.grants().filter(move |grant| grant.applies_to_table(self.borrow(), database))
+        database.table_grants().filter(move |grant| grant.applies_to_table(self.borrow(), database))
     }
 
     /// Returns whether the given role can read (SELECT) from this table.
