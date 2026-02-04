@@ -559,4 +559,54 @@ where
     pub fn tables_metadata_mut(&mut self) -> impl Iterator<Item = (&T, &mut T::Meta)> {
         self.tables.iter_mut().map(|(t, m)| ((*t).as_ref(), m))
     }
+
+    /// Returns a reference to the metadata of the specified table grant, if it
+    /// exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    ///     CREATE ROLE admin;
+    ///     CREATE TABLE users (id INT);
+    ///     GRANT SELECT ON users TO admin;
+    ///     ",
+    /// )?;
+    /// let grant = db.table_grants().next().unwrap();
+    /// assert!(db.table_grant_metadata(grant).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn table_grant_metadata(&self, grant: &TG) -> Option<&TG::Meta> {
+        self.table_grants.iter().find(|(g, _)| g.as_ref() == grant).map(|(_, m)| m)
+    }
+
+    /// Returns a reference to the metadata of the specified column grant, if it
+    /// exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    ///     CREATE ROLE admin;
+    ///     CREATE TABLE users (id INT, name TEXT);
+    ///     GRANT SELECT (name) ON users TO admin;
+    ///     ",
+    /// )?;
+    /// let grant = db.column_grants().next().unwrap();
+    /// assert!(db.column_grant_metadata(grant).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn column_grant_metadata(&self, grant: &CG) -> Option<&CG::Meta> {
+        self.column_grants.iter().find(|(g, _)| g.as_ref() == grant).map(|(_, m)| m)
+    }
 }
