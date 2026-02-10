@@ -11,11 +11,11 @@ keywords = ["sql", "traits", "parser", "geometry"]
 categories = ["database", "parsing", "geometry"]
 
 [dependencies]
-sqlparser = { git = "https://github.com/LucaCappelletti94/sqlparser-rs", branch = "dialect-derives" }
+sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", branch = "main" }
 geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geometric-traits", branch = "main" }
 thiserror = "2.0"
 git2 = "0.20.3"
-tempfile = "3.10"
+tempfile = "3.25"
 sql_docs = { version = "1.0.11", git = "https://github.com/LucaCappelletti94/sql-docs", branch = "main" }
 
 [lints.rust]

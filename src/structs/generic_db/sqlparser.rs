@@ -808,7 +808,7 @@ impl ParserDB {
         let statements = parser.parse_statements()?;
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
 
-        if let Ok(documentation) = SqlDoc::builder_from_str(sql).build() {
+        if let Ok(documentation) = SqlDoc::builder_from_str(sql).build::<D>() {
             for (table, metadata) in db.tables_metadata_mut() {
                 if let Ok(table_doc) = documentation.table(table.table_name(), table.table_schema())
                 {
@@ -821,25 +821,24 @@ impl ParserDB {
 
     /// Constructs a `ParserDB` from a git URL.
     ///
-    /// Uses `GenericDialect` for parsing.
-    ///
     /// # Example
     ///
     /// ```
     /// use sql_traits::prelude::ParserDB;
+    /// use sqlparser::dialect::PostgreSqlDialect;
     ///
     /// let url = "https://github.com/earth-metabolome-initiative/asset-procedure-schema.git";
-    /// let db = ParserDB::from_git_url(url).unwrap();
+    /// let db = ParserDB::from_git_url::<PostgreSqlDialect>(url).unwrap();
     /// ```
     ///
     /// # Errors
     ///
     /// Returns an error if the repository cannot be cloned or if the SQL files
     /// cannot be parsed.
-    pub fn from_git_url(url: &str) -> Result<Self, crate::errors::Error> {
+    pub fn from_git_url<D: Dialect + Default>(url: &str) -> Result<Self, crate::errors::Error> {
         let dir = tempfile::tempdir()?;
         Repository::clone(url, dir.path())?;
-        Self::from_path(dir.path(), &GenericDialect {})
+        Self::from_path::<D>(dir.path())
     }
 
     /// Constructs a `ParserDB` from a git URL using a specific dialect.
@@ -848,13 +847,12 @@ impl ParserDB {
     ///
     /// Returns an error if the repository cannot be cloned or if the SQL files
     /// cannot be parsed.
-    pub fn from_git_url_with_dialect(
+    pub fn from_git_url_with_dialect<D: Dialect + Default>(
         url: &str,
-        dialect: &impl Dialect,
     ) -> Result<Self, crate::errors::Error> {
         let dir = tempfile::tempdir()?;
         Repository::clone(url, dir.path())?;
-        Self::from_path(dir.path(), dialect)
+        Self::from_path::<D>(dir.path())
     }
 
     /// Parses SQL from a file or directory path.
@@ -880,10 +878,10 @@ impl ParserDB {
     /// use sql_traits::prelude::ParserDB;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::from_path(Path::new("migrations/"), &PostgreSqlDialect {}).unwrap();
+    /// let db = ParserDB::from_path::<PostgreSqlDialect>(Path::new("migrations/")).unwrap();
     /// ```
-    pub fn from_path(path: &Path, dialect: &impl Dialect) -> Result<Self, crate::errors::Error> {
-        Self::from_paths(&[path], dialect)
+    pub fn from_path<D: Dialect + Default>(path: &Path) -> Result<Self, crate::errors::Error> {
+        Self::from_paths::<D>(&[path])
     }
 
     /// Parses SQL from multiple file or directory paths.
@@ -897,10 +895,7 @@ impl ParserDB {
     ///
     /// Returns an error if any path doesn't exist, files can't be read, or
     /// parsing fails.
-    pub fn from_paths(
-        paths: &[&Path],
-        dialect: &impl Dialect,
-    ) -> Result<Self, crate::errors::Error> {
+    pub fn from_paths<D: Dialect + Default>(paths: &[&Path]) -> Result<Self, crate::errors::Error> {
         let mut statements = Vec::new();
         let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
 
@@ -926,7 +921,8 @@ impl ParserDB {
                         }
                     })?;
 
-                let mut parser = Parser::new(dialect).try_with_sql(&sql_content).map_err(|e| {
+                let dialect = D::default();
+                let mut parser = Parser::new(&dialect).try_with_sql(&sql_content).map_err(|e| {
                     crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
                 })?;
                 statements.extend(parser.parse_statements().map_err(|e| {
@@ -938,7 +934,7 @@ impl ParserDB {
 
         let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
 
-        if let Ok(documentation) = SqlDoc::builder_from_strs_with_paths(&sql_str).build() {
+        if let Ok(documentation) = SqlDoc::builder_from_strs_with_paths(&sql_str).build::<D>() {
             for (table, metadata) in db.tables_metadata_mut() {
                 if let Ok(table_doc) = documentation.table(table.table_name(), table.table_schema())
                 {
