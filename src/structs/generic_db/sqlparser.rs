@@ -768,6 +768,7 @@ impl ParserDB {
                 | Statement::ShowVariable { .. }
                 | Statement::Raise { .. }
                 | Statement::Vacuum { .. }
+                | Statement::ShowCharset { .. }
                 | Statement::Print { .. }
                 | Statement::Open { .. }
                 | Statement::Close { .. }
