@@ -758,6 +758,53 @@ impl ParserDB {
                 | Statement::CreateOperatorFamily(_)
                 | Statement::CreateType { .. }
                 | Statement::CreateExtension(_)
+                | Statement::CreateView(_)
+                | Statement::Query(_)
+                | Statement::Rollback { .. }
+                | Statement::Commit { .. }
+                | Statement::StartTransaction { .. }
+                | Statement::Savepoint { .. }
+                | Statement::ReleaseSavepoint { .. }
+                | Statement::ShowVariable { .. }
+                | Statement::Raise { .. }
+                | Statement::Vacuum { .. }
+                | Statement::Print { .. }
+                | Statement::Open { .. }
+                | Statement::Close { .. }
+                | Statement::Fetch { .. }
+                | Statement::Declare { .. }
+                | Statement::Use { .. }
+                | Statement::Throw { .. }
+                | Statement::Load { .. }
+                | Statement::Return { .. }
+                | Statement::Assert { .. }
+                | Statement::While { .. }
+                | Statement::ExplainTable { .. }
+                | Statement::Explain { .. }
+                | Statement::Kill { .. }
+                | Statement::LISTEN { .. }
+                | Statement::UNLISTEN { .. }
+                | Statement::NOTIFY { .. }
+                | Statement::ShowTables { .. }
+                | Statement::Analyze { .. }
+                | Statement::Deallocate { .. }
+                | Statement::Prepare { .. }
+                | Statement::Execute { .. }
+                | Statement::Set(_)
+                | Statement::Pragma { .. }
+                | Statement::Call(_)
+                | Statement::Reset(_)
+                | Statement::Truncate(_)
+                | Statement::Directory { .. }
+                | Statement::Discard { .. }
+                | Statement::ShowViews { .. }
+                | Statement::ShowFunctions { .. }
+                | Statement::ShowCollation { .. }
+                | Statement::ShowCreate { .. }
+                | Statement::ShowSchemas { .. }
+                | Statement::Update(_)
+                | Statement::ShowColumns { .. }
+                | Statement::Delete(_)
                 | Statement::Insert(_) => {
                     // Ignored statements
                 }
