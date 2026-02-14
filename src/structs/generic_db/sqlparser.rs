@@ -287,27 +287,30 @@ impl ParserDB {
     }
 
     /// Helper function to create an index expression from columns.
-    fn create_index_expression(columns: &[IndexColumn]) -> Expr {
+    fn create_index_expression(columns: &[IndexColumn]) -> Option<Expr> {
+        if columns.is_empty() {
+            return None;
+        }
         let expression_string = format!(
             "({})",
             columns.iter().map(|ident| ident.column.to_string()).collect::<Vec<_>>().join(", ")
         );
         Parser::new(&GenericDialect)
             .try_with_sql(expression_string.as_str())
-            .expect("Failed to parse index constraint expression")
+            .ok()?
             .parse_expr()
-            .expect("No expression found in parsed index constraint")
+            .ok()
     }
 
     /// Helper function to process unique constraints.
     fn process_unique_constraint(
         unique_constraint: UniqueConstraint,
         create_table: &Rc<CreateTable>,
-    ) -> UniqueConstraintResult {
+    ) -> Option<UniqueConstraintResult> {
         let unique_index = Rc::new(TableAttribute::new(create_table.clone(), unique_constraint));
-        let expression = Self::create_index_expression(&unique_index.attribute().columns);
+        let expression = Self::create_index_expression(&unique_index.attribute().columns)?;
         let unique_index_metadata = UniqueIndexMetadata::new(expression, create_table.clone());
-        (unique_index, unique_index_metadata)
+        Some((unique_index, unique_index_metadata))
     }
 
     #[allow(clippy::type_complexity)]
@@ -334,7 +337,17 @@ impl ParserDB {
         };
 
         let index_rc = Rc::new(TableAttribute::new(table.clone(), create_index));
-        let expression = Self::create_index_expression(&index_rc.attribute().columns);
+        let Some(expression) = Self::create_index_expression(&index_rc.attribute().columns) else {
+            return Err(crate::errors::Error::InvalidIndex {
+                index_name: index_rc
+                    .attribute()
+                    .name
+                    .as_ref()
+                    .map_or("<unnamed>", last_str)
+                    .to_string(),
+                reason: "index has no columns".to_string(),
+            });
+        };
         let metadata = IndexMetadata::new(expression, table.clone());
         Ok((index_rc, metadata))
     }
@@ -386,10 +399,12 @@ impl ParserDB {
                         },
                         operator_class: None,
                     });
-                    let (unique_index, unique_index_metadata) =
-                        Self::process_unique_constraint(unique_constraint, create_table);
-                    table_metadata.add_unique_index(unique_index.clone());
-                    builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    if let Some((unique_index, unique_index_metadata)) =
+                        Self::process_unique_constraint(unique_constraint, create_table)
+                    {
+                        table_metadata.add_unique_index(unique_index.clone());
+                        builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    }
                 }
                 ColumnOption::PrimaryKey(_) => {
                     let primary_key_unique_constraint = UniqueConstraint {
@@ -410,12 +425,12 @@ impl ParserDB {
                         nulls_distinct: sqlparser::ast::NullsDistinctOption::None,
                     };
 
-                    let (unique_index, unique_index_metadata) = Self::process_unique_constraint(
-                        primary_key_unique_constraint,
-                        create_table,
-                    );
-                    table_metadata.add_unique_index(unique_index.clone());
-                    builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    if let Some((unique_index, unique_index_metadata)) =
+                        Self::process_unique_constraint(primary_key_unique_constraint, create_table)
+                    {
+                        table_metadata.add_unique_index(unique_index.clone());
+                        builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    }
 
                     table_metadata.set_primary_key(vec![column.clone()]);
                 }
@@ -491,10 +506,12 @@ impl ParserDB {
         for constraint in constraints {
             match constraint {
                 TableConstraint::Unique(uc) => {
-                    let (unique_index, unique_index_metadata) =
-                        Self::process_unique_constraint(uc.clone(), create_table);
-                    table_metadata.add_unique_index(unique_index.clone());
-                    builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    if let Some((unique_index, unique_index_metadata)) =
+                        Self::process_unique_constraint(uc.clone(), create_table)
+                    {
+                        table_metadata.add_unique_index(unique_index.clone());
+                        builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    }
                 }
                 TableConstraint::ForeignKey(fk) => {
                     builder = Self::process_foreign_key_table_constraint(
@@ -555,12 +572,12 @@ impl ParserDB {
                         nulls_distinct: sqlparser::ast::NullsDistinctOption::None,
                     };
 
-                    let (unique_index, unique_index_metadata) = Self::process_unique_constraint(
-                        primary_key_unique_constraint,
-                        create_table,
-                    );
-                    table_metadata.add_unique_index(unique_index.clone());
-                    builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    if let Some((unique_index, unique_index_metadata)) =
+                        Self::process_unique_constraint(primary_key_unique_constraint, create_table)
+                    {
+                        table_metadata.add_unique_index(unique_index.clone());
+                        builder = builder.add_unique_index(unique_index, unique_index_metadata);
+                    }
 
                     table_metadata.set_primary_key(primary_key_columns);
                 }
@@ -1191,11 +1208,8 @@ impl ParserDB {
                     }) = value
                     {
                         builder = builder.timezone(lit);
-                    } else {
-                        unimplemented!(
-                            "Only string literals are supported for SET TIME ZONE, found: {value:?}"
-                        );
                     }
+                    // Ignore unsupported SET TIME ZONE expressions (e.g., binary ops)
                 }
                 Statement::RenameTable(renames) => {
                     use crate::traits::TableLike;

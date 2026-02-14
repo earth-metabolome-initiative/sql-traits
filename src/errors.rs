@@ -62,6 +62,14 @@ pub enum Error {
         /// Name of the index.
         index_name: String,
     },
+    #[error("Invalid index `{index_name}`: {reason}")]
+    /// Error indicating that an index definition is invalid.
+    InvalidIndex {
+        /// Name of the invalid index.
+        index_name: String,
+        /// Reason why the index is invalid.
+        reason: String,
+    },
     #[error("Function `{function_name}` not found for trigger `{trigger_name}`.")]
     /// Error indicating that a trigger references a function that does not
     /// exist.

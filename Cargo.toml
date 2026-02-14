@@ -47,6 +47,9 @@ doc_markdown = "allow"
 clone_on_copy = "forbid"
 pedantic = { level = "deny", priority = -1 }
 
+[dev-dependencies]
+arbitrary = "1.4"
+
 [workspace]
 members = ["fuzz"]
 
