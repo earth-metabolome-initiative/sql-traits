@@ -159,6 +159,38 @@ impl ParserDBBuilder {
             !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| last_str(t) == table_name))
         });
     }
+
+    /// Checks if a role with the given name is referenced by any grants.
+    ///
+    /// Returns `true` if the role is a grantee in any table or column grant.
+    fn is_role_referenced(&self, role_name: &str) -> bool {
+        use sqlparser::ast::GranteeName;
+
+        let check_grantees = |grantees: &[sqlparser::ast::Grantee]| -> bool {
+            grantees.iter().any(|g| {
+                matches!(
+                    &g.name,
+                    Some(GranteeName::ObjectName(name)) if last_str(name) == role_name
+                )
+            })
+        };
+
+        // Check table grants
+        for (grant, ()) in self.table_grants() {
+            if check_grantees(&grant.grantees) {
+                return true;
+            }
+        }
+
+        // Check column grants
+        for (grant, ()) in self.column_grants() {
+            if check_grantees(&grant.grantees) {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 /// A type alias for the result of processing check constraints.
@@ -838,6 +870,46 @@ impl ParserDB {
                         .policies_mut()
                         .retain(|(p, _)| p.name.value != policy_name);
                 }
+                Statement::Drop {
+                    object_type: sqlparser::ast::ObjectType::Role,
+                    if_exists,
+                    names,
+                    ..
+                } => {
+                    // Note: DROP ROLE doesn't support CASCADE/RESTRICT in PostgreSQL syntax.
+                    // We always use RESTRICT semantics (fail if role is referenced).
+                    for name in names {
+                        let role_name = last_str(&name);
+
+                        // Check if role exists
+                        let role_exists = builder.roles().iter().any(|(r, ())| {
+                            r.names.first().is_some_and(|n| last_str(n) == role_name)
+                        });
+
+                        if !role_exists {
+                            if if_exists {
+                                continue;
+                            }
+                            return Err(crate::errors::Error::DropRoleNotFound {
+                                role_name: role_name.to_string(),
+                            });
+                        }
+
+                        // Check for references from grants
+                        if builder.is_role_referenced(role_name) {
+                            return Err(crate::errors::Error::RoleReferenced {
+                                role_name: role_name.to_string(),
+                            });
+                        }
+
+                        // Remove the role
+                        builder.roles_mut().retain(|(r, ())| {
+                            r.names
+                                .first()
+                                .is_none_or(|n| last_str(n) != role_name)
+                        });
+                    }
+                }
                 Statement::CreateIndex(create_index) => {
                     let (index, metadata) = Self::process_create_index(create_index, &builder)?;
                     let table_name = index.table().table_name();
@@ -1149,7 +1221,6 @@ impl ParserDB {
                 // These statements affect schema and should be implemented:
                 //
                 // DROP statements (via Statement::Drop):
-                //   - DROP ROLE: Remove role (check for grant references)
                 //   - DROP SCHEMA: Remove schema and contained objects
                 //
                 // ALTER statements:
@@ -2201,6 +2272,116 @@ mod tests {
             // Table should still exist with its columns
             let table = db.table(None, "t").expect("Table should exist");
             assert_eq!(table.columns(&db).count(), 2);
+        }
+    }
+
+    mod drop_role_tests {
+        use super::*;
+
+        #[test]
+        fn test_drop_role_basic() {
+            let sql = r"
+                CREATE ROLE my_role;
+                DROP ROLE my_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Role should be removed
+            assert!(db.role("my_role").is_none());
+        }
+
+        #[test]
+        fn test_drop_role_if_exists_when_exists() {
+            let sql = r"
+                CREATE ROLE my_role;
+                DROP ROLE IF EXISTS my_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Role should be removed
+            assert!(db.role("my_role").is_none());
+        }
+
+        #[test]
+        fn test_drop_role_if_exists_when_not_exists() {
+            let sql = r"
+                DROP ROLE IF EXISTS nonexistent_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Should succeed without error
+            assert_eq!(db.roles().count(), 0);
+        }
+
+        #[test]
+        fn test_drop_role_not_found_error_type() {
+            let sql = "DROP ROLE nonexistent_role;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::DropRoleNotFound { role_name }) if role_name == "nonexistent_role"
+            ));
+        }
+
+        #[test]
+        fn test_drop_role_referenced_by_grant_fails() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE my_role;
+                GRANT SELECT ON t TO my_role;
+                DROP ROLE my_role;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::RoleReferenced { role_name }) if role_name == "my_role"
+            ));
+        }
+
+        #[test]
+        fn test_drop_role_after_revoking_grant_succeeds() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE my_role;
+                GRANT SELECT ON t TO my_role;
+                REVOKE SELECT ON t FROM my_role;
+                DROP ROLE my_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Should succeed after revoking");
+
+            // Role should be removed
+            assert!(db.role("my_role").is_none());
+        }
+
+        #[test]
+        fn test_drop_one_of_multiple_roles() {
+            let sql = r"
+                CREATE ROLE role1;
+                CREATE ROLE role2;
+                DROP ROLE role1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // role1 should be removed
+            assert!(db.role("role1").is_none());
+
+            // role2 should still exist
+            assert!(db.role("role2").is_some());
+        }
+
+        #[test]
+        fn test_drop_role_then_recreate() {
+            let sql = r"
+                CREATE ROLE my_role;
+                DROP ROLE my_role;
+                CREATE ROLE my_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Role should exist again
+            assert!(db.role("my_role").is_some());
         }
     }
 }

@@ -112,6 +112,16 @@ where
         &self.foreign_keys
     }
 
+    /// Returns a slice of table grant Rc references with their metadata.
+    pub(crate) fn table_grants(&self) -> &[(Rc<TG>, TG::Meta)] {
+        &self.table_grants
+    }
+
+    /// Returns a slice of column grant Rc references with their metadata.
+    pub(crate) fn column_grants(&self) -> &[(Rc<CG>, CG::Meta)] {
+        &self.column_grants
+    }
+
     /// Returns a mutable reference to the columns list.
     pub(crate) fn columns_mut(&mut self) -> &mut Vec<(Rc<C>, C::Meta)> {
         &mut self.columns
@@ -145,6 +155,11 @@ where
     /// Returns a mutable reference to the policies list.
     pub(crate) fn policies_mut(&mut self) -> &mut Vec<(Rc<P>, P::Meta)> {
         &mut self.policies
+    }
+
+    /// Returns a mutable reference to the roles list.
+    pub(crate) fn roles_mut(&mut self) -> &mut Vec<(Rc<R>, R::Meta)> {
+        &mut self.roles
     }
 
     #[must_use]

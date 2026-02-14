@@ -155,6 +155,20 @@ pub enum Error {
         /// Name of the policy that was not found.
         policy_name: String,
     },
+    #[error("Role `{role_name}` not found for DROP ROLE statement.")]
+    /// Error indicating that a DROP ROLE statement references a role
+    /// that does not exist.
+    DropRoleNotFound {
+        /// Name of the role that was not found.
+        role_name: String,
+    },
+    #[error("Cannot drop role `{role_name}`: still referenced by grants.")]
+    /// Error indicating that a DROP ROLE statement references a role
+    /// that is still used as a grantee in existing grants.
+    RoleReferenced {
+        /// Name of the role being dropped.
+        role_name: String,
+    },
 }
 
 impl From<ParserError> for Error {
