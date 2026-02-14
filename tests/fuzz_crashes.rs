@@ -33,18 +33,18 @@ fn test_fuzz_crashes() {
     if let Ok(entries) = std::fs::read_dir(&workspace_dir) {
         for entry in entries.flatten() {
             let crashes_dir = entry.path().join("crashes");
-            if crashes_dir.is_dir() {
-                if let Ok(crashes) = std::fs::read_dir(&crashes_dir) {
-                    for crash in crashes.flatten() {
-                        let crash_path = crash.path();
-                        if crash_path.is_file() {
-                            // Read crash file content as bytes and try to interpret as UTF-8
-                            if let Ok(bytes) = std::fs::read(&crash_path) {
-                                let sql = String::from_utf8_lossy(&bytes);
-                                // This should not panic - errors are OK
-                                should_not_panic(&sql);
-                                crash_count += 1;
-                            }
+            if crashes_dir.is_dir()
+                && let Ok(crashes) = std::fs::read_dir(&crashes_dir)
+            {
+                for crash in crashes.flatten() {
+                    let crash_path = crash.path();
+                    if crash_path.is_file() {
+                        // Read crash file content as bytes and try to interpret as UTF-8
+                        if let Ok(bytes) = std::fs::read(&crash_path) {
+                            let sql = String::from_utf8_lossy(&bytes);
+                            // This should not panic - errors are OK
+                            should_not_panic(&sql);
+                            crash_count += 1;
                         }
                     }
                 }

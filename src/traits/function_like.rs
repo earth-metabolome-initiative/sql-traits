@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(func.name(), "my_func");
 
         // Should have the new return type
-        assert_eq!(func.return_type_name(&db).as_deref(), Some("TEXT"));
+        assert_eq!(func.return_type_name(&db), Some("TEXT"));
     }
 
     #[test]
