@@ -815,6 +815,29 @@ impl ParserDB {
                         .triggers_mut()
                         .retain(|(t, ())| last_str(&t.name) != trigger_name);
                 }
+                Statement::DropPolicy(drop_policy) => {
+                    let policy_name = drop_policy.name.value.as_str();
+
+                    // Find the policy
+                    let policy_exists = builder
+                        .policies()
+                        .iter()
+                        .any(|(p, _)| p.name.value == policy_name);
+
+                    if !policy_exists {
+                        if drop_policy.if_exists {
+                            continue;
+                        }
+                        return Err(crate::errors::Error::DropPolicyNotFound {
+                            policy_name: policy_name.to_string(),
+                        });
+                    }
+
+                    // Remove the policy
+                    builder
+                        .policies_mut()
+                        .retain(|(p, _)| p.name.value != policy_name);
+                }
                 Statement::CreateIndex(create_index) => {
                     let (index, metadata) = Self::process_create_index(create_index, &builder)?;
                     let table_name = index.table().table_name();
@@ -1126,7 +1149,6 @@ impl ParserDB {
                 // These statements affect schema and should be implemented:
                 //
                 // DROP statements (via Statement::Drop):
-                //   - DROP POLICY: Remove policy from table
                 //   - DROP ROLE: Remove role (check for grant references)
                 //   - DROP SCHEMA: Remove schema and contained objects
                 //
@@ -2057,6 +2079,128 @@ mod tests {
 
             // Function should still exist after dropping trigger
             assert!(db.function("trigger_fn").is_some());
+        }
+    }
+
+    mod drop_policy_tests {
+        use super::*;
+
+        #[test]
+        fn test_drop_policy_basic() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE POLICY my_policy ON t USING (true);
+                DROP POLICY my_policy ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Policy should be removed
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.policies(&db).count(), 0);
+        }
+
+        #[test]
+        fn test_drop_policy_if_exists_when_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE POLICY my_policy ON t USING (true);
+                DROP POLICY IF EXISTS my_policy ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Policy should be removed
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.policies(&db).count(), 0);
+        }
+
+        #[test]
+        fn test_drop_policy_if_exists_when_not_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                DROP POLICY IF EXISTS nonexistent_policy ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Should succeed without error
+            assert!(db.table(None, "t").is_some());
+        }
+
+        #[test]
+        fn test_drop_policy_not_found_error_type() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                DROP POLICY nonexistent_policy ON t;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::DropPolicyNotFound { policy_name }) if policy_name == "nonexistent_policy"
+            ));
+        }
+
+        #[test]
+        fn test_drop_one_of_multiple_policies() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE POLICY policy1 ON t USING (true);
+                CREATE POLICY policy2 ON t USING (false);
+                DROP POLICY policy1 ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Only policy2 should remain
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.policies(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_policy_then_recreate() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE POLICY my_policy ON t USING (true);
+                DROP POLICY my_policy ON t;
+                CREATE POLICY my_policy ON t USING (false);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Policy should exist again
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.policies(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_policy_keeps_other_table_policies() {
+            let sql = r"
+                CREATE TABLE t1 (id INT);
+                CREATE TABLE t2 (id INT);
+                CREATE POLICY policy1 ON t1 USING (true);
+                CREATE POLICY policy2 ON t2 USING (true);
+                DROP POLICY policy1 ON t1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // t1 should have no policies
+            let t1 = db.table(None, "t1").expect("t1 should exist");
+            assert_eq!(t1.policies(&db).count(), 0);
+
+            // t2 should still have its policy
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.policies(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_policy_table_still_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT, name TEXT);
+                CREATE POLICY my_policy ON t USING (true);
+                DROP POLICY my_policy ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Table should still exist with its columns
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.columns(&db).count(), 2);
         }
     }
 }

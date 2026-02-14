@@ -148,6 +148,13 @@ pub enum Error {
         /// Name of the trigger that was not found.
         trigger_name: String,
     },
+    #[error("Policy `{policy_name}` not found for DROP POLICY statement.")]
+    /// Error indicating that a DROP POLICY statement references a policy
+    /// that does not exist.
+    DropPolicyNotFound {
+        /// Name of the policy that was not found.
+        policy_name: String,
+    },
 }
 
 impl From<ParserError> for Error {
