@@ -48,6 +48,45 @@ pub type ParserDBBuilder = super::GenericDBBuilder<
     Grant,
 >;
 
+impl ParserDBBuilder {
+    /// Checks if a function with the given name is referenced by any schema
+    /// object.
+    ///
+    /// Returns `true` if the function is used by:
+    /// - Check constraints (via their metadata)
+    /// - Policies (via USING or WITH CHECK expressions)
+    /// - Triggers (via EXECUTE FUNCTION)
+    fn is_function_used(&self, function_name: &str) -> bool {
+        use crate::traits::{FunctionLike, TriggerLike};
+
+        // Check if any check constraint references the function
+        for (_, metadata) in self.check_constraints() {
+            if metadata.functions().any(|f| f.name() == function_name) {
+                return true;
+            }
+        }
+
+        // Check if any policy references the function
+        for (_, metadata) in self.policies() {
+            if metadata.using_functions().any(|f| f.name() == function_name) {
+                return true;
+            }
+            if metadata.check_functions().any(|f| f.name() == function_name) {
+                return true;
+            }
+        }
+
+        // Check if any trigger executes the function
+        for (trigger, ()) in self.triggers() {
+            if trigger.function_name().is_some_and(|name| name == function_name) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
 /// A type alias for the result of processing check constraints.
 type CheckConstraintResult =
     (Vec<Rc<TableAttribute<CreateTable, ColumnDef>>>, Vec<Rc<CreateFunction>>);
@@ -539,6 +578,35 @@ impl ParserDB {
                 Statement::CreateFunction(create_function) => {
                     builder = builder.add_function(Rc::new(create_function), ());
                 }
+                Statement::DropFunction(drop_function) => {
+                    for func_desc in &drop_function.func_desc {
+                        let function_name = last_str(&func_desc.name);
+
+                        // Check if function exists
+                        let function_exists =
+                            builder.function_rc_vec().iter().any(|f| f.name() == function_name);
+
+                        if !function_exists {
+                            if drop_function.if_exists {
+                                continue;
+                            }
+                            return Err(crate::errors::Error::DropFunctionNotFound {
+                                function_name: function_name.to_string(),
+                            });
+                        }
+
+                        // Check for references in check constraints, policies, or triggers
+                        if builder.is_function_used(function_name) {
+                            return Err(crate::errors::Error::FunctionReferenced {
+                                function_name: function_name.to_string(),
+                            });
+                        }
+
+                        // Remove the function
+                        let functions = builder.functions_mut();
+                        functions.retain(|(f, ())| f.name() != function_name);
+                    }
+                }
                 Statement::CreateTrigger(create_trigger) => {
                     let table_name = last_str(&create_trigger.table_name);
                     let table_exists =
@@ -801,9 +869,14 @@ impl ParserDB {
                 | Statement::ShowViews { .. }
                 | Statement::ShowFunctions { .. }
                 | Statement::ShowCollation { .. }
+                | Statement::DetachDuckDBDatabase { .. }
+                | Statement::OptimizeTable { .. }
                 | Statement::ShowCreate { .. }
                 | Statement::ShowSchemas { .. }
                 | Statement::Update(_)
+                | Statement::Install { .. }
+                | Statement::Copy { .. }
+                | Statement::Drop { .. }
                 | Statement::ShowColumns { .. }
                 | Statement::Delete(_)
                 | Statement::Insert(_) => {

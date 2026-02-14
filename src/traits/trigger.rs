@@ -350,6 +350,16 @@ pub trait TriggerLike: Clone + Debug + Metadata {
     where
         Self: 'db;
 
+    /// Returns the name of the function the trigger executes, if any.
+    ///
+    /// This method returns just the function name string without requiring
+    /// a database reference, making it useful for dependency checking during
+    /// schema construction.
+    ///
+    /// Returns `None` for triggers that don't execute a function (e.g., SQLite
+    /// triggers with inline statements).
+    fn function_name(&self) -> Option<&str>;
+
     /// Returns whether the trigger is a maintenance trigger.
     ///
     /// A maintenance trigger is defined as a trigger that solely consists of
@@ -510,6 +520,10 @@ impl<T: TriggerLike> TriggerLike for &T {
         Self: 'db,
     {
         (*self).function(database)
+    }
+
+    fn function_name(&self) -> Option<&str> {
+        (*self).function_name()
     }
 
     fn is_maintenance_trigger<'db>(&'db self, database: &'db Self::DB) -> bool {

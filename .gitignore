@@ -23,3 +23,7 @@ cobertura.xml
 
 .vscode/*
 build_rs_cov.profraw
+
+# Honggfuzz artifacts
+hfuzz_workspace/
+hfuzz_target/

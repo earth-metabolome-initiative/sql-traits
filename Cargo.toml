@@ -46,3 +46,10 @@ should_panic_without_expect = "allow"
 doc_markdown = "allow"
 clone_on_copy = "forbid"
 pedantic = { level = "deny", priority = -1 }
+
+[workspace]
+members = ["fuzz"]
+
+# Enable debug symbols in release mode for fuzzing
+[profile.release]
+debug = true

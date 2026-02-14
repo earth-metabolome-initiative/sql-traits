@@ -105,6 +105,21 @@ pub enum Error {
         /// Name of the undefined table.
         table_name: String,
     },
+    #[error("Function `{function_name}` not found for DROP FUNCTION statement.")]
+    /// Error indicating that a DROP FUNCTION statement references a function
+    /// that does not exist.
+    DropFunctionNotFound {
+        /// Name of the function that was not found.
+        function_name: String,
+    },
+    #[error("Cannot drop function `{function_name}`: still referenced in the schema.")]
+    /// Error indicating that a DROP FUNCTION statement references a function
+    /// that is still used by other schema objects (check constraints, policies,
+    /// or triggers).
+    FunctionReferenced {
+        /// Name of the function being dropped.
+        function_name: String,
+    },
 }
 
 impl From<ParserError> for Error {

@@ -54,4 +54,9 @@ impl TriggerLike for CreateTrigger {
     {
         self.exec_body.as_ref().and_then(|body| database.function(last_str(&body.func_desc.name)))
     }
+
+    #[inline]
+    fn function_name(&self) -> Option<&str> {
+        self.exec_body.as_ref().map(|body| last_str(&body.func_desc.name))
+    }
 }

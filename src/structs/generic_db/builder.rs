@@ -87,6 +87,26 @@ where
         &mut self.column_grants
     }
 
+    /// Returns a mutable reference to the functions list.
+    pub(crate) fn functions_mut(&mut self) -> &mut Vec<(Rc<Func>, Func::Meta)> {
+        &mut self.functions
+    }
+
+    /// Returns a slice of check constraint Rc references with their metadata.
+    pub(crate) fn check_constraints(&self) -> &[(Rc<Ch>, Ch::Meta)] {
+        &self.check_constraints
+    }
+
+    /// Returns a slice of policy Rc references with their metadata.
+    pub(crate) fn policies(&self) -> &[(Rc<P>, P::Meta)] {
+        &self.policies
+    }
+
+    /// Returns a slice of trigger Rc references with their metadata.
+    pub(crate) fn triggers(&self) -> &[(Rc<Tr>, Tr::Meta)] {
+        &self.triggers
+    }
+
     #[must_use]
     /// Creates a new `GenericDBBuilder` instance.
     pub fn new(catalog_name: String) -> Self {

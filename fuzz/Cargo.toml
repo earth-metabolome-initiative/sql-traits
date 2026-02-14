@@ -1,0 +1,14 @@
+[package]
+name = "sql-traits-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+honggfuzz = { version = "0.5.58", features = ["arbitrary"] }
+sql-traits = { path = ".." }
+sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", branch = "main" }
+
+[[bin]]
+name = "fuzz_dialect"
+path = "fuzz_targets/fuzz_dialect.rs"
