@@ -821,67 +821,145 @@ impl ParserDB {
                         );
                     }
                 }
-                Statement::CreateOperator(_)
-                | Statement::CreateOperatorClass(_)
-                | Statement::CreateOperatorFamily(_)
-                | Statement::CreateType { .. }
-                | Statement::CreateExtension(_)
-                | Statement::CreateView(_)
+                // =================================================================
+                // IGNORED STATEMENTS
+                // These statements don't affect schema structure tracking.
+                // =================================================================
+
+                // DML statements (data manipulation, not schema)
                 | Statement::Query(_)
-                | Statement::Rollback { .. }
+                | Statement::Insert(_)
+                | Statement::Update(_)
+                | Statement::Delete(_)
+                | Statement::Merge { .. }
+                | Statement::Truncate(_)
+
+                // Transaction control
                 | Statement::Commit { .. }
+                | Statement::Rollback { .. }
                 | Statement::StartTransaction { .. }
                 | Statement::Savepoint { .. }
                 | Statement::ReleaseSavepoint { .. }
-                | Statement::ShowVariable { .. }
-                | Statement::Raise { .. }
-                | Statement::Vacuum { .. }
-                | Statement::ShowCharset { .. }
-                | Statement::Print { .. }
+
+                // Cursor operations
+                | Statement::Declare { .. }
+                | Statement::Fetch { .. }
                 | Statement::Open { .. }
                 | Statement::Close { .. }
-                | Statement::Fetch { .. }
-                | Statement::Declare { .. }
+
+                // Session/connection settings (Set variants handled above)
+                | Statement::Set(_)
+                | Statement::Reset(_)
                 | Statement::Use { .. }
-                | Statement::Throw { .. }
-                | Statement::Load { .. }
+
+                // SHOW/EXPLAIN commands (read-only introspection)
+                | Statement::ShowVariable { .. }
+                | Statement::ShowVariables { .. }
+                | Statement::ShowTables { .. }
+                | Statement::ShowColumns { .. }
+                | Statement::ShowCreate { .. }
+                | Statement::ShowFunctions { .. }
+                | Statement::ShowCollation { .. }
+                | Statement::ShowViews { .. }
+                | Statement::ShowSchemas { .. }
+                | Statement::ShowCharset { .. }
+                | Statement::Explain { .. }
+                | Statement::ExplainTable { .. }
+
+                // Utility/maintenance commands
+                | Statement::Analyze { .. }
+                | Statement::Vacuum { .. }
+                | Statement::Copy { .. }
+                | Statement::CopyIntoSnowflake { .. }
+                | Statement::Kill { .. }
+                | Statement::Flush { .. }
+                | Statement::Discard { .. }
+                | Statement::OptimizeTable { .. }
+
+                // Prepared statements
+                | Statement::Prepare { .. }
+                | Statement::Execute { .. }
+                | Statement::Deallocate { .. }
+
+                // Procedural/control flow (PL/pgSQL, T-SQL, etc.)
+                | Statement::Call(_)
                 | Statement::Return { .. }
+                | Statement::Raise { .. }
                 | Statement::Assert { .. }
                 | Statement::While { .. }
-                | Statement::ExplainTable { .. }
-                | Statement::Explain { .. }
-                | Statement::Kill { .. }
+                | Statement::Throw { .. }
+                | Statement::Print { .. }
+                | Statement::Load { .. }
+
+                // Locks
+                | Statement::LockTables { .. }
+                | Statement::UnlockTables
+
+                // Pub/sub notifications
                 | Statement::LISTEN { .. }
                 | Statement::UNLISTEN { .. }
                 | Statement::NOTIFY { .. }
-                | Statement::ShowTables { .. }
-                | Statement::Analyze { .. }
-                | Statement::Deallocate { .. }
-                | Statement::Prepare { .. }
-                | Statement::Execute { .. }
-                | Statement::Set(_)
+
+                // Database-specific statements we don't track
                 | Statement::Pragma { .. }
-                | Statement::Call(_)
-                | Statement::Reset(_)
-                | Statement::Truncate(_)
                 | Statement::Directory { .. }
-                | Statement::Discard { .. }
-                | Statement::ShowViews { .. }
-                | Statement::ShowFunctions { .. }
-                | Statement::ShowCollation { .. }
+                | Statement::AttachDatabase { .. }
                 | Statement::DetachDuckDBDatabase { .. }
-                | Statement::OptimizeTable { .. }
-                | Statement::ShowCreate { .. }
-                | Statement::ShowSchemas { .. }
-                | Statement::Update(_)
                 | Statement::Install { .. }
-                | Statement::Copy { .. }
+                | Statement::Msck { .. }
+                | Statement::Cache { .. }
+                | Statement::UNCache { .. }
+
+                // Objects we're not currently tracking
+                // (views, procedures, types, extensions, operators, etc.)
+                | Statement::CreateView(_)
+                | Statement::AlterView { .. }
+                | Statement::CreateVirtualTable { .. }
+                | Statement::CreateDatabase { .. }
+                | Statement::CreateSchema { .. }
+                | Statement::CreateSequence { .. }
+                | Statement::CreateProcedure { .. }
+                | Statement::CreateMacro { .. }
+                | Statement::CreateStage { .. }
+                | Statement::CreateType { .. }
+                | Statement::CreateExtension(_)
+                | Statement::CreateDomain(_)
+                | Statement::DropDomain(_)
+                | Statement::CreateOperator(_)
+                | Statement::CreateOperatorClass(_)
+                | Statement::CreateOperatorFamily(_)
+                | Statement::Comment { .. }
+
+                // Generic DROP (handles TABLE, INDEX, etc. - not yet implemented)
                 | Statement::Drop { .. }
-                | Statement::ShowColumns { .. }
-                | Statement::Delete(_)
-                | Statement::Insert(_) => {
-                    // Ignored statements
+
+                // ALTER statements not yet implemented
+                | Statement::AlterIndex { .. }
+                | Statement::AlterRole { .. } => {
+                    // Ignored statements - no schema tracking needed
                 }
+
+                // =================================================================
+                // TODO: Future support candidates
+                // These statements affect schema and should be implemented:
+                //
+                // DROP statements (via Statement::Drop):
+                //   - DROP TABLE: Remove table and cascade to dependents
+                //   - DROP INDEX: Remove index from table
+                //   - DROP TRIGGER: Remove trigger from table
+                //   - DROP POLICY: Remove policy from table
+                //   - DROP ROLE: Remove role (check for grant references)
+                //   - DROP SCHEMA: Remove schema and contained objects
+                //
+                // ALTER statements:
+                //   - AlterIndex: Rename, set options
+                //   - AlterRole: Modify role properties
+                //
+                // Other DDL:
+                //   - CreateSequence/AlterSequence: For auto-increment tracking
+                //   - CreateSchema: Namespace management
+                //   - Comment: Documentation metadata extraction
+                // =================================================================
                 _ => {
                     unimplemented!("Unsupported statement found: {statement:?}");
                 }
