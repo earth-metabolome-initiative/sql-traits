@@ -134,6 +134,13 @@ pub enum Error {
         /// Name of the table being dropped.
         table_name: String,
     },
+    #[error("Index `{index_name}` not found for DROP INDEX statement.")]
+    /// Error indicating that a DROP INDEX statement references an index
+    /// that does not exist.
+    DropIndexNotFound {
+        /// Name of the index that was not found.
+        index_name: String,
+    },
 }
 
 impl From<ParserError> for Error {

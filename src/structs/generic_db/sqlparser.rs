@@ -717,6 +717,54 @@ impl ParserDB {
                         builder.remove_table(table_name);
                     }
                 }
+                Statement::Drop {
+                    object_type: sqlparser::ast::ObjectType::Index,
+                    if_exists,
+                    names,
+                    ..
+                } => {
+                    for name in names {
+                        let index_name = last_str(&name);
+
+                        // Find the index
+                        let index_exists = builder
+                            .indices_mut()
+                            .iter()
+                            .any(|(idx, _)| {
+                                idx.attribute()
+                                    .name
+                                    .as_ref()
+                                    .is_some_and(|n| last_str(n) == index_name)
+                            });
+
+                        if !index_exists {
+                            if if_exists {
+                                continue;
+                            }
+                            return Err(crate::errors::Error::DropIndexNotFound {
+                                index_name: index_name.to_string(),
+                            });
+                        }
+
+                        // Remove from builder's indices list
+                        builder.indices_mut().retain(|(idx, _)| {
+                            idx.attribute()
+                                .name
+                                .as_ref()
+                                .is_none_or(|n| last_str(n) != index_name)
+                        });
+
+                        // Remove from table metadata
+                        for (_, table_meta) in builder.tables_mut() {
+                            table_meta.retain_indices(|idx| {
+                                idx.attribute()
+                                    .name
+                                    .as_ref()
+                                    .is_none_or(|n| last_str(n) != index_name)
+                            });
+                        }
+                    }
+                }
                 Statement::CreateTrigger(create_trigger) => {
                     let table_name = last_str(&create_trigger.table_name);
                     let table_exists =
@@ -1055,7 +1103,6 @@ impl ParserDB {
                 // These statements affect schema and should be implemented:
                 //
                 // DROP statements (via Statement::Drop):
-                //   - DROP INDEX: Remove index from table
                 //   - DROP TRIGGER: Remove trigger from table
                 //   - DROP POLICY: Remove policy from table
                 //   - DROP ROLE: Remove role (check for grant references)
@@ -1740,6 +1787,125 @@ mod tests {
             // Only t2's policy should remain
             let t2 = db.table(None, "t2").expect("t2 should exist");
             assert_eq!(t2.policies(&db).count(), 1);
+        }
+    }
+
+    mod drop_index_tests {
+        use super::*;
+
+        #[test]
+        fn test_drop_index_basic() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY, name TEXT);
+                CREATE INDEX idx_name ON t(name);
+                DROP INDEX idx_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Index should be removed
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.indices(&db).count(), 0);
+        }
+
+        #[test]
+        fn test_drop_index_if_exists_when_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY, name TEXT);
+                CREATE INDEX idx_name ON t(name);
+                DROP INDEX IF EXISTS idx_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Index should be removed
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.indices(&db).count(), 0);
+        }
+
+        #[test]
+        fn test_drop_index_if_exists_when_not_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY);
+                DROP INDEX IF EXISTS nonexistent_idx;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Should succeed without error
+            assert!(db.table(None, "t").is_some());
+        }
+
+        #[test]
+        fn test_drop_index_not_found_error_type() {
+            let sql = "DROP INDEX nonexistent_idx;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::DropIndexNotFound { index_name }) if index_name == "nonexistent_idx"
+            ));
+        }
+
+        #[test]
+        fn test_drop_multiple_indices() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY, name TEXT, age INT);
+                CREATE INDEX idx_name ON t(name);
+                CREATE INDEX idx_age ON t(age);
+                DROP INDEX idx_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Only idx_age should remain
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.indices(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_index_then_recreate() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY, name TEXT);
+                CREATE INDEX idx_name ON t(name);
+                DROP INDEX idx_name;
+                CREATE INDEX idx_name ON t(name);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Index should exist again
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.indices(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_index_keeps_other_table_indices() {
+            let sql = r"
+                CREATE TABLE t1 (id INT PRIMARY KEY, name TEXT);
+                CREATE TABLE t2 (id INT PRIMARY KEY, value TEXT);
+                CREATE INDEX idx_t1_name ON t1(name);
+                CREATE INDEX idx_t2_value ON t2(value);
+                DROP INDEX idx_t1_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // t1 should have no indices
+            let t1 = db.table(None, "t1").expect("t1 should exist");
+            assert_eq!(t1.indices(&db).count(), 0);
+
+            // t2 should still have its index
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.indices(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_index_table_still_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY, name TEXT, age INT);
+                CREATE INDEX idx_name ON t(name);
+                DROP INDEX idx_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Table should still exist with its columns
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.columns(&db).count(), 3);
         }
     }
 }

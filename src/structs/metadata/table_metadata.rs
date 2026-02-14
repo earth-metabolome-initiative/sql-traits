@@ -235,4 +235,16 @@ impl<T: TableLike> TableMetadata<T> {
     pub fn set_primary_key(&mut self, pk_columns: Vec<Rc<<T::DB as DatabaseLike>::Column>>) {
         self.primary_key = pk_columns;
     }
+
+    /// Removes indices that don't match the predicate.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - A predicate function that returns `true` for indices to keep.
+    pub fn retain_indices<F>(&mut self, f: F)
+    where
+        F: FnMut(&Rc<<T::DB as DatabaseLike>::Index>) -> bool,
+    {
+        self.indices.retain(f);
+    }
 }
