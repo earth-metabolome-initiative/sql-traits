@@ -281,4 +281,76 @@ mod tests {
         assert!(db.schema("schema_a").is_none());
         assert!(db.schema("schema_b").is_none());
     }
+
+    // ========================
+    // ALTER SCHEMA tests
+    // ========================
+
+    #[test]
+    fn test_alter_schema_rename() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA old_name;
+            ALTER SCHEMA old_name RENAME TO new_name;
+            ",
+        )
+        .unwrap();
+
+        assert!(db.schema("old_name").is_none());
+        let schema = db.schema("new_name").expect("new_name should exist");
+        assert_eq!(schema.name(), "new_name");
+    }
+
+    #[test]
+    fn test_alter_schema_owner_to() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            ALTER SCHEMA my_schema OWNER TO new_owner;
+            ",
+        )
+        .unwrap();
+
+        let schema = db.schema("my_schema").expect("Schema should exist");
+        assert_eq!(schema.authorization(), Some("new_owner"));
+    }
+
+    #[test]
+    fn test_alter_schema_preserves_authorization_on_rename() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA old_name AUTHORIZATION admin;
+            ALTER SCHEMA old_name RENAME TO new_name;
+            ",
+        )
+        .unwrap();
+
+        let schema = db.schema("new_name").expect("new_name should exist");
+        assert_eq!(schema.authorization(), Some("admin"));
+    }
+
+    #[test]
+    fn test_alter_nonexistent_schema_fails() {
+        let result = parse_postgres("ALTER SCHEMA nonexistent RENAME TO other;");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::errors::Error::AlterSchemaNotFound { schema_name } if schema_name == "nonexistent")
+        );
+    }
+
+    #[test]
+    fn test_alter_schema_if_exists() {
+        // Should not error when IF EXISTS is used on non-existent schema
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA existing;
+            ALTER SCHEMA IF EXISTS nonexistent RENAME TO other;
+            ",
+        )
+        .unwrap();
+
+        assert!(db.schema("existing").is_some());
+    }
 }

@@ -190,6 +190,27 @@ pub enum Error {
         /// Name of the schema being dropped.
         schema_name: String,
     },
+    #[error("Table `{table_name}` not found for RENAME TABLE statement.")]
+    /// Error indicating that a RENAME TABLE statement references a table
+    /// that does not exist.
+    RenameTableNotFound {
+        /// Name of the table that was not found.
+        table_name: String,
+    },
+    #[error("Policy `{policy_name}` not found for ALTER POLICY statement.")]
+    /// Error indicating that an ALTER POLICY statement references a policy
+    /// that does not exist.
+    AlterPolicyNotFound {
+        /// Name of the policy that was not found.
+        policy_name: String,
+    },
+    #[error("Schema `{schema_name}` not found for ALTER SCHEMA statement.")]
+    /// Error indicating that an ALTER SCHEMA statement references a schema
+    /// that does not exist.
+    AlterSchemaNotFound {
+        /// Name of the schema that was not found.
+        schema_name: String,
+    },
 }
 
 impl From<ParserError> for Error {

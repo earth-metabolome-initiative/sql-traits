@@ -345,4 +345,34 @@ mod tests {
         assert_eq!(check_funcs.len(), 1);
         assert_eq!(check_funcs[0].name(), "check_func");
     }
+
+    #[test]
+    fn test_alter_policy_rename() {
+        let sql = r"
+            CREATE TABLE my_table (id INT);
+            CREATE POLICY old_policy ON my_table USING (true);
+            ALTER POLICY old_policy ON my_table RENAME TO new_policy;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "my_table").expect("Table not found");
+        let policies: Vec<_> = table.policies(&db).collect();
+
+        assert_eq!(policies.len(), 1);
+        assert_eq!(policies[0].name(), "new_policy");
+    }
+
+    #[test]
+    fn test_alter_nonexistent_policy_fails() {
+        let sql = r"
+            CREATE TABLE my_table (id INT);
+            ALTER POLICY nonexistent ON my_table RENAME TO other;
+        ";
+        let result = ParserDB::parse::<GenericDialect>(sql);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::errors::Error::AlterPolicyNotFound { policy_name } if policy_name == "nonexistent")
+        );
+    }
 }

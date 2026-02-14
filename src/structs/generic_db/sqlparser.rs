@@ -9,7 +9,8 @@ use git2::Repository;
 use sql_docs::SqlDoc;
 use sqlparser::{
     ast::{
-        AlterTableOperation, CheckConstraint, ColumnDef, ColumnOption, CreateFunction,
+        AlterPolicy, AlterPolicyOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation,
+        CheckConstraint, ColumnDef, ColumnOption, CommentObject, CreateFunction,
         CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger,
         DataType, ExactNumberInfo, Expr, ForeignKeyConstraint, Grant, Ident, IndexColumn,
         ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, SchemaName,
@@ -1196,13 +1197,186 @@ impl ParserDB {
                         );
                     }
                 }
+                Statement::RenameTable(renames) => {
+                    use crate::traits::TableLike;
+
+                    for rename in renames {
+                        let old_name = last_str(&rename.old_name);
+
+                        // Check if table exists
+                        let table_exists =
+                            builder.tables().iter().any(|(t, _)| t.table_name() == old_name);
+
+                        if !table_exists {
+                            return Err(crate::errors::Error::RenameTableNotFound {
+                                table_name: old_name.to_string(),
+                            });
+                        }
+
+                        // Get table and update its name by replacing in the Rc
+                        // Since CreateTable is in an Rc, we need to create a new one
+                        let tables = builder.tables_mut();
+                        if let Some(idx) = tables.iter().position(|(t, _)| t.table_name() == old_name)
+                        {
+                            let (old_table, meta) = tables.remove(idx);
+                            let mut new_table = (*old_table).clone();
+                            // Update the table name
+                            new_table.name = rename.new_name.clone();
+                            tables.push((Rc::new(new_table), meta));
+                            tables.sort_by(|(a, _), (b, _)| {
+                                (a.table_schema(), a.table_name())
+                                    .cmp(&(b.table_schema(), b.table_name()))
+                            });
+                        }
+                    }
+                }
+                Statement::AlterPolicy(AlterPolicy {
+                    name,
+                    table_name,
+                    operation,
+                }) => {
+                    use crate::traits::PolicyLike;
+
+                    let policy_name = &name.value;
+                    let _table_name = last_str(&table_name);
+
+                    // Check if policy exists
+                    let policy_exists = builder
+                        .policies()
+                        .iter()
+                        .any(|(p, _)| p.name() == policy_name);
+
+                    if !policy_exists {
+                        return Err(crate::errors::Error::AlterPolicyNotFound {
+                            policy_name: policy_name.clone(),
+                        });
+                    }
+
+                    match operation {
+                        AlterPolicyOperation::Rename { new_name } => {
+                            // Update the policy name
+                            let policies = builder.policies_mut();
+                            if let Some(idx) =
+                                policies.iter().position(|(p, _)| p.name() == policy_name)
+                            {
+                                let (old_policy, meta) = policies.remove(idx);
+                                let mut new_policy = (*old_policy).clone();
+                                new_policy.name = new_name.clone();
+                                policies.push((Rc::new(new_policy), meta));
+                            }
+                        }
+                        AlterPolicyOperation::Apply { .. } => {
+                            // For Apply operations (changing USING/WITH CHECK expressions),
+                            // we would need to update the policy metadata with new function refs.
+                            // This is complex and would require re-parsing expressions.
+                            // For now, we skip detailed tracking of expression changes.
+                        }
+                    }
+                }
+                Statement::AlterSchema(AlterSchema {
+                    name,
+                    if_exists,
+                    operations,
+                }) => {
+                    let schema_name = last_str(&name);
+
+                    // Check if schema exists
+                    let schema_exists =
+                        builder.schemas().iter().any(|(s, ())| s.name() == schema_name);
+
+                    if !schema_exists {
+                        if if_exists {
+                            continue;
+                        }
+                        return Err(crate::errors::Error::AlterSchemaNotFound {
+                            schema_name: schema_name.to_string(),
+                        });
+                    }
+
+                    for operation in &operations {
+                        match operation {
+                            AlterSchemaOperation::Rename { name: new_name } => {
+                                let new_schema_name = last_str(new_name);
+                                let schemas = builder.schemas_mut();
+                                if let Some(idx) =
+                                    schemas.iter().position(|(s, ())| s.name() == schema_name)
+                                {
+                                    let (old_schema, ()) = schemas.remove(idx);
+                                    let new_schema = Schema::new(new_schema_name.to_string());
+                                    // Preserve authorization if present
+                                    let new_schema = if let Some(auth) = old_schema.authorization()
+                                    {
+                                        Schema::with_authorization(
+                                            new_schema_name.to_string(),
+                                            auth.to_string(),
+                                        )
+                                    } else {
+                                        new_schema
+                                    };
+                                    schemas.push((Rc::new(new_schema), ()));
+                                    schemas.sort_by(|(a, ()), (b, ())| a.name().cmp(b.name()));
+                                }
+                            }
+                            AlterSchemaOperation::OwnerTo { owner } => {
+                                // Update the authorization
+                                let owner_name = match owner {
+                                    sqlparser::ast::Owner::Ident(ident) => ident.value.clone(),
+                                    sqlparser::ast::Owner::CurrentRole
+                                    | sqlparser::ast::Owner::CurrentUser
+                                    | sqlparser::ast::Owner::SessionUser => continue,
+                                };
+                                let schemas = builder.schemas_mut();
+                                if let Some(idx) =
+                                    schemas.iter().position(|(s, ())| s.name() == schema_name)
+                                {
+                                    let (old_schema, ()) = schemas.remove(idx);
+                                    let new_schema = Schema::with_authorization(
+                                        old_schema.name().to_string(),
+                                        owner_name,
+                                    );
+                                    schemas.push((Rc::new(new_schema), ()));
+                                }
+                            }
+                            // Other operations don't affect our schema tracking
+                            AlterSchemaOperation::SetDefaultCollate { .. }
+                            | AlterSchemaOperation::AddReplica { .. }
+                            | AlterSchemaOperation::DropReplica { .. }
+                            | AlterSchemaOperation::SetOptionsParens { .. } => {}
+                        }
+                    }
+                }
+                Statement::Comment {
+                    object_type,
+                    object_name: _,
+                    comment: _,
+                    if_exists: _,
+                } => {
+                    // COMMENT ON statements set comments on database objects.
+                    // Currently, table documentation is extracted from SQL comments
+                    // (lines starting with --) via the sql_docs crate.
+                    // COMMENT ON TABLE/COLUMN would be a different mechanism.
+                    // For now, we acknowledge but don't store these comments.
+                    match object_type {
+                        CommentObject::Table
+                        | CommentObject::Column
+                        | CommentObject::Schema
+                        | CommentObject::Extension
+                        | CommentObject::Database
+                        | CommentObject::User
+                        | CommentObject::Role => {
+                            // TODO: Store COMMENT ON statements when comment metadata
+                            // field is added to the appropriate metadata structs
+                        }
+                    }
+                }
                 // =================================================================
                 // IGNORED STATEMENTS
                 // These statements don't affect schema structure tracking.
+                // All Statement variants are explicitly listed here for clarity.
                 // =================================================================
 
                 // DML statements (data manipulation, not schema)
-                | Statement::Query(_)
+                Statement::Query(_)
                 | Statement::Insert(_)
                 | Statement::Update(_)
                 | Statement::Delete(_)
@@ -1219,13 +1393,14 @@ impl ParserDB {
                 // Cursor operations
                 | Statement::Declare { .. }
                 | Statement::Fetch { .. }
-                | Statement::Open { .. }
+                | Statement::Open(_)
                 | Statement::Close { .. }
 
                 // Session/connection settings (Set variants handled above)
                 | Statement::Set(_)
                 | Statement::Reset(_)
                 | Statement::Use { .. }
+                | Statement::AlterSession { .. }
 
                 // SHOW/EXPLAIN commands (read-only introspection)
                 | Statement::ShowVariable { .. }
@@ -1238,11 +1413,14 @@ impl ParserDB {
                 | Statement::ShowViews { .. }
                 | Statement::ShowSchemas { .. }
                 | Statement::ShowCharset { .. }
+                | Statement::ShowDatabases { .. }
+                | Statement::ShowObjects { .. }
+                | Statement::ShowStatus { .. }
                 | Statement::Explain { .. }
                 | Statement::ExplainTable { .. }
 
                 // Utility/maintenance commands
-                | Statement::Analyze { .. }
+                | Statement::Analyze(_)
                 | Statement::Vacuum { .. }
                 | Statement::Copy { .. }
                 | Statement::CopyIntoSnowflake { .. }
@@ -1250,6 +1428,11 @@ impl ParserDB {
                 | Statement::Flush { .. }
                 | Statement::Discard { .. }
                 | Statement::OptimizeTable { .. }
+                | Statement::ExportData { .. }
+                | Statement::Unload { .. }
+                | Statement::LoadData { .. }
+                | Statement::List(_)
+                | Statement::Remove { .. }
 
                 // Prepared statements
                 | Statement::Prepare { .. }
@@ -1259,10 +1442,13 @@ impl ParserDB {
                 // Procedural/control flow (PL/pgSQL, T-SQL, etc.)
                 | Statement::Call(_)
                 | Statement::Return { .. }
-                | Statement::Raise { .. }
+                | Statement::Raise(_)
+                | Statement::RaisError { .. }
                 | Statement::Assert { .. }
-                | Statement::While { .. }
-                | Statement::Throw { .. }
+                | Statement::While(_)
+                | Statement::Case(_)
+                | Statement::If(_)
+                | Statement::Throw(_)
                 | Statement::Print { .. }
                 | Statement::Load { .. }
 
@@ -1279,14 +1465,15 @@ impl ParserDB {
                 | Statement::Pragma { .. }
                 | Statement::Directory { .. }
                 | Statement::AttachDatabase { .. }
+                | Statement::AttachDuckDBDatabase { .. }
                 | Statement::DetachDuckDBDatabase { .. }
                 | Statement::Install { .. }
-                | Statement::Msck { .. }
+                | Statement::Msck(_)
                 | Statement::Cache { .. }
                 | Statement::UNCache { .. }
 
                 // Objects we're not currently tracking
-                // (views, procedures, types, extensions, operators, etc.)
+                // (views, procedures, types, extensions, operators, connectors, secrets, etc.)
                 | Statement::CreateView(_)
                 | Statement::AlterView { .. }
                 | Statement::CreateVirtualTable { .. }
@@ -1302,32 +1489,37 @@ impl ParserDB {
                 | Statement::CreateOperator(_)
                 | Statement::CreateOperatorClass(_)
                 | Statement::CreateOperatorFamily(_)
-                | Statement::Comment { .. }
+                | Statement::CreateConnector(_)
+                | Statement::CreateSecret { .. }
+                | Statement::CreateServer(_)
+                | Statement::CreateUser(_)
+                | Statement::AlterUser { .. }
 
-                // Generic DROP for non-Table objects (INDEX, VIEW, etc. - not yet implemented)
-                // Note: DROP TABLE is handled explicitly above
+                // DROP statements for objects we don't track
+                | Statement::DropExtension(_)
+                | Statement::DropOperator { .. }
+                | Statement::DropOperatorClass { .. }
+                | Statement::DropOperatorFamily { .. }
+                | Statement::DropProcedure { .. }
+                | Statement::DropConnector { .. }
+                | Statement::DropSecret { .. }
+
+                // Generic DROP for non-Table/Index/Role/Schema objects
+                // Note: DROP TABLE, INDEX, ROLE, SCHEMA are handled explicitly above
                 | Statement::Drop { .. }
 
                 // ALTER statements not yet implemented
                 | Statement::AlterIndex { .. }
-                | Statement::AlterRole { .. } => {
-                    // Ignored statements - no schema tracking needed
-                }
+                | Statement::AlterRole { .. }
+                | Statement::AlterType { .. }
+                | Statement::AlterOperator { .. }
+                | Statement::AlterOperatorClass { .. }
+                | Statement::AlterOperatorFamily { .. }
+                | Statement::AlterConnector { .. }
 
-                // =================================================================
-                // TODO: Future support candidates
-                // These statements affect schema and should be implemented:
-                //
-                // ALTER statements:
-                //   - AlterIndex: Rename, set options
-                //   - AlterRole: Modify role properties
-                //
-                // Other DDL:
-                //   - CreateSequence/AlterSequence: For auto-increment tracking
-                //   - Comment: Documentation metadata extraction
-                // =================================================================
-                _ => {
-                    unimplemented!("Unsupported statement found: {statement:?}");
+                // Permissions
+                | Statement::Deny { .. } => {
+                    // Ignored statements - no schema tracking needed
                 }
             }
         }

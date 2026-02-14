@@ -2961,4 +2961,60 @@ mod tests {
             assert_eq!(table.columns(&db).count(), 2);
         }
     }
+
+    mod rename_table {
+        use super::*;
+
+        #[test]
+        fn test_rename_table() {
+            let sql = r"
+                CREATE TABLE old_name (id INT PRIMARY KEY);
+                RENAME TABLE old_name TO new_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert!(db.table(None, "old_name").is_none());
+            let table = db.table(None, "new_name").expect("new_name should exist");
+            assert_eq!(table.table_name(), "new_name");
+        }
+
+        #[test]
+        fn test_rename_nonexistent_table_fails() {
+            let sql = r"RENAME TABLE nonexistent TO other;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, crate::errors::Error::RenameTableNotFound { table_name } if table_name == "nonexistent")
+            );
+        }
+
+        #[test]
+        fn test_rename_multiple_tables() {
+            let sql = r"
+                CREATE TABLE table_a (id INT);
+                CREATE TABLE table_b (id INT);
+                RENAME TABLE table_a TO new_a, table_b TO new_b;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert!(db.table(None, "table_a").is_none());
+            assert!(db.table(None, "table_b").is_none());
+            assert!(db.table(None, "new_a").is_some());
+            assert!(db.table(None, "new_b").is_some());
+        }
+
+        #[test]
+        fn test_rename_preserves_columns() {
+            let sql = r"
+                CREATE TABLE old_name (id INT PRIMARY KEY, name TEXT);
+                RENAME TABLE old_name TO new_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let table = db.table(None, "new_name").expect("Table should exist");
+            assert_eq!(table.columns(&db).count(), 2);
+        }
+    }
 }
