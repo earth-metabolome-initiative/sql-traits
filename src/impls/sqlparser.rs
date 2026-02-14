@@ -11,6 +11,7 @@ mod create_table;
 mod create_trigger;
 mod foreign_key_constraint;
 mod grant;
+mod schema;
 mod unique_constraint;
 
 pub use grant::grant_matches_revoke;

@@ -169,6 +169,27 @@ pub enum Error {
         /// Name of the role being dropped.
         role_name: String,
     },
+    #[error("Schema `{schema_name}` already exists.")]
+    /// Error indicating that a CREATE SCHEMA statement tries to create a schema
+    /// that already exists.
+    SchemaAlreadyExists {
+        /// Name of the schema that already exists.
+        schema_name: String,
+    },
+    #[error("Schema `{schema_name}` not found for DROP SCHEMA statement.")]
+    /// Error indicating that a DROP SCHEMA statement references a schema
+    /// that does not exist.
+    DropSchemaNotFound {
+        /// Name of the schema that was not found.
+        schema_name: String,
+    },
+    #[error("Cannot drop schema `{schema_name}`: still contains objects.")]
+    /// Error indicating that a DROP SCHEMA statement references a schema
+    /// that still contains objects (tables, functions, etc.).
+    SchemaNotEmpty {
+        /// Name of the schema being dropped.
+        schema_name: String,
+    },
 }
 
 impl From<ParserError> for Error {

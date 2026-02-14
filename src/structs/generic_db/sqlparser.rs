@@ -12,8 +12,8 @@ use sqlparser::{
         AlterTableOperation, CheckConstraint, ColumnDef, ColumnOption, CreateFunction,
         CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger,
         DataType, ExactNumberInfo, Expr, ForeignKeyConstraint, Grant, Ident, IndexColumn,
-        ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Statement,
-        TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
+        ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, SchemaName,
+        Statement, TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::{Dialect, GenericDialect},
     parser::{Parser, ParserError},
@@ -22,7 +22,7 @@ use sqlparser::{
 
 use crate::{
     structs::{
-        GenericDB, TableAttribute, TableMetadata,
+        GenericDB, Schema, TableAttribute, TableMetadata,
         metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
     },
     traits::{ColumnLike, FunctionLike, TableLike},
@@ -44,6 +44,7 @@ pub type ParserDBBuilder = super::GenericDBBuilder<
     CreateTrigger,
     CreatePolicy,
     CreateRole,
+    Schema,
     Grant,
     Grant,
 >;
@@ -191,6 +192,16 @@ impl ParserDBBuilder {
 
         false
     }
+
+    /// Checks if a schema contains any objects (tables).
+    ///
+    /// Returns `true` if any table belongs to this schema.
+    fn is_schema_non_empty(&self, schema_name: &str) -> bool {
+        use crate::traits::TableLike;
+
+        // Check if any table is in this schema
+        self.tables().iter().any(|(t, _)| t.table_schema().is_some_and(|s| s == schema_name))
+    }
 }
 
 /// A type alias for the result of processing check constraints.
@@ -248,6 +259,7 @@ pub type ParserDB = GenericDB<
     CreateTrigger,
     CreatePolicy,
     CreateRole,
+    Schema,
     Grant,
     Grant,
 >;
@@ -910,6 +922,59 @@ impl ParserDB {
                         });
                     }
                 }
+                Statement::Drop {
+                    object_type: sqlparser::ast::ObjectType::Schema,
+                    if_exists,
+                    names,
+                    cascade,
+                    ..
+                } => {
+                    for name in names {
+                        let schema_name = last_str(&name);
+
+                        // Check if schema exists
+                        let schema_exists =
+                            builder.schemas().iter().any(|(s, ())| s.name() == schema_name);
+
+                        if !schema_exists {
+                            if if_exists {
+                                continue;
+                            }
+                            return Err(crate::errors::Error::DropSchemaNotFound {
+                                schema_name: schema_name.to_string(),
+                            });
+                        }
+
+                        // Check for contained objects unless CASCADE is specified
+                        if !cascade && builder.is_schema_non_empty(schema_name) {
+                            return Err(crate::errors::Error::SchemaNotEmpty {
+                                schema_name: schema_name.to_string(),
+                            });
+                        }
+
+                        // If CASCADE, remove all tables in the schema first
+                        if cascade {
+                            use crate::traits::TableLike;
+                            let tables_to_remove: Vec<_> = builder
+                                .tables()
+                                .iter()
+                                .filter(|(t, _)| {
+                                    t.table_schema().is_some_and(|s| s == schema_name)
+                                })
+                                .map(|(t, _)| t.table_name().to_string())
+                                .collect();
+
+                            for table_name in tables_to_remove {
+                                builder.remove_table(&table_name);
+                            }
+                        }
+
+                        // Remove the schema
+                        builder
+                            .schemas_mut()
+                            .retain(|(s, ())| s.name() != schema_name);
+                    }
+                }
                 Statement::CreateIndex(create_index) => {
                     let (index, metadata) = Self::process_create_index(create_index, &builder)?;
                     let table_name = index.table().table_name();
@@ -1019,6 +1084,40 @@ impl ParserDB {
                 }
                 Statement::CreateRole(create_role) => {
                     builder = builder.add_role(Rc::new(create_role), ());
+                }
+                Statement::CreateSchema {
+                    schema_name,
+                    if_not_exists,
+                    ..
+                } => {
+                    let (name, authorization) = match &schema_name {
+                        SchemaName::Simple(name) => (last_str(name).to_string(), None),
+                        SchemaName::UnnamedAuthorization(auth) => {
+                            // CREATE SCHEMA AUTHORIZATION admin creates schema named "admin"
+                            (auth.value.clone(), Some(auth.value.clone()))
+                        }
+                        SchemaName::NamedAuthorization(name, auth) => {
+                            (last_str(name).to_string(), Some(auth.value.clone()))
+                        }
+                    };
+
+                    // Check if schema already exists
+                    let schema_exists = builder.schemas().iter().any(|(s, ())| s.name() == name);
+
+                    if schema_exists {
+                        if !if_not_exists {
+                            return Err(crate::errors::Error::SchemaAlreadyExists {
+                                schema_name: name,
+                            });
+                        }
+                        // IF NOT EXISTS - skip adding duplicate
+                    } else {
+                        let schema = match authorization {
+                            Some(auth) => Schema::with_authorization(name, auth),
+                            None => Schema::new(name),
+                        };
+                        builder = builder.add_schema(Rc::new(schema), ());
+                    }
                 }
                 Statement::Grant(grant) => {
                     // Validate grantees exist (closed world assumption)
@@ -1192,7 +1291,6 @@ impl ParserDB {
                 | Statement::AlterView { .. }
                 | Statement::CreateVirtualTable { .. }
                 | Statement::CreateDatabase { .. }
-                | Statement::CreateSchema { .. }
                 | Statement::CreateSequence { .. }
                 | Statement::CreateProcedure { .. }
                 | Statement::CreateMacro { .. }
@@ -1220,16 +1318,12 @@ impl ParserDB {
                 // TODO: Future support candidates
                 // These statements affect schema and should be implemented:
                 //
-                // DROP statements (via Statement::Drop):
-                //   - DROP SCHEMA: Remove schema and contained objects
-                //
                 // ALTER statements:
                 //   - AlterIndex: Rename, set options
                 //   - AlterRole: Modify role properties
                 //
                 // Other DDL:
                 //   - CreateSequence/AlterSequence: For auto-increment tracking
-                //   - CreateSchema: Namespace management
                 //   - Comment: Documentation metadata extraction
                 // =================================================================
                 _ => {

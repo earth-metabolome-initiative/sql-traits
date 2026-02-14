@@ -6,12 +6,12 @@ use crate::{
     structs::GenericDB,
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-        PolicyLike, RoleLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+        PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
     },
 };
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -23,6 +23,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
@@ -50,14 +51,16 @@ where
     check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
     /// List of roles in the database.
     roles: Vec<(Rc<R>, R::Meta)>,
+    /// List of schemas in the database.
+    schemas: Vec<(Rc<S>, S::Meta)>,
     /// List of table grants in the database.
     table_grants: Vec<(Rc<TG>, TG::Meta)>,
     /// List of column grants in the database.
     column_grants: Vec<(Rc<CG>, CG::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
-    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -69,6 +72,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
@@ -162,6 +166,16 @@ where
         &mut self.roles
     }
 
+    /// Returns a slice of schema Rc references with their metadata.
+    pub(crate) fn schemas(&self) -> &[(Rc<S>, S::Meta)] {
+        &self.schemas
+    }
+
+    /// Returns a mutable reference to the schemas list.
+    pub(crate) fn schemas_mut(&mut self) -> &mut Vec<(Rc<S>, S::Meta)> {
+        &mut self.schemas
+    }
+
     #[must_use]
     /// Creates a new `GenericDBBuilder` instance.
     pub fn new(catalog_name: String) -> Self {
@@ -178,14 +192,15 @@ where
             policies: Vec::new(),
             check_constraints: Vec::new(),
             roles: Vec::new(),
+            schemas: Vec::new(),
             table_grants: Vec::new(),
             column_grants: Vec::new(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
-    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -197,6 +212,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
@@ -373,6 +389,22 @@ where
         self
     }
 
+    /// Adds a schema with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_schema(mut self, schema: Rc<S>, metadata: S::Meta) -> Self {
+        self.schemas.push((schema, metadata));
+        self
+    }
+
+    /// Adds multiple schemas with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_schemas(mut self, schemas: impl IntoIterator<Item = (Rc<S>, S::Meta)>) -> Self {
+        self.schemas.extend(schemas);
+        self
+    }
+
     /// Adds a table grant with its metadata to the builder.
     #[must_use]
     #[inline]
@@ -412,9 +444,9 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
-    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>>
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>>
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -426,10 +458,11 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>) -> Self {
+    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -448,6 +481,7 @@ where
         builder.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
         builder.roles.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        builder.schemas.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         // Grants are not sorted as their order may be significant
 
         GenericDB {
@@ -463,6 +497,7 @@ where
             policies: builder.policies,
             check_constraints: builder.check_constraints,
             roles: builder.roles,
+            schemas: builder.schemas,
             table_grants: builder.table_grants,
             column_grants: builder.column_grants,
         }

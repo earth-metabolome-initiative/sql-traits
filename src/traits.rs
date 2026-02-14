@@ -24,6 +24,8 @@ pub mod policy;
 pub use policy::PolicyLike;
 pub mod role;
 pub use role::RoleLike;
+pub mod schema;
+pub use schema::SchemaLike;
 pub mod grant;
 pub use grant::{ColumnGrantLike, GrantLike, TableGrantLike};
 

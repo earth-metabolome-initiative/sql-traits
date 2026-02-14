@@ -1,0 +1,284 @@
+//! Submodule providing a trait for describing SQL Schema-like entities.
+
+use std::fmt::Debug;
+
+use crate::traits::{DatabaseLike, Metadata};
+
+/// A trait for types that can be treated as SQL schemas.
+///
+/// Schemas in SQL are namespaces that contain database objects like tables,
+/// views, functions, etc. They help organize database objects and manage
+/// access control.
+pub trait SchemaLike: Debug + Clone + Ord + Eq + Metadata {
+    /// The database type the schema belongs to.
+    type DB: DatabaseLike;
+
+    /// Returns the name of the schema.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE SCHEMA my_schema;")?;
+    /// let schema = db.schema("my_schema").unwrap();
+    /// assert_eq!(schema.name(), "my_schema");
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn name(&self) -> &str;
+
+    /// Returns the authorization owner of the schema, if specified.
+    ///
+    /// In PostgreSQL, schemas can have an owner specified via the
+    /// `AUTHORIZATION` clause.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE SCHEMA my_schema AUTHORIZATION admin;")?;
+    /// let schema = db.schema("my_schema").unwrap();
+    /// assert_eq!(schema.authorization(), Some("admin"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn authorization(&self) -> Option<&str>;
+}
+
+/// Blanket implementation for references to `SchemaLike` types.
+impl<S: SchemaLike> SchemaLike for &S {
+    type DB = S::DB;
+
+    fn name(&self) -> &str {
+        (*self).name()
+    }
+
+    fn authorization(&self) -> Option<&str> {
+        (*self).authorization()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+
+    use super::*;
+    use crate::structs::ParserDB;
+
+    /// Helper to parse SQL using PostgreSQL dialect
+    fn parse_postgres(sql: &str) -> Result<ParserDB, crate::errors::Error> {
+        let dialect = PostgreSqlDialect {};
+        let statements = Parser::parse_sql(&dialect, sql)?;
+        ParserDB::from_statements(statements, "test".to_string())
+    }
+
+    #[test]
+    fn test_create_simple_schema() {
+        let db = parse_postgres("CREATE SCHEMA my_schema;").unwrap();
+        let schema = db.schema("my_schema").expect("Schema should exist");
+        assert_eq!(schema.name(), "my_schema");
+        assert_eq!(schema.authorization(), None);
+    }
+
+    #[test]
+    fn test_create_schema_with_authorization() {
+        let db = parse_postgres("CREATE SCHEMA my_schema AUTHORIZATION admin;").unwrap();
+        let schema = db.schema("my_schema").expect("Schema should exist");
+        assert_eq!(schema.name(), "my_schema");
+        assert_eq!(schema.authorization(), Some("admin"));
+    }
+
+    #[test]
+    fn test_create_schema_authorization_only() {
+        // CREATE SCHEMA AUTHORIZATION admin creates schema named "admin"
+        let db = parse_postgres("CREATE SCHEMA AUTHORIZATION admin;").unwrap();
+        let schema = db.schema("admin").expect("Schema should exist");
+        assert_eq!(schema.name(), "admin");
+        assert_eq!(schema.authorization(), Some("admin"));
+    }
+
+    #[test]
+    fn test_create_multiple_schemas() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA schema_a;
+            CREATE SCHEMA schema_b AUTHORIZATION owner_b;
+            CREATE SCHEMA AUTHORIZATION owner_c;
+            ",
+        )
+        .unwrap();
+
+        let schemas: Vec<_> = db.schemas().collect();
+        assert_eq!(schemas.len(), 3);
+
+        let schema_a = db.schema("schema_a").expect("schema_a should exist");
+        assert_eq!(schema_a.authorization(), None);
+
+        let schema_b = db.schema("schema_b").expect("schema_b should exist");
+        assert_eq!(schema_b.authorization(), Some("owner_b"));
+
+        let schema_c = db.schema("owner_c").expect("owner_c should exist");
+        assert_eq!(schema_c.authorization(), Some("owner_c"));
+    }
+
+    #[test]
+    fn test_create_schema_if_not_exists() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            CREATE SCHEMA IF NOT EXISTS my_schema;
+            ",
+        )
+        .unwrap();
+
+        let schemas: Vec<_> = db.schemas().collect();
+        assert_eq!(schemas.len(), 1, "Should not create duplicate schema");
+    }
+
+    #[test]
+    fn test_create_duplicate_schema_fails() {
+        let result = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            CREATE SCHEMA my_schema;
+            ",
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::errors::Error::SchemaAlreadyExists { schema_name } if schema_name == "my_schema")
+        );
+    }
+
+    #[test]
+    fn test_schema_not_found() {
+        let db = parse_postgres("CREATE SCHEMA my_schema;").unwrap();
+        assert!(db.schema("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_has_schemas() {
+        let db_with_schemas = parse_postgres("CREATE SCHEMA my_schema;").unwrap();
+        assert!(db_with_schemas.has_schemas());
+
+        let db_without_schemas = parse_postgres("CREATE TABLE t (id INT);").unwrap();
+        assert!(!db_without_schemas.has_schemas());
+    }
+
+    // ========================
+    // DROP SCHEMA tests
+    // ========================
+
+    #[test]
+    fn test_drop_empty_schema() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            DROP SCHEMA my_schema;
+            ",
+        )
+        .unwrap();
+
+        assert!(db.schema("my_schema").is_none());
+        assert!(!db.has_schemas());
+    }
+
+    #[test]
+    fn test_drop_schema_if_exists() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            DROP SCHEMA IF EXISTS my_schema;
+            DROP SCHEMA IF EXISTS nonexistent;
+            ",
+        )
+        .unwrap();
+
+        assert!(db.schema("my_schema").is_none());
+    }
+
+    #[test]
+    fn test_drop_nonexistent_schema_fails() {
+        let result = parse_postgres("DROP SCHEMA nonexistent;");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::errors::Error::DropSchemaNotFound { schema_name } if schema_name == "nonexistent")
+        );
+    }
+
+    #[test]
+    fn test_drop_non_empty_schema_fails_restrict() {
+        let result = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            CREATE TABLE my_schema.my_table (id INT);
+            DROP SCHEMA my_schema;
+            ",
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::errors::Error::SchemaNotEmpty { schema_name } if schema_name == "my_schema")
+        );
+    }
+
+    #[test]
+    fn test_drop_schema_cascade() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            CREATE TABLE my_schema.my_table (id INT);
+            DROP SCHEMA my_schema CASCADE;
+            ",
+        )
+        .unwrap();
+
+        assert!(db.schema("my_schema").is_none());
+        assert!(db.table(Some("my_schema"), "my_table").is_none());
+    }
+
+    #[test]
+    fn test_drop_schema_cascade_with_multiple_tables() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA my_schema;
+            CREATE TABLE my_schema.table1 (id INT);
+            CREATE TABLE my_schema.table2 (name TEXT);
+            CREATE TABLE other_table (id INT);
+            DROP SCHEMA my_schema CASCADE;
+            ",
+        )
+        .unwrap();
+
+        assert!(db.schema("my_schema").is_none());
+        assert!(db.table(Some("my_schema"), "table1").is_none());
+        assert!(db.table(Some("my_schema"), "table2").is_none());
+        // Table outside schema should remain
+        assert!(db.table(None, "other_table").is_some());
+    }
+
+    #[test]
+    fn test_drop_multiple_schemas() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA schema_a;
+            CREATE SCHEMA schema_b;
+            DROP SCHEMA schema_a, schema_b;
+            ",
+        )
+        .unwrap();
+
+        assert!(db.schema("schema_a").is_none());
+        assert!(db.schema("schema_b").is_none());
+    }
+}

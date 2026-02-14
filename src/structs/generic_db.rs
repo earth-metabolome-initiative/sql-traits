@@ -11,11 +11,11 @@ pub use sqlparser::{ParserDB, ParserDBBuilder};
 
 use crate::traits::{
     CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-    PolicyLike, RoleLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+    PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
 };
 
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -27,6 +27,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
@@ -58,10 +59,12 @@ where
     table_grants: Vec<(Rc<TG>, TG::Meta)>,
     /// List of column grants in the database.
     column_grants: Vec<(Rc<CG>, CG::Meta)>,
+    /// List of schemas in the database.
+    schemas: Vec<(Rc<S>, S::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG> Debug
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> Debug
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -70,9 +73,10 @@ where
     F: ForeignKeyLike,
     Func: FunctionLike,
     Ch: CheckConstraintLike,
-    P: PolicyLike,
     Tr: TriggerLike,
+    P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
@@ -92,12 +96,13 @@ where
             .field("roles", &self.roles.len())
             .field("table_grants", &self.table_grants.len())
             .field("column_grants", &self.column_grants.len())
+            .field("schemas", &self.schemas.len())
             .finish()
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG> Clone
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> Clone
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -109,6 +114,7 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
@@ -128,11 +134,13 @@ where
             roles: self.roles.clone(),
             table_grants: self.table_grants.clone(),
             column_grants: self.column_grants.clone(),
+            schemas: self.schemas.clone(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG> GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+    GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike,
     C: ColumnLike,
@@ -144,14 +152,16 @@ where
     Tr: TriggerLike,
     P: PolicyLike,
     R: RoleLike,
+    S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
+    #[allow(clippy::type_complexity)]
     pub fn new(
         catalog_name: String,
-    ) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG> {
+    ) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> {
         GenericDBBuilder::new(catalog_name)
     }
 
@@ -608,5 +618,36 @@ where
     /// ```
     pub fn column_grant_metadata(&self, grant: &CG) -> Option<&CG::Meta> {
         self.column_grants.iter().find(|(g, _)| g.as_ref() == grant).map(|(_, m)| m)
+    }
+
+    /// Returns a reference to the schema by name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the schema to retrieve.
+    #[must_use]
+    pub fn schema(&self, name: &str) -> Option<&S> {
+        self.schemas
+            .binary_search_by(|(s, _)| s.name().cmp(name))
+            .ok()
+            .map(|index| self.schemas[index].0.as_ref())
+    }
+
+    /// Returns a reference to the metadata of the specified schema, if it
+    /// exists in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - The schema to retrieve metadata for.
+    pub fn schema_metadata(&self, schema: &S) -> Option<&S::Meta> {
+        self.schemas
+            .binary_search_by(|(s, _)| s.name().cmp(schema.name()))
+            .ok()
+            .map(|index| &self.schemas[index].1)
+    }
+
+    /// Iterates over the schemas and their metadata.
+    pub fn schemas(&self) -> impl Iterator<Item = (&S, &S::Meta)> {
+        self.schemas.iter().map(|(s, m)| (s.as_ref(), m))
     }
 }

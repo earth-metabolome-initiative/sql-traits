@@ -10,7 +10,7 @@ use geometric_traits::{
 
 use crate::traits::{
     CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-    PolicyLike, RoleLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+    PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
 };
 
 /// A trait for types that can be treated as SQL databases.
@@ -39,6 +39,8 @@ pub trait DatabaseLike: Clone + Debug {
     type TableGrant: TableGrantLike<DB = Self>;
     /// Type of the column grants in the schema.
     type ColumnGrant: ColumnGrantLike<DB = Self>;
+    /// Type of the schemas in the database.
+    type Schema: SchemaLike<DB = Self>;
 
     /// Returns the name of the database.
     ///
@@ -759,5 +761,41 @@ pub trait DatabaseLike: Clone + Debug {
     #[inline]
     fn has_column_grants(&self) -> bool {
         self.column_grants().next().is_some()
+    }
+
+    /// Iterates over the schemas defined in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA my_schema;
+    /// CREATE SCHEMA other_schema AUTHORIZATION admin;
+    /// ",
+    /// )?;
+    /// let schemas: Vec<_> = db.schemas().collect();
+    /// assert_eq!(schemas.len(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn schemas(&self) -> impl Iterator<Item = &Self::Schema>;
+
+    /// Returns the schema with the given name, if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the schema to retrieve.
+    fn schema(&self, name: &str) -> Option<&Self::Schema> {
+        self.schemas().find(|s| s.name() == name)
+    }
+
+    /// Returns whether the database has any schemas defined.
+    #[inline]
+    fn has_schemas(&self) -> bool {
+        self.schemas().next().is_some()
     }
 }

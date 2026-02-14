@@ -4,13 +4,13 @@ use crate::{
     structs::GenericDB,
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, DatabaseLike, ForeignKeyLike,
-        FunctionLike, IndexLike, PolicyLike, RoleLike, TableGrantLike, TableLike, TriggerLike,
-        UniqueIndexLike,
+        FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
+        TriggerLike, UniqueIndexLike,
     },
 };
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG> DatabaseLike
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> DatabaseLike
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
 where
     T: TableLike<DB = Self>,
     C: ColumnLike<DB = Self>,
@@ -22,6 +22,7 @@ where
     Tr: TriggerLike<DB = Self>,
     P: PolicyLike<DB = Self>,
     R: RoleLike<DB = Self>,
+    S: SchemaLike<DB = Self>,
     TG: TableGrantLike<DB = Self>,
     CG: ColumnGrantLike<DB = Self>,
 {
@@ -37,6 +38,7 @@ where
     type Role = R;
     type TableGrant = TG;
     type ColumnGrant = CG;
+    type Schema = S;
 
     #[inline]
     fn catalog_name(&self) -> &str {
@@ -106,5 +108,9 @@ where
 
     fn column_grants(&self) -> impl Iterator<Item = &Self::ColumnGrant> {
         self.column_grants.iter().map(|(g, _)| g.as_ref())
+    }
+
+    fn schemas(&self) -> impl Iterator<Item = &Self::Schema> {
+        self.schemas.iter().map(|(s, _)| s.as_ref())
     }
 }
