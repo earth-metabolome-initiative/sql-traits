@@ -120,6 +120,20 @@ pub enum Error {
         /// Name of the function being dropped.
         function_name: String,
     },
+    #[error("Table `{table_name}` not found for DROP TABLE statement.")]
+    /// Error indicating that a DROP TABLE statement references a table
+    /// that does not exist.
+    DropTableNotFound {
+        /// Name of the table that was not found.
+        table_name: String,
+    },
+    #[error("Cannot drop table `{table_name}`: still referenced in the schema.")]
+    /// Error indicating that a DROP TABLE statement references a table
+    /// that is still referenced by foreign keys from other tables.
+    TableReferenced {
+        /// Name of the table being dropped.
+        table_name: String,
+    },
 }
 
 impl From<ParserError> for Error {

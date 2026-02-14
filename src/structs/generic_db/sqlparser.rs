@@ -85,6 +85,80 @@ impl ParserDBBuilder {
 
         false
     }
+
+    /// Checks if a table with the given name is referenced by foreign keys from
+    /// other tables.
+    ///
+    /// Returns `true` if any other table has a foreign key pointing to this
+    /// table.
+    fn is_table_referenced(&self, table_name: &str) -> bool {
+        for (fk, ()) in self.foreign_keys() {
+            // Check if this FK references the table being dropped
+            // and is NOT from the same table (self-referential FKs are OK to drop)
+            let referenced_table = last_str(&fk.attribute().foreign_table);
+            let host_table = last_str(&fk.table().name);
+            if referenced_table == table_name && host_table != table_name {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Removes a table and all its associated schema objects.
+    ///
+    /// This removes:
+    /// - The table itself
+    /// - All columns belonging to the table
+    /// - All indices on the table
+    /// - All unique indices on the table
+    /// - All foreign keys from the table
+    /// - All check constraints on the table
+    /// - All triggers on the table
+    /// - All policies on the table
+    /// - All grants on the table
+    fn remove_table(&mut self, table_name: &str) {
+        use crate::traits::TableLike;
+
+        // Remove the table
+        self.tables_mut().retain(|(t, _)| t.table_name() != table_name);
+
+        // Remove columns belonging to this table
+        self.columns_mut().retain(|(c, ())| last_str(&TableAttribute::table(c).name) != table_name);
+
+        // Remove indices on this table
+        self.indices_mut().retain(|(i, _)| last_str(&TableAttribute::table(i).name) != table_name);
+
+        // Remove unique indices on this table
+        self.unique_indices_mut()
+            .retain(|(u, _)| last_str(&TableAttribute::table(u).name) != table_name);
+
+        // Remove foreign keys from this table
+        self.foreign_keys_mut()
+            .retain(|(fk, ())| last_str(&TableAttribute::table(fk).name) != table_name);
+
+        // Remove check constraints on this table
+        self.check_constraints_mut()
+            .retain(|(c, _)| last_str(&TableAttribute::table(c).name) != table_name);
+
+        // Remove triggers on this table
+        self.triggers_mut().retain(|(t, ())| last_str(&t.table_name) != table_name);
+
+        // Remove policies on this table
+        self.policies_mut().retain(|(p, _)| last_str(&p.table_name) != table_name);
+
+        // Remove table grants for this table
+        self.table_grants_mut().retain(|(g, ())| {
+            use sqlparser::ast::GrantObjects;
+            !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| last_str(t) == table_name))
+        });
+
+        // Remove column grants for this table
+        self.column_grants_mut().retain(|(g, ())| {
+            use sqlparser::ast::GrantObjects;
+            !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| last_str(t) == table_name))
+        });
+    }
 }
 
 /// A type alias for the result of processing check constraints.
@@ -607,6 +681,42 @@ impl ParserDB {
                         functions.retain(|(f, ())| f.name() != function_name);
                     }
                 }
+                Statement::Drop {
+                    object_type: sqlparser::ast::ObjectType::Table,
+                    if_exists,
+                    names,
+                    cascade,
+                    ..
+                } => {
+                    for name in names {
+                        let table_name = last_str(&name);
+
+                        // Check if table exists
+                        let table_exists = builder
+                            .tables()
+                            .iter()
+                            .any(|(t, _)| t.table_name() == table_name);
+
+                        if !table_exists {
+                            if if_exists {
+                                continue;
+                            }
+                            return Err(crate::errors::Error::DropTableNotFound {
+                                table_name: table_name.to_string(),
+                            });
+                        }
+
+                        // Check for references from other tables (unless CASCADE)
+                        if !cascade && builder.is_table_referenced(table_name) {
+                            return Err(crate::errors::Error::TableReferenced {
+                                table_name: table_name.to_string(),
+                            });
+                        }
+
+                        // Remove the table and all associated objects
+                        builder.remove_table(table_name);
+                    }
+                }
                 Statement::CreateTrigger(create_trigger) => {
                     let table_name = last_str(&create_trigger.table_name);
                     let table_exists =
@@ -930,7 +1040,8 @@ impl ParserDB {
                 | Statement::CreateOperatorFamily(_)
                 | Statement::Comment { .. }
 
-                // Generic DROP (handles TABLE, INDEX, etc. - not yet implemented)
+                // Generic DROP for non-Table objects (INDEX, VIEW, etc. - not yet implemented)
+                // Note: DROP TABLE is handled explicitly above
                 | Statement::Drop { .. }
 
                 // ALTER statements not yet implemented
@@ -944,7 +1055,6 @@ impl ParserDB {
                 // These statements affect schema and should be implemented:
                 //
                 // DROP statements (via Statement::Drop):
-                //   - DROP TABLE: Remove table and cascade to dependents
                 //   - DROP INDEX: Remove index from table
                 //   - DROP TRIGGER: Remove trigger from table
                 //   - DROP POLICY: Remove policy from table
@@ -1166,4 +1276,470 @@ fn search_sql_documents(path: &Path) -> Vec<PathBuf> {
         sql_files.push(path.to_path_buf());
     }
     sql_files
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::dialect::GenericDialect;
+
+    use super::*;
+    use crate::{errors::Error, traits::DatabaseLike};
+
+    mod drop_function_errors {
+        use super::*;
+
+        #[test]
+        fn test_drop_function_not_found_error_type() {
+            let sql = "DROP FUNCTION nonexistent_func;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::DropFunctionNotFound { function_name }) if function_name == "nonexistent_func"
+            ));
+        }
+
+        #[test]
+        fn test_drop_function_referenced_error_type() {
+            let sql = r"
+                CREATE FUNCTION is_valid(x INT) RETURNS BOOLEAN AS 'SELECT x > 0;';
+                CREATE TABLE t (id INT CHECK (is_valid(id)));
+                DROP FUNCTION is_valid;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::FunctionReferenced { function_name }) if function_name == "is_valid"
+            ));
+        }
+
+        #[test]
+        fn test_drop_function_if_exists_not_found_succeeds() {
+            let sql = "DROP FUNCTION IF EXISTS nonexistent_func;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn test_drop_function_if_exists_referenced_still_fails() {
+            let sql = r"
+                CREATE FUNCTION is_valid(x INT) RETURNS BOOLEAN AS 'SELECT x > 0;';
+                CREATE TABLE t (id INT CHECK (is_valid(id)));
+                DROP FUNCTION IF EXISTS is_valid;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            // IF EXISTS doesn't bypass the reference check
+            assert!(matches!(
+                result,
+                Err(Error::FunctionReferenced { function_name }) if function_name == "is_valid"
+            ));
+        }
+    }
+
+    mod drop_table_errors {
+        use super::*;
+
+        #[test]
+        fn test_drop_table_not_found_error_type() {
+            let sql = "DROP TABLE nonexistent_table;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::DropTableNotFound { table_name }) if table_name == "nonexistent_table"
+            ));
+        }
+
+        #[test]
+        fn test_drop_table_referenced_error_type() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+                DROP TABLE parent;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::TableReferenced { table_name }) if table_name == "parent"
+            ));
+        }
+
+        #[test]
+        fn test_drop_table_if_exists_not_found_succeeds() {
+            let sql = "DROP TABLE IF EXISTS nonexistent_table;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn test_drop_table_if_exists_referenced_still_fails() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+                DROP TABLE IF EXISTS parent;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            // IF EXISTS doesn't bypass the reference check
+            assert!(matches!(
+                result,
+                Err(Error::TableReferenced { table_name }) if table_name == "parent"
+            ));
+        }
+
+        #[test]
+        fn test_drop_table_cascade_bypasses_reference_check() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+                DROP TABLE parent CASCADE;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(result.is_ok());
+            let db = result.unwrap();
+            assert!(db.table(None, "parent").is_none());
+            assert!(db.table(None, "child").is_some());
+        }
+
+        #[test]
+        fn test_drop_multiple_tables() {
+            let sql = r"
+                CREATE TABLE t1 (id INT PRIMARY KEY);
+                CREATE TABLE t2 (id INT PRIMARY KEY);
+                CREATE TABLE t3 (id INT PRIMARY KEY);
+                DROP TABLE t1, t2;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(result.is_ok());
+            let db = result.unwrap();
+            assert!(db.table(None, "t1").is_none());
+            assert!(db.table(None, "t2").is_none());
+            assert!(db.table(None, "t3").is_some());
+        }
+
+        #[test]
+        fn test_drop_multiple_tables_one_referenced_fails() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+                CREATE TABLE other (id INT PRIMARY KEY);
+                DROP TABLE parent, other;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            // Should fail because parent is referenced
+            assert!(matches!(
+                result,
+                Err(Error::TableReferenced { table_name }) if table_name == "parent"
+            ));
+        }
+    }
+
+    mod is_function_used_tests {
+        use super::*;
+
+        #[test]
+        fn test_is_function_used_returns_false_when_no_references() {
+            // Parse SQL with a function but no references
+            let sql = r"
+                CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
+                CREATE TABLE t (id INT);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // The function exists but isn't used by any schema object
+            assert!(db.function("my_func").is_some());
+        }
+
+        #[test]
+        fn test_function_used_by_check_constraint() {
+            let sql = r"
+                CREATE FUNCTION is_positive(x INT) RETURNS BOOLEAN AS 'SELECT x > 0;';
+                CREATE TABLE t (id INT CHECK (is_positive(id)));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Function should exist and be used
+            assert!(db.function("is_positive").is_some());
+
+            // Verify dropping it would fail
+            let drop_sql = format!("{sql}\nDROP FUNCTION is_positive;");
+            let result = ParserDB::parse::<GenericDialect>(&drop_sql);
+            assert!(matches!(result, Err(Error::FunctionReferenced { .. })));
+        }
+
+        #[test]
+        fn test_function_used_by_policy_using_clause() {
+            let sql = r"
+                CREATE FUNCTION check_access() RETURNS BOOLEAN AS 'SELECT true;';
+                CREATE TABLE t (id INT);
+                CREATE POLICY my_policy ON t USING (check_access());
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Function should exist
+            assert!(db.function("check_access").is_some());
+
+            // Verify dropping it would fail
+            let drop_sql = format!("{sql}\nDROP FUNCTION check_access;");
+            let result = ParserDB::parse::<GenericDialect>(&drop_sql);
+            assert!(matches!(result, Err(Error::FunctionReferenced { .. })));
+        }
+
+        #[test]
+        fn test_function_used_by_policy_with_check_clause() {
+            let sql = r"
+                CREATE FUNCTION validate() RETURNS BOOLEAN AS 'SELECT true;';
+                CREATE TABLE t (id INT);
+                CREATE POLICY my_policy ON t WITH CHECK (validate());
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Function should exist
+            assert!(db.function("validate").is_some());
+
+            // Verify dropping it would fail
+            let drop_sql = format!("{sql}\nDROP FUNCTION validate;");
+            let result = ParserDB::parse::<GenericDialect>(&drop_sql);
+            assert!(matches!(result, Err(Error::FunctionReferenced { .. })));
+        }
+
+        #[test]
+        fn test_function_used_by_trigger() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE FUNCTION trigger_fn() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION trigger_fn();
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Function should exist
+            assert!(db.function("trigger_fn").is_some());
+
+            // Verify dropping it would fail
+            let drop_sql = format!("{sql}\nDROP FUNCTION trigger_fn;");
+            let result = ParserDB::parse::<GenericDialect>(&drop_sql);
+            assert!(matches!(result, Err(Error::FunctionReferenced { .. })));
+        }
+    }
+
+    mod is_table_referenced_tests {
+        use super::*;
+
+        #[test]
+        fn test_table_not_referenced() {
+            let sql = r"
+                CREATE TABLE standalone (id INT PRIMARY KEY);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Table exists
+            assert!(db.table(None, "standalone").is_some());
+
+            // Can be dropped
+            let drop_sql = format!("{sql}\nDROP TABLE standalone;");
+            let result = ParserDB::parse::<GenericDialect>(&drop_sql);
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn test_table_referenced_by_single_fk() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Both tables exist
+            assert!(db.table(None, "parent").is_some());
+            assert!(db.table(None, "child").is_some());
+
+            // Parent cannot be dropped (referenced)
+            let drop_parent = format!("{sql}\nDROP TABLE parent;");
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(&drop_parent),
+                Err(Error::TableReferenced { table_name }) if table_name == "parent"
+            ));
+
+            // Child can be dropped (not referenced)
+            let drop_child = format!("{sql}\nDROP TABLE child;");
+            assert!(ParserDB::parse::<GenericDialect>(&drop_child).is_ok());
+        }
+
+        #[test]
+        fn test_table_referenced_by_multiple_fks() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child1 (id INT, parent_id INT REFERENCES parent(id));
+                CREATE TABLE child2 (id INT, parent_id INT REFERENCES parent(id));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            assert!(db.table(None, "parent").is_some());
+
+            // Parent cannot be dropped
+            let drop_sql = format!("{sql}\nDROP TABLE parent;");
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(&drop_sql),
+                Err(Error::TableReferenced { .. })
+            ));
+        }
+
+        #[test]
+        fn test_self_referential_table_not_blocked() {
+            let sql = r"
+                CREATE TABLE tree (id INT PRIMARY KEY, parent_id INT REFERENCES tree(id));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            assert!(db.table(None, "tree").is_some());
+
+            // Self-referential table CAN be dropped
+            let drop_sql = format!("{sql}\nDROP TABLE tree;");
+            assert!(ParserDB::parse::<GenericDialect>(&drop_sql).is_ok());
+        }
+
+        #[test]
+        fn test_chain_of_references() {
+            let sql = r"
+                CREATE TABLE grandparent (id INT PRIMARY KEY);
+                CREATE TABLE parent (id INT PRIMARY KEY, gp_id INT REFERENCES grandparent(id));
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+            ";
+
+            // Cannot drop grandparent (referenced by parent)
+            let drop_gp = format!("{sql}\nDROP TABLE grandparent;");
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(&drop_gp),
+                Err(Error::TableReferenced { table_name }) if table_name == "grandparent"
+            ));
+
+            // Cannot drop parent (referenced by child)
+            let drop_parent = format!("{sql}\nDROP TABLE parent;");
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(&drop_parent),
+                Err(Error::TableReferenced { table_name }) if table_name == "parent"
+            ));
+
+            // Can drop child (not referenced)
+            let drop_child = format!("{sql}\nDROP TABLE child;");
+            assert!(ParserDB::parse::<GenericDialect>(&drop_child).is_ok());
+        }
+    }
+
+    mod remove_table_tests {
+        use super::*;
+        use crate::traits::{DatabaseLike, TableLike};
+
+        #[test]
+        fn test_remove_table_removes_columns() {
+            let sql = r"
+                CREATE TABLE t1 (id INT PRIMARY KEY, name TEXT, age INT);
+                CREATE TABLE t2 (id INT PRIMARY KEY);
+                DROP TABLE t1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // t1 should be gone
+            assert!(db.table(None, "t1").is_none());
+
+            // t2 should still have its column
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.columns(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_remove_table_removes_indices() {
+            let sql = r"
+                CREATE TABLE t1 (id INT PRIMARY KEY, name TEXT);
+                CREATE INDEX idx_name ON t1(name);
+                CREATE TABLE t2 (id INT PRIMARY KEY, value TEXT);
+                CREATE INDEX idx_value ON t2(value);
+                DROP TABLE t1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // t1's index should be gone, t2's should remain
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.indices(&db).count(), 1);
+
+            // Total indices across all tables should be 1 (only t2's index)
+            let total_indices: usize = db.tables().map(|t| t.indices(&db).count()).sum();
+            assert_eq!(total_indices, 1);
+        }
+
+        #[test]
+        fn test_remove_table_removes_foreign_keys() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+                DROP TABLE child;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Parent should exist with no foreign keys (parent doesn't have any FKs
+            // pointing out)
+            let parent = db.table(None, "parent").expect("parent should exist");
+            assert_eq!(parent.foreign_keys(&db).count(), 0);
+
+            // No foreign keys in the database (child's FK was removed with child)
+            let total_fks: usize = db.tables().map(|t| t.foreign_keys(&db).count()).sum();
+            assert_eq!(total_fks, 0);
+        }
+
+        #[test]
+        fn test_remove_table_removes_check_constraints() {
+            let sql = r"
+                CREATE TABLE t1 (id INT CHECK (id > 0));
+                CREATE TABLE t2 (value INT CHECK (value < 100));
+                DROP TABLE t1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Only t2's check constraint should remain
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.check_constraints(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_remove_table_removes_triggers() {
+            let sql = r"
+                CREATE TABLE t1 (id INT);
+                CREATE TABLE t2 (id INT);
+                CREATE FUNCTION fn1() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE FUNCTION fn2() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER trg1 BEFORE INSERT ON t1 FOR EACH ROW EXECUTE FUNCTION fn1();
+                CREATE TRIGGER trg2 BEFORE INSERT ON t2 FOR EACH ROW EXECUTE FUNCTION fn2();
+                DROP TABLE t1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Only t2's trigger should remain
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.triggers(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_remove_table_removes_policies() {
+            let sql = r"
+                CREATE TABLE t1 (id INT);
+                CREATE TABLE t2 (id INT);
+                CREATE POLICY p1 ON t1 USING (true);
+                CREATE POLICY p2 ON t2 USING (true);
+                DROP TABLE t1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            // Only t2's policy should remain
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.policies(&db).count(), 1);
+        }
+    }
 }

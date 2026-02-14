@@ -2801,4 +2801,164 @@ mod tests {
             assert!(child_deps.is_empty());
         }
     }
+
+    mod drop_table_tests {
+        use sqlparser::dialect::GenericDialect;
+
+        use crate::{
+            structs::ParserDB,
+            traits::{DatabaseLike, TableLike},
+        };
+
+        #[test]
+        fn test_drop_table_basic() {
+            let sql = r"
+                CREATE TABLE my_table (id INT PRIMARY KEY);
+                DROP TABLE my_table;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Table should be removed
+            assert!(db.table(None, "my_table").is_none());
+            assert_eq!(db.tables().count(), 0);
+        }
+
+        #[test]
+        fn test_drop_table_if_exists_when_exists() {
+            let sql = r"
+                CREATE TABLE my_table (id INT PRIMARY KEY);
+                DROP TABLE IF EXISTS my_table;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Table should be removed
+            assert!(db.table(None, "my_table").is_none());
+        }
+
+        #[test]
+        fn test_drop_table_if_exists_when_not_exists() {
+            let sql = r"
+                DROP TABLE IF EXISTS nonexistent_table;
+            ";
+            let db =
+                ParserDB::parse::<GenericDialect>(sql).expect("Should not error with IF EXISTS");
+
+            // No tables
+            assert_eq!(db.tables().count(), 0);
+        }
+
+        #[test]
+        fn test_drop_table_not_found() {
+            let sql = r"
+                DROP TABLE nonexistent_table;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            // Should fail because table doesn't exist
+            assert!(result.is_err());
+            if let Err(e) = result {
+                let error_msg = format!("{e}");
+                assert!(error_msg.contains("nonexistent_table"));
+            }
+        }
+
+        #[test]
+        fn test_drop_table_referenced_by_foreign_key_fails() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+                DROP TABLE parent;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            // Should fail because parent is referenced by child
+            assert!(result.is_err());
+            if let Err(e) = result {
+                let error_msg = format!("{e}");
+                assert!(error_msg.contains("parent"));
+                assert!(error_msg.contains("referenced"));
+            }
+        }
+
+        #[test]
+        fn test_drop_table_with_cascade_succeeds() {
+            let sql = r"
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT, parent_id INT REFERENCES parent(id));
+                DROP TABLE parent CASCADE;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("CASCADE should allow drop");
+
+            // Parent should be removed
+            assert!(db.table(None, "parent").is_none());
+
+            // Child should still exist
+            assert!(db.table(None, "child").is_some());
+        }
+
+        #[test]
+        fn test_drop_table_self_referential_succeeds() {
+            let sql = r"
+                CREATE TABLE tree (id INT PRIMARY KEY, parent_id INT REFERENCES tree(id));
+                DROP TABLE tree;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql)
+                .expect("Self-referential table should be droppable");
+
+            // Table should be removed
+            assert!(db.table(None, "tree").is_none());
+        }
+
+        #[test]
+        fn test_drop_table_removes_associated_objects() {
+            let sql = r"
+                CREATE TABLE my_table (
+                    id INT PRIMARY KEY,
+                    name TEXT CHECK (length(name) > 0)
+                );
+                CREATE INDEX my_idx ON my_table (name);
+                DROP TABLE my_table;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Table should be removed
+            assert!(db.table(None, "my_table").is_none());
+
+            // No tables, columns, indices should remain
+            assert_eq!(db.tables().count(), 0);
+        }
+
+        #[test]
+        fn test_drop_table_keeps_other_tables() {
+            let sql = r"
+                CREATE TABLE table1 (id INT PRIMARY KEY);
+                CREATE TABLE table2 (id INT PRIMARY KEY);
+                CREATE TABLE table3 (id INT PRIMARY KEY);
+                DROP TABLE table2;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // table2 should be removed
+            assert!(db.table(None, "table2").is_none());
+
+            // table1 and table3 should still exist
+            assert!(db.table(None, "table1").is_some());
+            assert!(db.table(None, "table3").is_some());
+            assert_eq!(db.tables().count(), 2);
+        }
+
+        #[test]
+        fn test_drop_table_then_recreate() {
+            let sql = r"
+                CREATE TABLE my_table (id INT PRIMARY KEY);
+                DROP TABLE my_table;
+                CREATE TABLE my_table (id INT, name TEXT);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Table should exist with new schema
+            let table = db.table(None, "my_table").expect("Table should exist");
+            assert_eq!(table.columns(&db).count(), 2);
+        }
+    }
 }

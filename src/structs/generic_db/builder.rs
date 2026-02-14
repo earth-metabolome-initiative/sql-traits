@@ -107,6 +107,46 @@ where
         &self.triggers
     }
 
+    /// Returns a slice of foreign key Rc references with their metadata.
+    pub(crate) fn foreign_keys(&self) -> &[(Rc<F>, F::Meta)] {
+        &self.foreign_keys
+    }
+
+    /// Returns a mutable reference to the columns list.
+    pub(crate) fn columns_mut(&mut self) -> &mut Vec<(Rc<C>, C::Meta)> {
+        &mut self.columns
+    }
+
+    /// Returns a mutable reference to the indices list.
+    pub(crate) fn indices_mut(&mut self) -> &mut Vec<(Rc<I>, I::Meta)> {
+        &mut self.indices
+    }
+
+    /// Returns a mutable reference to the unique indices list.
+    pub(crate) fn unique_indices_mut(&mut self) -> &mut Vec<(Rc<U>, U::Meta)> {
+        &mut self.unique_indices
+    }
+
+    /// Returns a mutable reference to the foreign keys list.
+    pub(crate) fn foreign_keys_mut(&mut self) -> &mut Vec<(Rc<F>, F::Meta)> {
+        &mut self.foreign_keys
+    }
+
+    /// Returns a mutable reference to the check constraints list.
+    pub(crate) fn check_constraints_mut(&mut self) -> &mut Vec<(Rc<Ch>, Ch::Meta)> {
+        &mut self.check_constraints
+    }
+
+    /// Returns a mutable reference to the triggers list.
+    pub(crate) fn triggers_mut(&mut self) -> &mut Vec<(Rc<Tr>, Tr::Meta)> {
+        &mut self.triggers
+    }
+
+    /// Returns a mutable reference to the policies list.
+    pub(crate) fn policies_mut(&mut self) -> &mut Vec<(Rc<P>, P::Meta)> {
+        &mut self.policies
+    }
+
     #[must_use]
     /// Creates a new `GenericDBBuilder` instance.
     pub fn new(catalog_name: String) -> Self {
