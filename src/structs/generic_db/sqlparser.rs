@@ -792,6 +792,29 @@ impl ParserDB {
 
                     builder = builder.add_trigger(Rc::new(create_trigger), ());
                 }
+                Statement::DropTrigger(drop_trigger) => {
+                    let trigger_name = last_str(&drop_trigger.trigger_name);
+
+                    // Find the trigger
+                    let trigger_exists = builder
+                        .triggers()
+                        .iter()
+                        .any(|(t, ())| last_str(&t.name) == trigger_name);
+
+                    if !trigger_exists {
+                        if drop_trigger.if_exists {
+                            continue;
+                        }
+                        return Err(crate::errors::Error::DropTriggerNotFound {
+                            trigger_name: trigger_name.to_string(),
+                        });
+                    }
+
+                    // Remove the trigger
+                    builder
+                        .triggers_mut()
+                        .retain(|(t, ())| last_str(&t.name) != trigger_name);
+                }
                 Statement::CreateIndex(create_index) => {
                     let (index, metadata) = Self::process_create_index(create_index, &builder)?;
                     let table_name = index.table().table_name();
@@ -1103,7 +1126,6 @@ impl ParserDB {
                 // These statements affect schema and should be implemented:
                 //
                 // DROP statements (via Statement::Drop):
-                //   - DROP TRIGGER: Remove trigger from table
                 //   - DROP POLICY: Remove policy from table
                 //   - DROP ROLE: Remove role (check for grant references)
                 //   - DROP SCHEMA: Remove schema and contained objects
@@ -1906,6 +1928,135 @@ mod tests {
             // Table should still exist with its columns
             let table = db.table(None, "t").expect("Table should exist");
             assert_eq!(table.columns(&db).count(), 3);
+        }
+    }
+
+    mod drop_trigger_tests {
+        use super::*;
+
+        #[test]
+        fn test_drop_trigger_basic() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE FUNCTION trigger_fn() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION trigger_fn();
+                DROP TRIGGER my_trigger ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Trigger should be removed
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.triggers(&db).count(), 0);
+        }
+
+        #[test]
+        fn test_drop_trigger_if_exists_when_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE FUNCTION trigger_fn() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION trigger_fn();
+                DROP TRIGGER IF EXISTS my_trigger ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Trigger should be removed
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.triggers(&db).count(), 0);
+        }
+
+        #[test]
+        fn test_drop_trigger_if_exists_when_not_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                DROP TRIGGER IF EXISTS nonexistent_trigger ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Should succeed without error
+            assert!(db.table(None, "t").is_some());
+        }
+
+        #[test]
+        fn test_drop_trigger_not_found_error_type() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                DROP TRIGGER nonexistent_trigger ON t;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::DropTriggerNotFound { trigger_name }) if trigger_name == "nonexistent_trigger"
+            ));
+        }
+
+        #[test]
+        fn test_drop_one_of_multiple_triggers() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE FUNCTION fn1() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE FUNCTION fn2() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER trigger1 BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION fn1();
+                CREATE TRIGGER trigger2 BEFORE UPDATE ON t FOR EACH ROW EXECUTE FUNCTION fn2();
+                DROP TRIGGER trigger1 ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Only trigger2 should remain
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.triggers(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_trigger_then_recreate() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE FUNCTION trigger_fn() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION trigger_fn();
+                DROP TRIGGER my_trigger ON t;
+                CREATE TRIGGER my_trigger AFTER INSERT ON t FOR EACH ROW EXECUTE FUNCTION trigger_fn();
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Trigger should exist again
+            let table = db.table(None, "t").expect("Table should exist");
+            assert_eq!(table.triggers(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_trigger_keeps_other_table_triggers() {
+            let sql = r"
+                CREATE TABLE t1 (id INT);
+                CREATE TABLE t2 (id INT);
+                CREATE FUNCTION fn1() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE FUNCTION fn2() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER trigger1 BEFORE INSERT ON t1 FOR EACH ROW EXECUTE FUNCTION fn1();
+                CREATE TRIGGER trigger2 BEFORE INSERT ON t2 FOR EACH ROW EXECUTE FUNCTION fn2();
+                DROP TRIGGER trigger1 ON t1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // t1 should have no triggers
+            let t1 = db.table(None, "t1").expect("t1 should exist");
+            assert_eq!(t1.triggers(&db).count(), 0);
+
+            // t2 should still have its trigger
+            let t2 = db.table(None, "t2").expect("t2 should exist");
+            assert_eq!(t2.triggers(&db).count(), 1);
+        }
+
+        #[test]
+        fn test_drop_trigger_function_still_exists() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE FUNCTION trigger_fn() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION trigger_fn();
+                DROP TRIGGER my_trigger ON t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            // Function should still exist after dropping trigger
+            assert!(db.function("trigger_fn").is_some());
         }
     }
 }

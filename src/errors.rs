@@ -141,6 +141,13 @@ pub enum Error {
         /// Name of the index that was not found.
         index_name: String,
     },
+    #[error("Trigger `{trigger_name}` not found for DROP TRIGGER statement.")]
+    /// Error indicating that a DROP TRIGGER statement references a trigger
+    /// that does not exist.
+    DropTriggerNotFound {
+        /// Name of the trigger that was not found.
+        trigger_name: String,
+    },
 }
 
 impl From<ParserError> for Error {
