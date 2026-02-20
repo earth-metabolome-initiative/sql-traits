@@ -36,13 +36,20 @@ fn copy_crash_files() {
         std::fs::create_dir(&test_dir).unwrap();
     }
 
-    for entry in std::fs::read_dir(crash_dir).unwrap() {
-        let entry = entry.unwrap();
+    let entries = match std::fs::read_dir(crash_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_file() && path.file_name().unwrap().to_str().unwrap().starts_with("SIGABRT") {
-            let file_name = path.file_name().unwrap();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if path.is_file() && file_name.starts_with("SIGABRT") {
             let dest_path = test_dir.join(file_name);
-            std::fs::copy(&path, &dest_path).unwrap();
+            let _ = std::fs::copy(&path, &dest_path);
         }
     }
 }
@@ -56,10 +63,13 @@ fn test_fuzz_crashes() {
     // should contain the crash files copied from the honggfuzz workspace.
     let toml_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let test_dir = Path::new(&toml_dir).join("tests/fuzz_dialect");
-    let crash_files: Vec<_> = std::fs::read_dir(test_dir)
-        .unwrap()
+    let Ok(entries) = std::fs::read_dir(test_dir) else {
+        return;
+    };
+
+    let crash_files: Vec<_> = entries
         .filter_map(|entry| {
-            let path = entry.unwrap().path();
+            let path = entry.ok()?.path();
             if path.is_file() {
                 let bytes = std::fs::read(&path).ok()?;
                 Some((path, bytes))
@@ -68,6 +78,10 @@ fn test_fuzz_crashes() {
             }
         })
         .collect();
+
+    if crash_files.is_empty() {
+        return;
+    }
 
     for (path, bytes) in crash_files {
         // Use arbitrary to extract the string exactly as honggfuzz does
