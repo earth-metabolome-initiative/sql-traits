@@ -36,9 +36,8 @@ fn copy_crash_files() {
         std::fs::create_dir(&test_dir).unwrap();
     }
 
-    let entries = match std::fs::read_dir(crash_dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
+    let Ok(entries) = std::fs::read_dir(crash_dir) else {
+        return;
     };
 
     for entry in entries.flatten() {
