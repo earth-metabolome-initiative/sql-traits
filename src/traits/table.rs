@@ -2788,6 +2788,7 @@ mod tests {
             assert_eq!(<&_ as TableLike>::table_name(table_ref), table.table_name());
             assert_eq!(<&_ as TableLike>::table_doc(table_ref, &db), table.table_doc(&db));
             assert_eq!(<&_ as TableLike>::table_schema(table_ref), table.table_schema());
+            assert_eq!(<&_ as TableLike>::table_id(table_ref, &db), table.table_id(&db));
 
             assert_eq!(
                 <&_ as TableLike>::columns(table_ref, &db).count(),
@@ -2836,6 +2837,21 @@ mod tests {
             let child_ref = &child;
             let child_deps: Vec<_> = <&_ as TableLike>::dependent_tables(child_ref, &db).collect();
             assert!(child_deps.is_empty());
+        }
+
+        #[test]
+        fn test_table_id_matches_global_table_ordering() {
+            let sql = "
+                CREATE TABLE z_schema.table_z (id INT PRIMARY KEY);
+                CREATE TABLE table_without_schema (id INT PRIMARY KEY);
+                CREATE TABLE a_schema.table_a (id INT PRIMARY KEY);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            for (expected_id, table) in db.tables().enumerate() {
+                assert_eq!(table.table_id(&db), Some(expected_id));
+                assert_eq!(table.table_id(&db), db.table_id(table));
+            }
         }
     }
 
