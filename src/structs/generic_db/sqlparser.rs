@@ -1474,7 +1474,6 @@ impl ParserDB {
                 | Statement::Throw(_)
                 | Statement::Print { .. }
                 | Statement::Load { .. }
-                | Statement::WaitFor(_)
 
                 // Locks
                 | Statement::LockTables { .. }
