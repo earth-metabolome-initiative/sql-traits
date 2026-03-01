@@ -397,6 +397,39 @@ pub trait ColumnLike:
     where
         Self: 'db;
 
+    /// Returns the column ID according to its position in the table's column
+    /// iterator.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE my_table (id INT, name TEXT, age INT);",
+    /// )?;
+    /// let table = db.table(None, "my_table").unwrap();
+    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
+    /// assert_eq!(id_column.column_id(&db), Some(0));
+    /// assert_eq!(name_column.column_id(&db), Some(1));
+    /// assert_eq!(age_column.column_id(&db), Some(2));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn column_id(&self, database: &Self::DB) -> Option<usize> {
+        let table = ColumnLike::table(self, database);
+        table.columns(database).position(|column| column == self.borrow())
+    }
+
     /// Returns the foreign keys associated with this column.
     ///
     /// # Arguments
