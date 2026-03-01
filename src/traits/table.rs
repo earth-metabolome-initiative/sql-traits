@@ -151,6 +151,37 @@ pub trait TableLike:
     /// ```
     fn table_schema(&self) -> Option<&str>;
 
+    /// Returns the table ID according to its position in the database's table
+    /// iterator.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE table1 (id INT);
+    /// CREATE TABLE table2 (name TEXT);
+    /// CREATE TABLE table3 (score DECIMAL);
+    /// ",
+    /// )?;
+    /// let table2 = db.table(None, "table2").expect("Table 'table2' should exist");
+    /// assert_eq!(table2.table_id(&db), Some(1));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn table_id(&self, database: &Self::DB) -> Option<usize> {
+        database.table_id(self.borrow())
+    }
+
     /// Iterates over the columns of the table using the provided schema.
     ///
     /// # Arguments
@@ -2655,6 +2686,10 @@ where
 
     fn table_schema(&self) -> Option<&str> {
         T::table_schema(self)
+    }
+
+    fn table_id(&self, database: &Self::DB) -> Option<usize> {
+        T::table_id(self, database)
     }
 
     fn columns<'db>(
