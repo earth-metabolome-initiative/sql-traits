@@ -2,7 +2,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    rc::Rc,
+    sync::Arc,
 };
 
 use git2::Repository;
@@ -207,11 +207,11 @@ impl ParserDBBuilder {
 
 /// A type alias for the result of processing check constraints.
 type CheckConstraintResult =
-    (Vec<Rc<TableAttribute<CreateTable, ColumnDef>>>, Vec<Rc<CreateFunction>>);
+    (Vec<Arc<TableAttribute<CreateTable, ColumnDef>>>, Vec<Arc<CreateFunction>>);
 
 /// A type alias for the result of processing unique constraints.
 type UniqueConstraintResult = (
-    Rc<TableAttribute<CreateTable, UniqueConstraint>>,
+    Arc<TableAttribute<CreateTable, UniqueConstraint>>,
     UniqueIndexMetadata<TableAttribute<CreateTable, UniqueConstraint>>,
 );
 
@@ -269,19 +269,19 @@ impl ParserDB {
     /// Helper function to process check constraints.
     fn process_check_constraint(
         check_expr: &Expr,
-        create_table: &Rc<CreateTable>,
+        create_table: &Arc<CreateTable>,
         table_metadata: &TableMetadata<CreateTable>,
         builder: &ParserDBBuilder,
     ) -> Result<CheckConstraintResult, crate::errors::Error> {
         let columns_in_expression =
-            columns_in_expression::<Rc<TableAttribute<CreateTable, ColumnDef>>>(
+            columns_in_expression::<Arc<TableAttribute<CreateTable, ColumnDef>>>(
                 check_expr,
                 &create_table.name.to_string(),
-                table_metadata.column_rc_slice(),
+                table_metadata.column_arc_slice(),
             )?;
         let functions_in_expression = functions_in_expression::functions_in_expression::<Self>(
             check_expr,
-            builder.function_rc_vec().as_slice(),
+            builder.function_arc_vec().as_slice(),
         );
         Ok((columns_in_expression, functions_in_expression))
     }
@@ -305,9 +305,9 @@ impl ParserDB {
     /// Helper function to process unique constraints.
     fn process_unique_constraint(
         unique_constraint: UniqueConstraint,
-        create_table: &Rc<CreateTable>,
+        create_table: &Arc<CreateTable>,
     ) -> Option<UniqueConstraintResult> {
-        let unique_index = Rc::new(TableAttribute::new(create_table.clone(), unique_constraint));
+        let unique_index = Arc::new(TableAttribute::new(create_table.clone(), unique_constraint));
         let expression = Self::create_index_expression(&unique_index.attribute().columns)?;
         let unique_index_metadata = UniqueIndexMetadata::new(expression, create_table.clone());
         Some((unique_index, unique_index_metadata))
@@ -320,7 +320,7 @@ impl ParserDB {
         builder: &ParserDBBuilder,
     ) -> Result<
         (
-            Rc<TableAttribute<CreateTable, CreateIndex>>,
+            Arc<TableAttribute<CreateTable, CreateIndex>>,
             IndexMetadata<TableAttribute<CreateTable, CreateIndex>>,
         ),
         crate::errors::Error,
@@ -336,10 +336,10 @@ impl ParserDB {
             });
         };
 
-        let index_rc = Rc::new(TableAttribute::new(table.clone(), create_index));
-        let Some(expression) = Self::create_index_expression(&index_rc.attribute().columns) else {
+        let index_arc = Arc::new(TableAttribute::new(table.clone(), create_index));
+        let Some(expression) = Self::create_index_expression(&index_arc.attribute().columns) else {
             return Err(crate::errors::Error::InvalidIndex {
-                index_name: index_rc
+                index_name: index_arc
                     .attribute()
                     .name
                     .as_ref()
@@ -349,24 +349,24 @@ impl ParserDB {
             });
         };
         let metadata = IndexMetadata::new(expression, table.clone());
-        Ok((index_rc, metadata))
+        Ok((index_arc, metadata))
     }
 
     /// Helper function to process column options.
     fn process_column_options(
-        column: &Rc<TableAttribute<CreateTable, ColumnDef>>,
-        create_table: &Rc<CreateTable>,
+        column: &Arc<TableAttribute<CreateTable, ColumnDef>>,
+        create_table: &Arc<CreateTable>,
         table_metadata: &mut TableMetadata<CreateTable>,
         mut builder: ParserDBBuilder,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         for option in &column.attribute().options {
             match option.option.clone() {
                 ColumnOption::Check(check_constraint) => {
-                    let check_rc = Rc::new(TableAttribute::new(
+                    let check_arc = Arc::new(TableAttribute::new(
                         create_table.clone(),
                         check_constraint.clone(),
                     ));
-                    table_metadata.add_check_constraint(check_rc.clone());
+                    table_metadata.add_check_constraint(check_arc.clone());
                     let (columns_in_expression, functions_in_expression) =
                         Self::process_check_constraint(
                             &check_constraint.expr,
@@ -375,7 +375,7 @@ impl ParserDB {
                             &builder,
                         )?;
                     builder = builder.add_check_constraint(
-                        check_rc,
+                        check_arc,
                         CheckMetadata::new(
                             *check_constraint.expr.clone(),
                             create_table.clone(),
@@ -386,7 +386,7 @@ impl ParserDB {
                 }
                 ColumnOption::ForeignKey(mut foreign_key) => {
                     foreign_key.columns.push(column.attribute().name.clone());
-                    let fk = Rc::new(TableAttribute::new(create_table.clone(), foreign_key));
+                    let fk = Arc::new(TableAttribute::new(create_table.clone(), foreign_key));
                     table_metadata.add_foreign_key(fk.clone());
                     builder = builder.add_foreign_key(fk, ());
                 }
@@ -443,13 +443,13 @@ impl ParserDB {
     /// Helper function to process a foreign key table constraint.
     fn process_foreign_key_table_constraint(
         fk: &ForeignKeyConstraint,
-        create_table: &Rc<CreateTable>,
+        create_table: &Arc<CreateTable>,
         table_metadata: &mut TableMetadata<CreateTable>,
         builder: ParserDBBuilder,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         for col_ident in &fk.columns {
             let column_exists = table_metadata
-                .column_rcs()
+                .column_arcs()
                 .any(|col| col.column_name() == col_ident.value.as_str());
 
             if !column_exists {
@@ -490,16 +490,16 @@ impl ParserDB {
             }
         }
 
-        let fk_rc = Rc::new(TableAttribute::new(create_table.clone(), fk.clone()));
-        table_metadata.add_foreign_key(fk_rc.clone());
-        let builder = builder.add_foreign_key(fk_rc, ());
+        let fk_arc = Arc::new(TableAttribute::new(create_table.clone(), fk.clone()));
+        table_metadata.add_foreign_key(fk_arc.clone());
+        let builder = builder.add_foreign_key(fk_arc, ());
         Ok(builder)
     }
 
     /// Helper function to process table constraints.
     fn process_table_constraints(
         constraints: &[TableConstraint],
-        create_table: &Rc<CreateTable>,
+        create_table: &Arc<CreateTable>,
         table_metadata: &mut TableMetadata<CreateTable>,
         mut builder: ParserDBBuilder,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
@@ -522,9 +522,9 @@ impl ParserDB {
                     )?;
                 }
                 TableConstraint::Check(check) => {
-                    let check_rc =
-                        Rc::new(TableAttribute::new(create_table.clone(), check.clone()));
-                    table_metadata.add_check_constraint(check_rc.clone());
+                    let check_arc =
+                        Arc::new(TableAttribute::new(create_table.clone(), check.clone()));
+                    table_metadata.add_check_constraint(check_arc.clone());
                     let (columns_in_expression, functions_in_expression) =
                         Self::process_check_constraint(
                             &check.expr,
@@ -533,7 +533,7 @@ impl ParserDB {
                             &builder,
                         )?;
                     builder = builder.add_check_constraint(
-                        check_rc,
+                        check_arc,
                         CheckMetadata::new(
                             *check.expr.clone(),
                             create_table.clone(),
@@ -553,8 +553,8 @@ impl ParserDB {
                         };
                         primary_key_columns.extend(
                             table_metadata
-                                .column_rcs()
-                                .filter(|col: &&Rc<TableAttribute<CreateTable, ColumnDef>>| {
+                                .column_arcs()
+                                .filter(|col: &&Arc<TableAttribute<CreateTable, ColumnDef>>| {
                                     col.column_name() == column_name.value.as_str()
                                 })
                                 .cloned(),
@@ -706,13 +706,13 @@ impl ParserDB {
                 security: None,
                 set_params: vec![],
             };
-            builder = builder.add_function(Rc::new(create_function), ());
+            builder = builder.add_function(Arc::new(create_function), ());
         }
 
         for statement in statements {
             match statement {
                 Statement::CreateFunction(create_function) => {
-                    builder = builder.add_function(Rc::new(create_function), ());
+                    builder = builder.add_function(Arc::new(create_function), ());
                 }
                 Statement::DropFunction(drop_function) => {
                     for func_desc in &drop_function.func_desc {
@@ -720,7 +720,7 @@ impl ParserDB {
 
                         // Check if function exists
                         let function_exists =
-                            builder.function_rc_vec().iter().any(|f| f.name() == function_name);
+                            builder.function_arc_vec().iter().any(|f| f.name() == function_name);
 
                         if !function_exists {
                             if drop_function.if_exists {
@@ -842,7 +842,7 @@ impl ParserDB {
                     if let Some(exec_body) = &create_trigger.exec_body {
                         let function_name = last_str(&exec_body.func_desc.name);
                         let function_exists =
-                            builder.function_rc_vec().iter().any(|f| f.name() == function_name);
+                            builder.function_arc_vec().iter().any(|f| f.name() == function_name);
 
                         if !function_exists {
                             return Err(crate::errors::Error::FunctionNotFoundForTrigger {
@@ -852,7 +852,7 @@ impl ParserDB {
                         }
                     }
 
-                    builder = builder.add_trigger(Rc::new(create_trigger), ());
+                    builder = builder.add_trigger(Arc::new(create_trigger), ());
                 }
                 Statement::DropTrigger(drop_trigger) => {
                     let trigger_name = last_str(&drop_trigger.trigger_name);
@@ -1051,15 +1051,15 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateTable(create_table) => {
-                    let create_table = Rc::new(create_table);
+                    let create_table = Arc::new(create_table);
                     let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
 
                     for column in create_table.columns.clone() {
-                        let column_rc = Rc::new(TableAttribute::new(create_table.clone(), column));
-                        table_metadata.add_column(column_rc.clone());
+                        let column_arc = Arc::new(TableAttribute::new(create_table.clone(), column));
+                        table_metadata.add_column(column_arc.clone());
                     }
 
-                    for column in table_metadata.clone().column_rcs() {
+                    for column in table_metadata.clone().column_arcs() {
                         builder = Self::process_column_options(
                             column,
                             &create_table,
@@ -1082,7 +1082,7 @@ impl ParserDB {
                     let using_functions = if let Some(using_expr) = &policy.using {
                         functions_in_expression::functions_in_expression::<Self>(
                             using_expr,
-                            builder.function_rc_vec().as_slice(),
+                            builder.function_arc_vec().as_slice(),
                         )
                     } else {
                         Vec::new()
@@ -1091,17 +1091,17 @@ impl ParserDB {
                     let check_functions = if let Some(check_expr) = &policy.with_check {
                         functions_in_expression::functions_in_expression::<Self>(
                             check_expr,
-                            builder.function_rc_vec().as_slice(),
+                            builder.function_arc_vec().as_slice(),
                         )
                     } else {
                         Vec::new()
                     };
 
                     let metadata = PolicyMetadata::new(using_functions, check_functions);
-                    builder = builder.add_policy(Rc::new(policy), metadata);
+                    builder = builder.add_policy(Arc::new(policy), metadata);
                 }
                 Statement::CreateRole(create_role) => {
-                    builder = builder.add_role(Rc::new(create_role), ());
+                    builder = builder.add_role(Arc::new(create_role), ());
                 }
                 Statement::CreateSchema {
                     schema_name,
@@ -1134,7 +1134,7 @@ impl ParserDB {
                             Some(auth) => Schema::with_authorization(name, auth),
                             None => Schema::new(name),
                         };
-                        builder = builder.add_schema(Rc::new(schema), ());
+                        builder = builder.add_schema(Arc::new(schema), ());
                     }
                 }
                 Statement::Grant(grant) => {
@@ -1176,8 +1176,8 @@ impl ParserDB {
                         }
                     }
 
-                    builder = builder.add_table_grant(Rc::new(grant.clone()), ());
-                    builder = builder.add_column_grant(Rc::new(grant), ());
+                    builder = builder.add_table_grant(Arc::new(grant.clone()), ());
+                    builder = builder.add_column_grant(Arc::new(grant), ());
                 }
                 Statement::Revoke(revoke) => {
                     // Find and remove matching grants from both table and column grants
@@ -1227,8 +1227,8 @@ impl ParserDB {
                             });
                         }
 
-                        // Get table and update its name by replacing in the Rc
-                        // Since CreateTable is in an Rc, we need to create a new one
+                        // Get table and update its name by replacing in the Arc
+                        // Since CreateTable is in an Arc, we need to create a new one
                         let tables = builder.tables_mut();
                         if let Some(idx) = tables.iter().position(|(t, _)| t.table_name() == old_name)
                         {
@@ -1236,7 +1236,7 @@ impl ParserDB {
                             let mut new_table = (*old_table).clone();
                             // Update the table name
                             new_table.name = rename.new_name.clone();
-                            tables.push((Rc::new(new_table), meta));
+                            tables.push((Arc::new(new_table), meta));
                             tables.sort_by(|(a, _), (b, _)| {
                                 (a.table_schema(), a.table_name())
                                     .cmp(&(b.table_schema(), b.table_name()))
@@ -1276,7 +1276,7 @@ impl ParserDB {
                                 let (old_policy, meta) = policies.remove(idx);
                                 let mut new_policy = (*old_policy).clone();
                                 new_policy.name = new_name.clone();
-                                policies.push((Rc::new(new_policy), meta));
+                                policies.push((Arc::new(new_policy), meta));
                             }
                         }
                         AlterPolicyOperation::Apply { .. } => {
@@ -1327,7 +1327,7 @@ impl ParserDB {
                                     } else {
                                         new_schema
                                     };
-                                    schemas.push((Rc::new(new_schema), ()));
+                                    schemas.push((Arc::new(new_schema), ()));
                                     schemas.sort_by(|(a, ()), (b, ())| a.name().cmp(b.name()));
                                 }
                             }
@@ -1348,7 +1348,7 @@ impl ParserDB {
                                         old_schema.name().to_string(),
                                         owner_name,
                                     );
-                                    schemas.push((Rc::new(new_schema), ()));
+                                    schemas.push((Arc::new(new_schema), ()));
                                 }
                             }
                             // Other operations don't affect our schema tracking

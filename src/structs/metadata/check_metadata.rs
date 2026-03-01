@@ -1,6 +1,6 @@
 //! Submodule defining a generic `IndexMetadata` struct.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use sqlparser::ast::Expr;
 
@@ -12,11 +12,11 @@ pub struct CheckMetadata<U: CheckConstraintLike> {
     /// The expression defining the constraint.
     expression: Expr,
     /// The table on which the constraint is defined.
-    table: Rc<<U::DB as DatabaseLike>::Table>,
+    table: Arc<<U::DB as DatabaseLike>::Table>,
     /// The columns involved in the constraint.
-    columns: Vec<Rc<<U::DB as DatabaseLike>::Column>>,
+    columns: Vec<Arc<<U::DB as DatabaseLike>::Column>>,
     /// The functions involved in the constraint.
-    functions: Vec<Rc<<U::DB as DatabaseLike>::Function>>,
+    functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>,
 }
 
 impl<U: CheckConstraintLike> CheckMetadata<U> {
@@ -24,9 +24,9 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     #[inline]
     pub fn new(
         expression: Expr,
-        table: Rc<<U::DB as DatabaseLike>::Table>,
-        columns: Vec<Rc<<U::DB as DatabaseLike>::Column>>,
-        functions: Vec<Rc<<U::DB as DatabaseLike>::Function>>,
+        table: Arc<<U::DB as DatabaseLike>::Table>,
+        columns: Vec<Arc<<U::DB as DatabaseLike>::Column>>,
+        functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>,
     ) -> Self {
         Self { expression, table, columns, functions }
     }

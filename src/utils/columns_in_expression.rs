@@ -117,7 +117,7 @@ pub fn columns_in_expression<C: ColumnLike + Clone>(
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use sqlparser::{
         ast::{
@@ -139,7 +139,7 @@ mod tests {
         let dialect = GenericDialect {};
         let ast = Parser::parse_sql(&dialect, &sql).expect("Failed to parse SQL");
         if let Statement::CreateTable(ct) = &ast[0] {
-            let table = Rc::new(ct.clone());
+            let table = Arc::new(ct.clone());
             let col_def = ct.columns[0].clone();
             TableAttribute::new(table, col_def)
         } else {

@@ -4,7 +4,7 @@ mod builder;
 mod database;
 mod sqlparser;
 
-use std::{fmt::Debug, rc::Rc};
+use std::{fmt::Debug, sync::Arc};
 
 pub use builder::GenericDBBuilder;
 pub use sqlparser::{ParserDB, ParserDBBuilder};
@@ -36,31 +36,31 @@ where
     /// Timezone of the database.
     timezone: Option<String>,
     /// List of tables in the database.
-    tables: Vec<(Rc<T>, T::Meta)>,
+    tables: Vec<(Arc<T>, T::Meta)>,
     /// List of columns in the database.
-    columns: Vec<(Rc<C>, C::Meta)>,
+    columns: Vec<(Arc<C>, C::Meta)>,
     /// List of indices in the database.
-    indices: Vec<(Rc<I>, I::Meta)>,
+    indices: Vec<(Arc<I>, I::Meta)>,
     /// List of unique indices in the database.
-    unique_indices: Vec<(Rc<U>, U::Meta)>,
+    unique_indices: Vec<(Arc<U>, U::Meta)>,
     /// List of foreign keys in the database.
-    foreign_keys: Vec<(Rc<F>, F::Meta)>,
+    foreign_keys: Vec<(Arc<F>, F::Meta)>,
     /// List of functions created in the database.
-    functions: Vec<(Rc<Func>, Func::Meta)>,
+    functions: Vec<(Arc<Func>, Func::Meta)>,
     /// List of triggers created in the database.
-    triggers: Vec<(Rc<Tr>, Tr::Meta)>,
+    triggers: Vec<(Arc<Tr>, Tr::Meta)>,
     /// List of policies created in the database.
-    policies: Vec<(Rc<P>, P::Meta)>,
+    policies: Vec<(Arc<P>, P::Meta)>,
     /// List of check constraints in the database.
-    check_constraints: Vec<(Rc<Ch>, Ch::Meta)>,
+    check_constraints: Vec<(Arc<Ch>, Ch::Meta)>,
     /// List of roles in the database.
-    roles: Vec<(Rc<R>, R::Meta)>,
+    roles: Vec<(Arc<R>, R::Meta)>,
     /// List of table grants in the database.
-    table_grants: Vec<(Rc<TG>, TG::Meta)>,
+    table_grants: Vec<(Arc<TG>, TG::Meta)>,
     /// List of column grants in the database.
-    column_grants: Vec<(Rc<CG>, CG::Meta)>,
+    column_grants: Vec<(Arc<CG>, CG::Meta)>,
     /// List of schemas in the database.
-    schemas: Vec<(Rc<S>, S::Meta)>,
+    schemas: Vec<(Arc<S>, S::Meta)>,
 }
 
 impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> Debug

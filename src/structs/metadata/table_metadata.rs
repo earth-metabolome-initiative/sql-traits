@@ -1,6 +1,6 @@
 //! Submodule defining a generic `TableMetadata` struct.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::traits::{DatabaseLike, DocumentationMetadata, TableLike};
 
@@ -8,17 +8,17 @@ use crate::traits::{DatabaseLike, DocumentationMetadata, TableLike};
 /// Metadata about a database table.
 pub struct TableMetadata<T: TableLike> {
     /// The columns of the table.
-    columns: Vec<Rc<<T::DB as DatabaseLike>::Column>>,
+    columns: Vec<Arc<<T::DB as DatabaseLike>::Column>>,
     /// The check constraints of the table.
-    check_constraints: Vec<Rc<<T::DB as DatabaseLike>::CheckConstraint>>,
+    check_constraints: Vec<Arc<<T::DB as DatabaseLike>::CheckConstraint>>,
     /// The indices of the table.
-    indices: Vec<Rc<<T::DB as DatabaseLike>::Index>>,
+    indices: Vec<Arc<<T::DB as DatabaseLike>::Index>>,
     /// The unique indices of the table.
-    unique_indices: Vec<Rc<<T::DB as DatabaseLike>::UniqueIndex>>,
+    unique_indices: Vec<Arc<<T::DB as DatabaseLike>::UniqueIndex>>,
     /// The foreign keys of the table.
-    foreign_keys: Vec<Rc<<T::DB as DatabaseLike>::ForeignKey>>,
+    foreign_keys: Vec<Arc<<T::DB as DatabaseLike>::ForeignKey>>,
     /// The columns composing the primary key of the table.
-    primary_key: Vec<Rc<<T::DB as DatabaseLike>::Column>>,
+    primary_key: Vec<Arc<<T::DB as DatabaseLike>::Column>>,
     /// Whether Row Level Security is enabled for the table.
     rls_enabled: bool,
     /// Whether Row Level Security is forced for the table (applies to table
@@ -86,16 +86,16 @@ impl<T: TableLike> TableMetadata<T> {
         self.columns.iter().map(std::convert::AsRef::as_ref)
     }
 
-    /// Returns an iterator over the Rc of columns of the table.
+    /// Returns an iterator over the Arc of columns of the table.
     #[inline]
-    pub fn column_rcs(&self) -> impl Iterator<Item = &Rc<<T::DB as DatabaseLike>::Column>> {
+    pub fn column_arcs(&self) -> impl Iterator<Item = &Arc<<T::DB as DatabaseLike>::Column>> {
         self.columns.iter()
     }
 
-    /// Returns a slice of the Rc of columns of the table.
+    /// Returns a slice of the Arc of columns of the table.
     #[must_use]
     #[inline]
-    pub fn column_rc_slice(&self) -> &[Rc<<T::DB as DatabaseLike>::Column>] {
+    pub fn column_arc_slice(&self) -> &[Arc<<T::DB as DatabaseLike>::Column>] {
         &self.columns
     }
 
@@ -107,11 +107,11 @@ impl<T: TableLike> TableMetadata<T> {
         self.check_constraints.iter().map(std::convert::AsRef::as_ref)
     }
 
-    /// Returns an iterator over the Rc of check constraints of the table.
+    /// Returns an iterator over the Arc of check constraints of the table.
     #[inline]
-    pub fn check_constraint_rcs(
+    pub fn check_constraint_arcs(
         &self,
-    ) -> impl Iterator<Item = &Rc<<T::DB as DatabaseLike>::CheckConstraint>> {
+    ) -> impl Iterator<Item = &Arc<<T::DB as DatabaseLike>::CheckConstraint>> {
         self.check_constraints.iter()
     }
 
@@ -121,9 +121,9 @@ impl<T: TableLike> TableMetadata<T> {
         self.indices.iter().map(std::convert::AsRef::as_ref)
     }
 
-    /// Returns an iterator over the Rc of indices of the table.
+    /// Returns an iterator over the Arc of indices of the table.
     #[inline]
-    pub fn index_rcs(&self) -> impl Iterator<Item = &Rc<<T::DB as DatabaseLike>::Index>> {
+    pub fn index_arcs(&self) -> impl Iterator<Item = &Arc<<T::DB as DatabaseLike>::Index>> {
         self.indices.iter()
     }
 
@@ -133,11 +133,11 @@ impl<T: TableLike> TableMetadata<T> {
         self.unique_indices.iter().map(std::convert::AsRef::as_ref)
     }
 
-    /// Returns an iterator over the Rc of unique indices of the table.
+    /// Returns an iterator over the Arc of unique indices of the table.
     #[inline]
-    pub fn unique_index_rcs(
+    pub fn unique_index_arcs(
         &self,
-    ) -> impl Iterator<Item = &Rc<<T::DB as DatabaseLike>::UniqueIndex>> {
+    ) -> impl Iterator<Item = &Arc<<T::DB as DatabaseLike>::UniqueIndex>> {
         self.unique_indices.iter()
     }
 
@@ -147,11 +147,11 @@ impl<T: TableLike> TableMetadata<T> {
         self.foreign_keys.iter().map(std::convert::AsRef::as_ref)
     }
 
-    /// Returns an iterator over the Rc of foreign keys of the table.
+    /// Returns an iterator over the Arc of foreign keys of the table.
     #[inline]
-    pub fn foreign_key_rcs(
+    pub fn foreign_key_arcs(
         &self,
-    ) -> impl Iterator<Item = &Rc<<T::DB as DatabaseLike>::ForeignKey>> {
+    ) -> impl Iterator<Item = &Arc<<T::DB as DatabaseLike>::ForeignKey>> {
         self.foreign_keys.iter()
     }
 
@@ -180,7 +180,7 @@ impl<T: TableLike> TableMetadata<T> {
     ///
     /// * `column` - The column to add.
     #[inline]
-    pub fn add_column(&mut self, column: Rc<<T::DB as DatabaseLike>::Column>) {
+    pub fn add_column(&mut self, column: Arc<<T::DB as DatabaseLike>::Column>) {
         self.columns.push(column);
     }
 
@@ -192,7 +192,7 @@ impl<T: TableLike> TableMetadata<T> {
     #[inline]
     pub fn add_check_constraint(
         &mut self,
-        constraint: Rc<<T::DB as DatabaseLike>::CheckConstraint>,
+        constraint: Arc<<T::DB as DatabaseLike>::CheckConstraint>,
     ) {
         self.check_constraints.push(constraint);
     }
@@ -203,7 +203,7 @@ impl<T: TableLike> TableMetadata<T> {
     ///
     /// * `index` - The index to add.
     #[inline]
-    pub fn add_index(&mut self, index: Rc<<T::DB as DatabaseLike>::Index>) {
+    pub fn add_index(&mut self, index: Arc<<T::DB as DatabaseLike>::Index>) {
         self.indices.push(index);
     }
 
@@ -213,7 +213,7 @@ impl<T: TableLike> TableMetadata<T> {
     ///
     /// * `index` - The unique index to add.
     #[inline]
-    pub fn add_unique_index(&mut self, index: Rc<<T::DB as DatabaseLike>::UniqueIndex>) {
+    pub fn add_unique_index(&mut self, index: Arc<<T::DB as DatabaseLike>::UniqueIndex>) {
         self.unique_indices.push(index);
     }
 
@@ -223,7 +223,7 @@ impl<T: TableLike> TableMetadata<T> {
     ///
     /// * `fk` - The foreign key to add.
     #[inline]
-    pub fn add_foreign_key(&mut self, fk: Rc<<T::DB as DatabaseLike>::ForeignKey>) {
+    pub fn add_foreign_key(&mut self, fk: Arc<<T::DB as DatabaseLike>::ForeignKey>) {
         self.foreign_keys.push(fk);
     }
 
@@ -232,7 +232,7 @@ impl<T: TableLike> TableMetadata<T> {
     /// # Arguments
     ///
     /// * `pk_columns` - The columns composing the primary key.
-    pub fn set_primary_key(&mut self, pk_columns: Vec<Rc<<T::DB as DatabaseLike>::Column>>) {
+    pub fn set_primary_key(&mut self, pk_columns: Vec<Arc<<T::DB as DatabaseLike>::Column>>) {
         self.primary_key = pk_columns;
     }
 
@@ -243,7 +243,7 @@ impl<T: TableLike> TableMetadata<T> {
     /// * `f` - A predicate function that returns `true` for indices to keep.
     pub fn retain_indices<F>(&mut self, f: F)
     where
-        F: FnMut(&Rc<<T::DB as DatabaseLike>::Index>) -> bool,
+        F: FnMut(&Arc<<T::DB as DatabaseLike>::Index>) -> bool,
     {
         self.indices.retain(f);
     }

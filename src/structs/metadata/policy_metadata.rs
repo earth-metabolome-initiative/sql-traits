@@ -1,6 +1,6 @@
 //! Submodule defining a generic `PolicyMetadata` struct.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::traits::{DatabaseLike, PolicyLike};
 
@@ -8,9 +8,9 @@ use crate::traits::{DatabaseLike, PolicyLike};
 /// Struct collecting metadata about a policy.
 pub struct PolicyMetadata<U: PolicyLike> {
     /// The functions involved in the using expression.
-    using_functions: Vec<Rc<<U::DB as DatabaseLike>::Function>>,
+    using_functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>,
     /// The functions involved in the check expression.
-    check_functions: Vec<Rc<<U::DB as DatabaseLike>::Function>>,
+    check_functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>,
 }
 
 impl<U: PolicyLike> PolicyMetadata<U> {
@@ -18,8 +18,8 @@ impl<U: PolicyLike> PolicyMetadata<U> {
     #[inline]
     #[must_use]
     pub fn new(
-        using_functions: Vec<Rc<<U::DB as DatabaseLike>::Function>>,
-        check_functions: Vec<Rc<<U::DB as DatabaseLike>::Function>>,
+        using_functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>,
+        check_functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>,
     ) -> Self {
         Self { using_functions, check_functions }
     }

@@ -32,21 +32,21 @@ pub use grant::{ColumnGrantLike, GrantLike, TableGrantLike};
 /// Trait for associating a metadata struct to a given type.
 pub trait Metadata {
     /// The associated metadata type.
-    type Meta: Clone + Debug;
+    type Meta: Clone + Debug + Send + Sync;
 }
 
 impl<M: Metadata> Metadata for &M {
     type Meta = M::Meta;
 }
 
-impl<M: Metadata> Metadata for std::rc::Rc<M> {
+impl<M: Metadata> Metadata for std::sync::Arc<M> {
     type Meta = M::Meta;
 }
 
 /// Trait for associating documentation struct with a given type
 pub trait DocumentationMetadata {
     /// The associated documentation type
-    type Documentation: Clone + Debug;
+    type Documentation: Clone + Debug + Send + Sync;
 }
 
 impl<D: DocumentationMetadata> DocumentationMetadata for &D {

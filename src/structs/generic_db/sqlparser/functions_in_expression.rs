@@ -1,6 +1,6 @@
 //! Functions to extract functions from SQL expressions.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use sqlparser::ast::Expr;
 
@@ -8,8 +8,8 @@ use crate::traits::{DatabaseLike, function_like::FunctionLike};
 
 pub(super) fn functions_in_expression<DB: DatabaseLike>(
     expr: &Expr,
-    functions: &[Rc<DB::Function>],
-) -> Vec<Rc<DB::Function>> {
+    functions: &[Arc<DB::Function>],
+) -> Vec<Arc<DB::Function>> {
     let mut result = Vec::new();
 
     match expr {
@@ -77,7 +77,7 @@ pub(super) fn functions_in_expression<DB: DatabaseLike>(
     result
         .into_iter()
         .filter(|func| {
-            let ptr = Rc::as_ptr(func).cast::<()>();
+            let ptr = Arc::as_ptr(func).cast::<()>();
             seen.insert(ptr)
         })
         .collect()

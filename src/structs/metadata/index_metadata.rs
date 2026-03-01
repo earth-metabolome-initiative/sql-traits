@@ -1,6 +1,6 @@
 //! Submodule defining a generic `IndexMetadata` struct.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use sqlparser::ast::Expr;
 
@@ -12,13 +12,13 @@ pub struct IndexMetadata<I: IndexLike> {
     /// The expression defining the index.
     expression: Expr,
     /// The table on which the index is defined.
-    table: Rc<<I::DB as DatabaseLike>::Table>,
+    table: Arc<<I::DB as DatabaseLike>::Table>,
 }
 
 impl<I: IndexLike> IndexMetadata<I> {
     /// Creates a new `IndexMetadata` instance.
     #[inline]
-    pub fn new(expression: Expr, table: Rc<<I::DB as DatabaseLike>::Table>) -> Self {
+    pub fn new(expression: Expr, table: Arc<<I::DB as DatabaseLike>::Table>) -> Self {
         Self { expression, table }
     }
 

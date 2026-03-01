@@ -11,6 +11,8 @@ use crate::{
 pub trait ColumnLike:
     Debug
     + Clone
+    + Send
+    + Sync
     + Hash
     + Eq
     + Ord
@@ -1041,7 +1043,7 @@ where
     }
 }
 
-impl<C> ColumnLike for std::rc::Rc<C>
+impl<C> ColumnLike for std::sync::Arc<C>
 where
     C: ColumnLike<DB: DatabaseLike>,
     Self: Borrow<<<C as ColumnLike>::DB as DatabaseLike>::Column>,
@@ -1092,7 +1094,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use sqlparser::dialect::GenericDialect;
 
@@ -1121,7 +1123,7 @@ mod tests {
         }
     }
 
-    mod rc_impl {
+    mod arc_impl {
         use super::*;
 
         #[test]
@@ -1131,15 +1133,15 @@ mod tests {
             let table = db.table(None, "products").expect("Table not found");
             let column = table.column("price", &db).expect("Column not found");
 
-            let col_rc = Rc::new(column.clone());
+            let col_arc = Arc::new(column.clone());
 
-            assert_eq!(<Rc<_> as ColumnLike>::column_name(&col_rc), "price");
-            assert_eq!(<Rc<_> as ColumnLike>::data_type(&col_rc, &db), "INT");
-            assert!(<Rc<_> as ColumnLike>::is_nullable(&col_rc, &db));
-            assert_eq!(<Rc<_> as ColumnLike>::default_value(&col_rc).as_deref(), Some("0"));
-            assert!(!<Rc<_> as ColumnLike>::is_generated(&col_rc));
-            assert_eq!(<Rc<_> as ColumnLike>::table(&col_rc, &db).table_name(), "products");
-            assert_eq!(<Rc<_> as ColumnLike>::column_doc(&col_rc, &db), None);
+            assert_eq!(<Arc<_> as ColumnLike>::column_name(&col_arc), "price");
+            assert_eq!(<Arc<_> as ColumnLike>::data_type(&col_arc, &db), "INT");
+            assert!(<Arc<_> as ColumnLike>::is_nullable(&col_arc, &db));
+            assert_eq!(<Arc<_> as ColumnLike>::default_value(&col_arc).as_deref(), Some("0"));
+            assert!(!<Arc<_> as ColumnLike>::is_generated(&col_arc));
+            assert_eq!(<Arc<_> as ColumnLike>::table(&col_arc, &db).table_name(), "products");
+            assert_eq!(<Arc<_> as ColumnLike>::column_doc(&col_arc, &db), None);
         }
     }
 }
