@@ -208,6 +208,65 @@ pub trait TableLike:
     where
         Self: 'db;
 
+    /// Returns a fingerprint hash for the table schema.
+    ///
+    /// The fingerprint includes:
+    /// - Table schema and name
+    /// - Column names, types, and their order
+    /// - Primary key column names and their order
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE users_archive (id INT PRIMARY KEY, name TEXT);
+    /// ",
+    /// )?;
+    ///
+    /// let users = db.table(None, "users").expect("users table should exist");
+    /// let users_archive = db.table(None, "users_archive").expect("users_archive table should exist");
+    ///
+    /// assert_ne!(users.fingerprint_hash(&db), users_archive.fingerprint_hash(&db));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn fingerprint_hash(&self, database: &Self::DB) -> u64 {
+        use std::hash::{DefaultHasher, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+
+        b"table-schema".hash(&mut hasher);
+        self.table_schema().hash(&mut hasher);
+
+        b"table-name".hash(&mut hasher);
+        self.table_name().hash(&mut hasher);
+
+        b"columns".hash(&mut hasher);
+        for (position, column) in self.columns(database).enumerate() {
+            position.hash(&mut hasher);
+            column.column_name().hash(&mut hasher);
+            column.data_type(database).hash(&mut hasher);
+        }
+
+        b"primary-keys".hash(&mut hasher);
+        for (position, column) in self.primary_key_columns(database).enumerate() {
+            position.hash(&mut hasher);
+            column.column_name().hash(&mut hasher);
+        }
+
+        hasher.finish()
+    }
+
     /// Returns whether any of the columns of the table are generated.
     ///
     /// # Arguments
@@ -2810,6 +2869,10 @@ mod tests {
                 <&_ as TableLike>::foreign_keys(table_ref, &db).count(),
                 table.foreign_keys(&db).count()
             );
+            assert_eq!(
+                <&_ as TableLike>::fingerprint_hash(table_ref, &db),
+                table.fingerprint_hash(&db)
+            );
         }
 
         #[test]
@@ -2852,6 +2915,67 @@ mod tests {
                 assert_eq!(table.table_id(&db), Some(expected_id));
                 assert_eq!(table.table_id(&db), db.table_id(table));
             }
+        }
+    }
+
+    mod fingerprint {
+        use super::*;
+
+        #[test]
+        fn test_fingerprint_changes_with_column_order() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let sql_b = "CREATE TABLE users (name TEXT, id INT PRIMARY KEY);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("Failed to parse SQL A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("Failed to parse SQL B");
+
+            let table_a = db_a.table(None, "users").expect("users in A should exist");
+            let table_b = db_b.table(None, "users").expect("users in B should exist");
+
+            assert_ne!(table_a.fingerprint_hash(&db_a), table_b.fingerprint_hash(&db_b));
+        }
+
+        #[test]
+        fn test_fingerprint_changes_with_column_types() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, score INT);";
+            let sql_b = "CREATE TABLE users (id INT PRIMARY KEY, score TEXT);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("Failed to parse SQL A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("Failed to parse SQL B");
+
+            let table_a = db_a.table(None, "users").expect("users in A should exist");
+            let table_b = db_b.table(None, "users").expect("users in B should exist");
+
+            assert_ne!(table_a.fingerprint_hash(&db_a), table_b.fingerprint_hash(&db_b));
+        }
+
+        #[test]
+        fn test_fingerprint_changes_with_primary_keys() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, external_id INT, name TEXT);";
+            let sql_b = "CREATE TABLE users (id INT, external_id INT PRIMARY KEY, name TEXT);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("Failed to parse SQL A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("Failed to parse SQL B");
+
+            let table_a = db_a.table(None, "users").expect("users in A should exist");
+            let table_b = db_b.table(None, "users").expect("users in B should exist");
+
+            assert_ne!(table_a.fingerprint_hash(&db_a), table_b.fingerprint_hash(&db_b));
+        }
+
+        #[test]
+        fn test_fingerprint_changes_with_table_name() {
+            let sql = "
+                CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+                CREATE TABLE users_archive (id INT PRIMARY KEY, name TEXT);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let users = db.table(None, "users").expect("users should exist");
+            let users_archive =
+                db.table(None, "users_archive").expect("users_archive should exist");
+
+            assert_ne!(users.fingerprint_hash(&db), users_archive.fingerprint_hash(&db));
         }
     }
 
