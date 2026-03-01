@@ -392,6 +392,37 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ```
     fn table_id(&self, table: &Self::Table) -> Option<usize>;
 
+    /// Returns the table at the given table ID according to the database's
+    /// table iterator ordering.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_id` - Table ID to look up.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE table1 (id INT);
+    /// CREATE TABLE table2 (name TEXT);
+    /// ",
+    /// )?;
+    /// let table = db
+    ///     .table_by_id(1)
+    ///     .expect("Table at ID 1 should exist");
+    /// assert_eq!(table.table_name(), "table2");
+    /// assert!(db.table_by_id(2).is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn table_by_id(&self, table_id: usize) -> Option<&Self::Table> {
+        self.tables().nth(table_id)
+    }
+
     /// Returns the function with the given name.
     ///
     /// # Arguments

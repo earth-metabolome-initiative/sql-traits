@@ -72,6 +72,10 @@ where
             .ok()
     }
 
+    fn table_by_id(&self, table_id: usize) -> Option<&Self::Table> {
+        self.tables.get(table_id).map(|(table, _)| table.as_ref())
+    }
+
     #[inline]
     fn tables(&self) -> impl Iterator<Item = &Self::Table> {
         self.tables.iter().map(|(table, _)| table.as_ref())
