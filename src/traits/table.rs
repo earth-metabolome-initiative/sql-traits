@@ -357,6 +357,44 @@ pub trait TableLike:
         TableLike::columns(self, database).find(|col| col.column_name() == name)
     }
 
+    /// Returns the corresponding column by ID position in the table's column
+    /// iterator, if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `column_id` - The position of the column to retrieve.
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Example
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db =
+    ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
+    /// let table = db.table(None, "my_table").unwrap();
+    ///
+    /// let name_column = table
+    ///     .column_by_id(1, &db)
+    ///     .expect("Column at position 1 should exist");
+    /// assert_eq!(name_column.column_name(), "name");
+    /// assert!(table.column_by_id(3, &db).is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn column_by_id<'db>(
+        &'db self,
+        column_id: usize,
+        database: &'db Self::DB,
+    ) -> Option<&'db <Self::DB as DatabaseLike>::Column>
+    where
+        Self: 'db,
+    {
+        TableLike::columns(self, database).nth(column_id)
+    }
+
     /// Returns whether the provided column belongs to this table.
     ///
     /// # Arguments
@@ -2759,6 +2797,17 @@ where
         Self: 'db,
     {
         T::columns(self, database)
+    }
+
+    fn column_by_id<'db>(
+        &'db self,
+        column_id: usize,
+        database: &'db Self::DB,
+    ) -> Option<&'db <Self::DB as DatabaseLike>::Column>
+    where
+        Self: 'db,
+    {
+        T::column_by_id(self, column_id, database)
     }
 
     fn has_row_level_security(&self, database: &Self::DB) -> bool {
