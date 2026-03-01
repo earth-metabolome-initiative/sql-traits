@@ -411,9 +411,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// CREATE TABLE table2 (name TEXT);
     /// ",
     /// )?;
-    /// let table = db
-    ///     .table_by_id(1)
-    ///     .expect("Table at ID 1 should exist");
+    /// let table = db.table_by_id(1).expect("Table at ID 1 should exist");
     /// assert_eq!(table.table_name(), "table2");
     /// assert!(db.table_by_id(2).is_none());
     /// # Ok(())

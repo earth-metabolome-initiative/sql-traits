@@ -375,9 +375,7 @@ pub trait TableLike:
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
-    /// let name_column = table
-    ///     .column_by_id(1, &db)
-    ///     .expect("Column at position 1 should exist");
+    /// let name_column = table.column_by_id(1, &db).expect("Column at position 1 should exist");
     /// assert_eq!(name_column.column_name(), "name");
     /// assert!(table.column_by_id(3, &db).is_none());
     /// # Ok(())
