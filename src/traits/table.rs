@@ -2914,7 +2914,10 @@ mod tests {
             for (expected_id, table) in db.tables().enumerate() {
                 assert_eq!(table.table_id(&db), Some(expected_id));
                 assert_eq!(table.table_id(&db), db.table_id(table));
+                assert_eq!(db.table_by_id(expected_id), Some(table));
             }
+
+            assert_eq!(db.table_by_id(db.number_of_tables()), None);
         }
     }
 
