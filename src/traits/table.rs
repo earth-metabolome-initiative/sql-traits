@@ -2903,6 +2903,10 @@ mod tests {
                 table.columns(&db).count()
             );
             assert_eq!(
+                <&_ as TableLike>::column_by_id(table_ref, 0, &db).map(ColumnLike::column_name),
+                table.column_by_id(0, &db).map(ColumnLike::column_name)
+            );
+            assert_eq!(
                 <&_ as TableLike>::primary_key_columns(table_ref, &db).count(),
                 table.primary_key_columns(&db).count()
             );
@@ -2967,6 +2971,26 @@ mod tests {
             }
 
             assert_eq!(db.table_by_id(db.number_of_tables()), None);
+        }
+
+        #[test]
+        fn test_column_id_matches_table_column_ordering() {
+            let sql = "
+                CREATE TABLE users (
+                    id INT PRIMARY KEY,
+                    name TEXT,
+                    age INT
+                );
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+            let table = db.table(None, "users").expect("Table not found");
+
+            for (expected_id, column) in table.columns(&db).enumerate() {
+                assert_eq!(column.column_id(&db), Some(expected_id));
+                assert_eq!(table.column_by_id(expected_id, &db), Some(column));
+            }
+
+            assert_eq!(table.column_by_id(table.number_of_columns(&db), &db), None);
         }
     }
 
