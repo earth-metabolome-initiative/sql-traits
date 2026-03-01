@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// A trait for describing SQL Function-like entities.
-pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq {
+pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync {
     /// The associated database type.
     type DB: DatabaseLike<Function = Self>;
 

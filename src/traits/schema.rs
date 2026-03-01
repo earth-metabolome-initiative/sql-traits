@@ -9,7 +9,7 @@ use crate::traits::{DatabaseLike, Metadata};
 /// Schemas in SQL are namespaces that contain database objects like tables,
 /// views, functions, etc. They help organize database objects and manage
 /// access control.
-pub trait SchemaLike: Debug + Clone + Ord + Eq + Metadata {
+pub trait SchemaLike: Debug + Clone + Ord + Eq + Metadata + Send + Sync {
     /// The database type the schema belongs to.
     type DB: DatabaseLike;
 

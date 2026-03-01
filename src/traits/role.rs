@@ -8,7 +8,7 @@ use crate::traits::{DatabaseLike, Metadata};
 ///
 /// Roles in SQL are used to manage permissions and access control.
 /// They can be granted to users or other roles, and can own database objects.
-pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata {
+pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata + Send + Sync {
     /// The database type the role belongs to.
     type DB: DatabaseLike;
 

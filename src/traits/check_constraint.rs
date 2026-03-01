@@ -486,6 +486,8 @@ where
 /// a check constraint in a database-agnostic way.
 pub trait CheckConstraintLike:
     Clone
+    + Send
+    + Sync
     + Eq
     + Ord
     + Debug

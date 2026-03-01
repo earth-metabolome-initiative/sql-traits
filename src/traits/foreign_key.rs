@@ -12,6 +12,8 @@ use crate::traits::{ColumnLike, DatabaseLike, IndexLike, Metadata, TableLike};
 pub trait ForeignKeyLike:
     Debug
     + Clone
+    + Send
+    + Sync
     + Eq
     + Metadata
     + Ord

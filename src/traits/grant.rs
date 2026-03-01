@@ -24,7 +24,7 @@ use crate::traits::{DatabaseLike, Metadata};
 /// Grants in SQL are used to assign privileges on database objects to
 /// roles/users. A single grant represents one or more privileges on one or more
 /// objects assigned to one or more grantees.
-pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata {
+pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     /// The database type the grant belongs to.
     type DB: DatabaseLike;
 
@@ -250,7 +250,7 @@ impl<T: GrantLike> GrantLike for &T {
 ///
 /// This trait corresponds to PostgreSQL's `role_table_grants` system view.
 pub trait TableGrantLike:
-    GrantLike + Borrow<<<Self as GrantLike>::DB as DatabaseLike>::TableGrant>
+    GrantLike + Borrow<<<Self as GrantLike>::DB as DatabaseLike>::TableGrant> + Send + Sync
 {
     /// Returns an iterator over the tables this grant applies to.
     ///
@@ -376,7 +376,7 @@ where
 ///
 /// This trait corresponds to PostgreSQL's `role_column_grants` system view.
 pub trait ColumnGrantLike:
-    GrantLike + Borrow<<<Self as GrantLike>::DB as DatabaseLike>::ColumnGrant>
+    GrantLike + Borrow<<<Self as GrantLike>::DB as DatabaseLike>::ColumnGrant> + Send + Sync
 {
     /// Returns an iterator over the columns that have privileges granted.
     ///

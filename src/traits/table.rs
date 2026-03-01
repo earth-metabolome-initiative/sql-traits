@@ -11,6 +11,8 @@ use crate::traits::{
 pub trait TableLike:
     Debug
     + Clone
+    + Send
+    + Sync
     + Hash
     + Ord
     + Eq

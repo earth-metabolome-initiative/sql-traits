@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// A trait for types that can be treated as SQL triggers.
-pub trait TriggerLike: Clone + Debug + Metadata {
+pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// The database type the trigger belongs to.
     type DB: DatabaseLike;
 

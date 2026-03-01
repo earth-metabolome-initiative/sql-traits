@@ -12,7 +12,7 @@ use crate::{
 /// An index is a rule that specifies that the values in a column
 /// (or a group of columns) must used to speed up queries on a table.
 /// This trait represents such an index in a database-agnostic way.
-pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone {
+pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// The database type the index belongs to.
     type DB: DatabaseLike;
 

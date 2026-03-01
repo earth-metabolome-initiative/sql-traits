@@ -10,6 +10,8 @@ use crate::traits::{DatabaseLike, DocumentationMetadata, Metadata};
 pub trait PolicyLike:
     Debug
     + Clone
+    + Send
+    + Sync
     + Hash
     + Ord
     + Eq

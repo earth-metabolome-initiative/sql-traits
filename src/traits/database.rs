@@ -14,7 +14,7 @@ use crate::traits::{
 };
 
 /// A trait for types that can be treated as SQL databases.
-pub trait DatabaseLike: Clone + Debug {
+pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// Type of the tables in the schema.
     type Table: TableLike<DB = Self>;
     /// Type of the columns in the schema.
