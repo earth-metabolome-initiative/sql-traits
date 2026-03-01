@@ -1152,6 +1152,7 @@ mod tests {
             assert_eq!(<&_ as ColumnLike>::default_value(&col_ref).as_deref(), Some("'val'"));
             assert!(!<&_ as ColumnLike>::is_generated(&col_ref));
             assert_eq!(<&_ as ColumnLike>::table(&col_ref, &db).table_name(), "users");
+            assert_eq!(<&_ as ColumnLike>::column_id(&col_ref, &db), Some(1));
             assert_eq!(<&_ as ColumnLike>::column_doc(&col_ref, &db), None);
         }
     }
@@ -1174,6 +1175,7 @@ mod tests {
             assert_eq!(<Arc<_> as ColumnLike>::default_value(&col_arc).as_deref(), Some("0"));
             assert!(!<Arc<_> as ColumnLike>::is_generated(&col_arc));
             assert_eq!(<Arc<_> as ColumnLike>::table(&col_arc, &db).table_name(), "products");
+            assert_eq!(<Arc<_> as ColumnLike>::column_id(&col_arc, &db), Some(1));
             assert_eq!(<Arc<_> as ColumnLike>::column_doc(&col_arc, &db), None);
         }
     }
