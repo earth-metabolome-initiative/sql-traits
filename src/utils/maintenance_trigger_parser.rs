@@ -219,23 +219,13 @@ impl Iterator for MaintenanceBodyIterator {
         loop {
             match self.tokens.peek() {
                 Some(Token::LParen) => balance_parens += 1,
-                Some(Token::RParen) => {
-                    if balance_parens > 0 {
-                        balance_parens -= 1;
-                    }
+                Some(Token::RParen) if balance_parens > 0 => balance_parens -= 1,
+                Some(Token::SemiColon) if balance_parens == 0 => {
+                    found_semi = true;
+                    break;
                 }
-                Some(Token::SemiColon) => {
-                    if balance_parens == 0 {
-                        found_semi = true;
-                        break;
-                    }
-                }
-                Some(Token::Word(w)) if w.keyword == Keyword::END => {
-                    // Should not hit END inside expression unless missing semicolon
-                    if balance_parens == 0 {
-                        break;
-                    }
-                }
+                // Should not hit END inside expression unless missing semicolon.
+                Some(Token::Word(w)) if w.keyword == Keyword::END && balance_parens == 0 => break,
                 Some(Token::EOF) | None => break,
                 _ => {}
             }
