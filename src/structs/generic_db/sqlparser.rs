@@ -1376,7 +1376,15 @@ impl ParserDB {
                         | CommentObject::Schema
                         | CommentObject::Extension
                         | CommentObject::Database
+                        | CommentObject::Domain
+                        | CommentObject::Function
+                        | CommentObject::Index
+                        | CommentObject::MaterializedView
+                        | CommentObject::Procedure
+                        | CommentObject::Sequence
+                        | CommentObject::Type
                         | CommentObject::User
+                        | CommentObject::View
                         | CommentObject::Role => {
                             // TODO: Store COMMENT ON statements when comment metadata
                             // field is added to the appropriate metadata structs
@@ -1459,6 +1467,7 @@ impl ParserDB {
                 | Statement::Raise(_)
                 | Statement::RaisError { .. }
                 | Statement::Assert { .. }
+                | Statement::WaitFor(_)
                 | Statement::While(_)
                 | Statement::Case(_)
                 | Statement::If(_)
