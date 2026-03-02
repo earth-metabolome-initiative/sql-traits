@@ -27,7 +27,7 @@ use crate::{
         metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
     },
     traits::{ColumnLike, FunctionLike, TableLike},
-    utils::{columns_in_expression, last_str},
+    utils::{columns_in_expression, identifier_resolution::identifiers_match, last_str},
 };
 
 mod functions_in_expression;
@@ -93,13 +93,32 @@ impl ParserDBBuilder {
     ///
     /// Returns `true` if any other table has a foreign key pointing to this
     /// table.
-    fn is_table_referenced(&self, table_name: &str) -> bool {
+    fn is_table_referenced(&self, table_name: &str, table_name_quoted: bool) -> bool {
         for (fk, ()) in self.foreign_keys() {
             // Check if this FK references the table being dropped
             // and is NOT from the same table (self-referential FKs are OK to drop)
-            let referenced_table = last_str(&fk.attribute().foreign_table);
-            let host_table = last_str(&fk.table().name);
-            if referenced_table == table_name && host_table != table_name {
+            let Some(referenced_table) = object_name_last_identifier(&fk.attribute().foreign_table)
+            else {
+                continue;
+            };
+            let Some(host_table) = object_name_last_identifier(&fk.table().name) else {
+                continue;
+            };
+
+            let referenced_matches = identifiers_match(
+                referenced_table.value.as_str(),
+                referenced_table.quote_style.is_some(),
+                table_name,
+                table_name_quoted,
+            );
+            let host_matches = identifiers_match(
+                host_table.value.as_str(),
+                host_table.quote_style.is_some(),
+                table_name,
+                table_name_quoted,
+            );
+
+            if referenced_matches && !host_matches {
                 return true;
             }
         }
@@ -119,46 +138,121 @@ impl ParserDBBuilder {
     /// - All triggers on the table
     /// - All policies on the table
     /// - All grants on the table
-    fn remove_table(&mut self, table_name: &str) {
+    fn remove_table(&mut self, table_name: &str, table_name_quoted: bool) {
         use crate::traits::TableLike;
 
         // Remove the table
-        self.tables_mut().retain(|(t, _)| t.table_name() != table_name);
+        self.tables_mut().retain(|(t, _)| {
+            !identifiers_match(
+                t.table_name(),
+                t.table_name_is_quoted(),
+                table_name,
+                table_name_quoted,
+            )
+        });
 
         // Remove columns belonging to this table
-        self.columns_mut().retain(|(c, ())| last_str(&TableAttribute::table(c).name) != table_name);
+        self.columns_mut().retain(|(c, ())| {
+            !identifiers_match(
+                TableAttribute::table(c).table_name(),
+                TableAttribute::table(c).table_name_is_quoted(),
+                table_name,
+                table_name_quoted,
+            )
+        });
 
         // Remove indices on this table
-        self.indices_mut().retain(|(i, _)| last_str(&TableAttribute::table(i).name) != table_name);
+        self.indices_mut().retain(|(i, _)| {
+            !identifiers_match(
+                TableAttribute::table(i).table_name(),
+                TableAttribute::table(i).table_name_is_quoted(),
+                table_name,
+                table_name_quoted,
+            )
+        });
 
         // Remove unique indices on this table
-        self.unique_indices_mut()
-            .retain(|(u, _)| last_str(&TableAttribute::table(u).name) != table_name);
+        self.unique_indices_mut().retain(|(u, _)| {
+            !identifiers_match(
+                TableAttribute::table(u).table_name(),
+                TableAttribute::table(u).table_name_is_quoted(),
+                table_name,
+                table_name_quoted,
+            )
+        });
 
         // Remove foreign keys from this table
-        self.foreign_keys_mut()
-            .retain(|(fk, ())| last_str(&TableAttribute::table(fk).name) != table_name);
+        self.foreign_keys_mut().retain(|(fk, ())| {
+            !identifiers_match(
+                TableAttribute::table(fk).table_name(),
+                TableAttribute::table(fk).table_name_is_quoted(),
+                table_name,
+                table_name_quoted,
+            )
+        });
 
         // Remove check constraints on this table
-        self.check_constraints_mut()
-            .retain(|(c, _)| last_str(&TableAttribute::table(c).name) != table_name);
+        self.check_constraints_mut().retain(|(c, _)| {
+            !identifiers_match(
+                TableAttribute::table(c).table_name(),
+                TableAttribute::table(c).table_name_is_quoted(),
+                table_name,
+                table_name_quoted,
+            )
+        });
 
         // Remove triggers on this table
-        self.triggers_mut().retain(|(t, ())| last_str(&t.table_name) != table_name);
+        self.triggers_mut().retain(|(t, ())| {
+            object_name_last_identifier(&t.table_name).is_none_or(|ident| {
+                !identifiers_match(
+                    ident.value.as_str(),
+                    ident.quote_style.is_some(),
+                    table_name,
+                    table_name_quoted,
+                )
+            })
+        });
 
         // Remove policies on this table
-        self.policies_mut().retain(|(p, _)| last_str(&p.table_name) != table_name);
+        self.policies_mut().retain(|(p, _)| {
+            object_name_last_identifier(&p.table_name).is_none_or(|ident| {
+                !identifiers_match(
+                    ident.value.as_str(),
+                    ident.quote_style.is_some(),
+                    table_name,
+                    table_name_quoted,
+                )
+            })
+        });
 
         // Remove table grants for this table
         self.table_grants_mut().retain(|(g, ())| {
             use sqlparser::ast::GrantObjects;
-            !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| last_str(t) == table_name))
+            !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| {
+                object_name_last_identifier(t).is_some_and(|ident| {
+                    identifiers_match(
+                        ident.value.as_str(),
+                        ident.quote_style.is_some(),
+                        table_name,
+                        table_name_quoted,
+                    )
+                })
+            }))
         });
 
         // Remove column grants for this table
         self.column_grants_mut().retain(|(g, ())| {
             use sqlparser::ast::GrantObjects;
-            !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| last_str(t) == table_name))
+            !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| {
+                object_name_last_identifier(t).is_some_and(|ident| {
+                    identifiers_match(
+                        ident.value.as_str(),
+                        ident.quote_style.is_some(),
+                        table_name,
+                        table_name_quoted,
+                    )
+                })
+            }))
         });
     }
 
@@ -197,11 +291,20 @@ impl ParserDBBuilder {
     /// Checks if a schema contains any objects (tables).
     ///
     /// Returns `true` if any table belongs to this schema.
-    fn is_schema_non_empty(&self, schema_name: &str) -> bool {
+    fn is_schema_non_empty(&self, schema_name: &str, schema_quoted: bool) -> bool {
         use crate::traits::TableLike;
 
         // Check if any table is in this schema
-        self.tables().iter().any(|(t, _)| t.table_schema().is_some_and(|s| s == schema_name))
+        self.tables().iter().any(|(t, _)| {
+            t.table_schema().is_some_and(|table_schema| {
+                identifiers_match(
+                    table_schema,
+                    t.table_schema_is_quoted(),
+                    schema_name,
+                    schema_quoted,
+                )
+            })
+        })
     }
 }
 
@@ -214,6 +317,65 @@ type UniqueConstraintResult = (
     Arc<TableAttribute<CreateTable, UniqueConstraint>>,
     UniqueIndexMetadata<TableAttribute<CreateTable, UniqueConstraint>>,
 );
+
+fn object_name_last_identifier(object_name: &ObjectName) -> Option<&Ident> {
+    match object_name.0.last() {
+        Some(ObjectNamePart::Identifier(ident)) => Some(ident),
+        _ => None,
+    }
+}
+
+fn object_name_schema_identifier(object_name: &ObjectName) -> Option<&Ident> {
+    if object_name.0.len() <= 1 {
+        return None;
+    }
+
+    match object_name.0.first() {
+        Some(ObjectNamePart::Identifier(ident)) => Some(ident),
+        _ => None,
+    }
+}
+
+fn table_matches_object_name(table: &CreateTable, object_name: &ObjectName) -> bool {
+    let Some(query_table_ident) = object_name_last_identifier(object_name) else {
+        return false;
+    };
+
+    if !identifiers_match(
+        table.table_name(),
+        table.table_name_is_quoted(),
+        query_table_ident.value.as_str(),
+        query_table_ident.quote_style.is_some(),
+    ) {
+        return false;
+    }
+
+    match (object_name_schema_identifier(object_name), table.table_schema()) {
+        (None, None) => true,
+        (Some(query_schema_ident), Some(table_schema)) => {
+            identifiers_match(
+                table_schema,
+                table.table_schema_is_quoted(),
+                query_schema_ident.value.as_str(),
+                query_schema_ident.quote_style.is_some(),
+            )
+        }
+        _ => false,
+    }
+}
+
+fn schema_matches_object_name(schema: &Schema, object_name: &ObjectName) -> bool {
+    let Some(query_schema_ident) = object_name_last_identifier(object_name) else {
+        return false;
+    };
+
+    identifiers_match(
+        schema.name(),
+        schema.is_quoted(),
+        query_schema_ident.value.as_str(),
+        query_schema_ident.quote_style.is_some(),
+    )
+}
 
 /// A database schema parsed from SQL text.
 ///
@@ -327,8 +489,10 @@ impl ParserDB {
     > {
         let table_name = last_str(&create_index.table_name);
 
-        let Some((table, _)) =
-            builder.tables().iter().find(|(t, _)| t.name.to_string() == table_name)
+        let Some((table, _)) = builder
+            .tables()
+            .iter()
+            .find(|(t, _)| table_matches_object_name(t, &create_index.table_name))
         else {
             return Err(crate::errors::Error::TableNotFoundForIndex {
                 table_name: table_name.to_string(),
@@ -448,9 +612,14 @@ impl ParserDB {
         builder: ParserDBBuilder,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         for col_ident in &fk.columns {
-            let column_exists = table_metadata
-                .column_arcs()
-                .any(|col| col.column_name() == col_ident.value.as_str());
+            let column_exists = table_metadata.column_arcs().any(|col| {
+                identifiers_match(
+                    col.column_name(),
+                    col.column_name_is_quoted(),
+                    col_ident.value.as_str(),
+                    col_ident.quote_style.is_some(),
+                )
+            });
 
             if !column_exists {
                 return Err(crate::errors::Error::HostColumnNotFoundForForeignKey {
@@ -467,7 +636,7 @@ impl ParserDB {
             .iter()
             .map(|(t, _)| t.as_ref())
             .chain(std::iter::once(create_table.as_ref()))
-            .find(|t| t.name.to_string() == referenced_table_name)
+            .find(|t| table_matches_object_name(t, &fk.foreign_table))
         else {
             return Err(crate::errors::Error::ReferencedTableNotFoundForForeignKey {
                 referenced_table: referenced_table_name.clone(),
@@ -476,10 +645,14 @@ impl ParserDB {
         };
 
         for ref_col_ident in &fk.referred_columns {
-            let column_exists = referenced_table
-                .columns
-                .iter()
-                .any(|col| col.name.value.as_str() == ref_col_ident.value.as_str());
+            let column_exists = referenced_table.columns.iter().any(|col| {
+                identifiers_match(
+                    col.name.value.as_str(),
+                    col.name.quote_style.is_some(),
+                    ref_col_ident.value.as_str(),
+                    ref_col_ident.quote_style.is_some(),
+                )
+            });
 
             if !column_exists {
                 return Err(crate::errors::Error::ReferencedColumnNotFoundForForeignKey {
@@ -555,7 +728,12 @@ impl ParserDB {
                             table_metadata
                                 .column_arcs()
                                 .filter(|col: &&Arc<TableAttribute<CreateTable, ColumnDef>>| {
-                                    col.column_name() == column_name.value.as_str()
+                                    identifiers_match(
+                                        col.column_name(),
+                                        col.column_name_is_quoted(),
+                                        column_name.value.as_str(),
+                                        column_name.quote_style.is_some(),
+                                    )
                                 })
                                 .cloned(),
                         );
@@ -753,30 +931,38 @@ impl ParserDB {
                     for name in names {
                         let table_name = last_str(&name);
 
-                        // Check if table exists
-                        let table_exists = builder
+                        // Check if table exists and resolve the canonical stored table.
+                        let maybe_table = builder
                             .tables()
                             .iter()
-                            .any(|(t, _)| t.table_name() == table_name);
+                            .map(|(t, _)| t.as_ref())
+                            .find(|t| table_matches_object_name(t, &name));
 
-                        if !table_exists {
+                        let Some(table) = maybe_table else {
                             if if_exists {
                                 continue;
                             }
                             return Err(crate::errors::Error::DropTableNotFound {
                                 table_name: table_name.to_string(),
                             });
-                        }
+                        };
+                        let resolved_table_name = table.table_name().to_string();
+                        let resolved_table_quoted = table.table_name_is_quoted();
 
                         // Check for references from other tables (unless CASCADE)
-                        if !cascade && builder.is_table_referenced(table_name) {
+                        if !cascade
+                            && builder.is_table_referenced(
+                                &resolved_table_name,
+                                resolved_table_quoted,
+                            )
+                        {
                             return Err(crate::errors::Error::TableReferenced {
-                                table_name: table_name.to_string(),
+                                table_name: resolved_table_name.clone(),
                             });
                         }
 
                         // Remove the table and all associated objects
-                        builder.remove_table(table_name);
+                        builder.remove_table(&resolved_table_name, resolved_table_quoted);
                     }
                 }
                 Statement::Drop {
@@ -829,8 +1015,10 @@ impl ParserDB {
                 }
                 Statement::CreateTrigger(create_trigger) => {
                     let table_name = last_str(&create_trigger.table_name);
-                    let table_exists =
-                        builder.tables().iter().any(|(t, _)| t.name.to_string() == table_name);
+                    let table_exists = builder
+                        .tables()
+                        .iter()
+                        .any(|(t, _)| table_matches_object_name(t, &create_trigger.table_name));
 
                     if !table_exists {
                         return Err(crate::errors::Error::TableNotFoundForTrigger {
@@ -949,24 +1137,30 @@ impl ParserDB {
                 } => {
                     for name in names {
                         let schema_name = last_str(&name);
+                        let maybe_schema = builder
+                            .schemas()
+                            .iter()
+                            .map(|(s, ())| s)
+                            .find(|s| schema_matches_object_name(s, &name));
 
-                        // Check if schema exists
-                        let schema_exists =
-                            builder.schemas().iter().any(|(s, ())| s.name() == schema_name);
-
-                        if !schema_exists {
+                        let Some(schema) = maybe_schema else {
                             if if_exists {
                                 continue;
                             }
                             return Err(crate::errors::Error::DropSchemaNotFound {
                                 schema_name: schema_name.to_string(),
                             });
-                        }
+                        };
+                        let resolved_schema_name = schema.name().to_string();
+                        let resolved_schema_quoted = schema.is_quoted();
 
                         // Check for contained objects unless CASCADE is specified
-                        if !cascade && builder.is_schema_non_empty(schema_name) {
+                        if !cascade
+                            && builder
+                                .is_schema_non_empty(&resolved_schema_name, resolved_schema_quoted)
+                        {
                             return Err(crate::errors::Error::SchemaNotEmpty {
-                                schema_name: schema_name.to_string(),
+                                schema_name: resolved_schema_name.clone(),
                             });
                         }
 
@@ -977,20 +1171,34 @@ impl ParserDB {
                                 .tables()
                                 .iter()
                                 .filter(|(t, _)| {
-                                    t.table_schema().is_some_and(|s| s == schema_name)
+                                    t.table_schema().is_some_and(|table_schema| {
+                                        identifiers_match(
+                                            table_schema,
+                                            t.table_schema_is_quoted(),
+                                            &resolved_schema_name,
+                                            resolved_schema_quoted,
+                                        )
+                                    })
                                 })
-                                .map(|(t, _)| t.table_name().to_string())
+                                .map(|(t, _)| (t.table_name().to_string(), t.table_name_is_quoted()))
                                 .collect();
 
-                            for table_name in tables_to_remove {
-                                builder.remove_table(&table_name);
+                            for (table_name, table_name_quoted) in tables_to_remove {
+                                builder.remove_table(&table_name, table_name_quoted);
                             }
                         }
 
                         // Remove the schema
                         builder
                             .schemas_mut()
-                            .retain(|(s, ())| s.name() != schema_name);
+                            .retain(|(s, ())| {
+                                !identifiers_match(
+                                    s.name(),
+                                    s.is_quoted(),
+                                    &resolved_schema_name,
+                                    resolved_schema_quoted,
+                                )
+                            });
                     }
                 }
                 Statement::CreateIndex(create_index) => {
@@ -1006,15 +1214,13 @@ impl ParserDB {
                     builder = builder.add_index(index, metadata);
                 }
                 Statement::AlterTable(alter_table) => {
-                    let table_name = last_str(&alter_table.name);
-
                     for operation in alter_table.operations {
                         match operation {
                             AlterTableOperation::EnableRowLevelSecurity => {
                                 if let Some(entry) = builder
                                     .tables_mut()
                                     .iter_mut()
-                                    .find(|entry| entry.0.table_name() == table_name)
+                                    .find(|entry| table_matches_object_name(&entry.0, &alter_table.name))
                                 {
                                     entry.1.set_rls_enabled(true);
                                 }
@@ -1023,7 +1229,7 @@ impl ParserDB {
                                 if let Some(entry) = builder
                                     .tables_mut()
                                     .iter_mut()
-                                    .find(|entry| entry.0.table_name() == table_name)
+                                    .find(|entry| table_matches_object_name(&entry.0, &alter_table.name))
                                 {
                                     entry.1.set_rls_enabled(false);
                                 }
@@ -1032,7 +1238,7 @@ impl ParserDB {
                                 if let Some(entry) = builder
                                     .tables_mut()
                                     .iter_mut()
-                                    .find(|entry| entry.0.table_name() == table_name)
+                                    .find(|entry| table_matches_object_name(&entry.0, &alter_table.name))
                                 {
                                     entry.1.set_rls_forced(true);
                                 }
@@ -1041,7 +1247,7 @@ impl ParserDB {
                                 if let Some(entry) = builder
                                     .tables_mut()
                                     .iter_mut()
-                                    .find(|entry| entry.0.table_name() == table_name)
+                                    .find(|entry| table_matches_object_name(&entry.0, &alter_table.name))
                                 {
                                     entry.1.set_rls_forced(false);
                                 }
@@ -1108,31 +1314,51 @@ impl ParserDB {
                     if_not_exists,
                     ..
                 } => {
-                    let (name, authorization) = match &schema_name {
-                        SchemaName::Simple(name) => (last_str(name).to_string(), None),
+                    let (name, quoted, authorization) = match &schema_name {
+                        SchemaName::Simple(name) => {
+                            let schema_ident = object_name_last_identifier(name);
+                            (
+                                schema_ident
+                                    .map_or_else(|| last_str(name).to_string(), |ident| ident.value.clone()),
+                                schema_ident.is_some_and(|ident| ident.quote_style.is_some()),
+                                None,
+                            )
+                        }
                         SchemaName::UnnamedAuthorization(auth) => {
                             // CREATE SCHEMA AUTHORIZATION admin creates schema named "admin"
-                            (auth.value.clone(), Some(auth.value.clone()))
+                            (
+                                auth.value.clone(),
+                                auth.quote_style.is_some(),
+                                Some(auth.value.clone()),
+                            )
                         }
                         SchemaName::NamedAuthorization(name, auth) => {
-                            (last_str(name).to_string(), Some(auth.value.clone()))
+                            let schema_ident = object_name_last_identifier(name);
+                            (
+                                schema_ident
+                                    .map_or_else(|| last_str(name).to_string(), |ident| ident.value.clone()),
+                                schema_ident.is_some_and(|ident| ident.quote_style.is_some()),
+                                Some(auth.value.clone()),
+                            )
                         }
                     };
 
                     // Check if schema already exists
-                    let schema_exists = builder.schemas().iter().any(|(s, ())| s.name() == name);
+                    let schema_exists = builder.schemas().iter().any(|(s, ())| {
+                        identifiers_match(s.name(), s.is_quoted(), &name, quoted)
+                    });
 
                     if schema_exists {
                         if !if_not_exists {
                             return Err(crate::errors::Error::SchemaAlreadyExists {
-                                schema_name: name,
+                                schema_name: name.clone(),
                             });
                         }
                         // IF NOT EXISTS - skip adding duplicate
                     } else {
                         let schema = match authorization {
-                            Some(auth) => Schema::with_authorization(name, auth),
-                            None => Schema::new(name),
+                            Some(auth) => Schema::with_authorization_and_quoted(name, auth, quoted),
+                            None => Schema::with_quoted(name, quoted),
                         };
                         builder = builder.add_schema(Arc::new(schema), ());
                     }
@@ -1167,7 +1393,7 @@ impl ParserDB {
                         for table_obj in tables {
                             let table_name = last_str(table_obj);
                             let table_exists =
-                                builder.tables().iter().any(|(t, _)| t.table_name() == table_name);
+                                builder.tables().iter().any(|(t, _)| table_matches_object_name(t, table_obj));
                             if !table_exists {
                                 return Err(crate::errors::Error::TableNotFoundForGrant {
                                     table_name: table_name.to_string(),
@@ -1218,30 +1444,28 @@ impl ParserDB {
                         let old_name = last_str(&rename.old_name);
 
                         // Check if table exists
-                        let table_exists =
-                            builder.tables().iter().any(|(t, _)| t.table_name() == old_name);
+                        let table_position = builder
+                            .tables()
+                            .iter()
+                            .position(|(t, _)| table_matches_object_name(t, &rename.old_name));
 
-                        if !table_exists {
+                        let Some(table_position) = table_position else {
                             return Err(crate::errors::Error::RenameTableNotFound {
                                 table_name: old_name.to_string(),
                             });
-                        }
+                        };
 
                         // Get table and update its name by replacing in the Arc
                         // Since CreateTable is in an Arc, we need to create a new one
                         let tables = builder.tables_mut();
-                        if let Some(idx) = tables.iter().position(|(t, _)| t.table_name() == old_name)
-                        {
-                            let (old_table, meta) = tables.remove(idx);
-                            let mut new_table = (*old_table).clone();
-                            // Update the table name
-                            new_table.name = rename.new_name.clone();
-                            tables.push((Arc::new(new_table), meta));
-                            tables.sort_by(|(a, _), (b, _)| {
-                                (a.table_schema(), a.table_name())
-                                    .cmp(&(b.table_schema(), b.table_name()))
-                            });
-                        }
+                        let (old_table, meta) = tables.remove(table_position);
+                        let mut new_table = (*old_table).clone();
+                        // Update the table name
+                        new_table.name = rename.new_name.clone();
+                        tables.push((Arc::new(new_table), meta));
+                        tables.sort_by(|(a, _), (b, _)| {
+                            (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name()))
+                        });
                     }
                 }
                 Statement::AlterPolicy(AlterPolicy {
@@ -1295,41 +1519,58 @@ impl ParserDB {
                     let schema_name = last_str(&name);
 
                     // Check if schema exists
-                    let schema_exists =
-                        builder.schemas().iter().any(|(s, ())| s.name() == schema_name);
+                    let schema_position = builder
+                        .schemas()
+                        .iter()
+                        .position(|(s, ())| schema_matches_object_name(s, &name));
 
-                    if !schema_exists {
+                    let Some(schema_position) = schema_position else {
                         if if_exists {
                             continue;
                         }
                         return Err(crate::errors::Error::AlterSchemaNotFound {
                             schema_name: schema_name.to_string(),
                         });
-                    }
+                    };
+
+                    let (mut current_schema_name, mut current_schema_quoted) = {
+                        let (schema, ()) = &builder.schemas()[schema_position];
+                        (schema.name().to_string(), schema.is_quoted())
+                    };
 
                     for operation in &operations {
                         match operation {
                             AlterSchemaOperation::Rename { name: new_name } => {
-                                let new_schema_name = last_str(new_name);
+                                let new_schema_ident = object_name_last_identifier(new_name);
+                                let new_schema_name = new_schema_ident
+                                    .map_or_else(|| last_str(new_name).to_string(), |ident| ident.value.clone());
+                                let new_schema_quoted =
+                                    new_schema_ident.is_some_and(|ident| ident.quote_style.is_some());
                                 let schemas = builder.schemas_mut();
-                                if let Some(idx) =
-                                    schemas.iter().position(|(s, ())| s.name() == schema_name)
-                                {
-                                    let (old_schema, ()) = schemas.remove(idx);
-                                    let new_schema = Schema::new(new_schema_name.to_string());
-                                    // Preserve authorization if present
-                                    let new_schema = if let Some(auth) = old_schema.authorization()
-                                    {
-                                        Schema::with_authorization(
-                                            new_schema_name.to_string(),
-                                            auth.to_string(),
-                                        )
-                                    } else {
-                                        new_schema
-                                    };
-                                    schemas.push((Arc::new(new_schema), ()));
-                                    schemas.sort_by(|(a, ()), (b, ())| a.name().cmp(b.name()));
-                                }
+                                let Some(idx) = schemas.iter().position(|(schema, ())| {
+                                    identifiers_match(
+                                        schema.name(),
+                                        schema.is_quoted(),
+                                        &current_schema_name,
+                                        current_schema_quoted,
+                                    )
+                                }) else {
+                                    continue;
+                                };
+                                let (old_schema, ()) = schemas.remove(idx);
+                                let new_schema = if let Some(auth) = old_schema.authorization() {
+                                    Schema::with_authorization_and_quoted(
+                                        new_schema_name.clone(),
+                                        auth.to_string(),
+                                        new_schema_quoted,
+                                    )
+                                } else {
+                                    Schema::with_quoted(new_schema_name.clone(), new_schema_quoted)
+                                };
+                                schemas.push((Arc::new(new_schema), ()));
+                                schemas.sort_by(|(a, ()), (b, ())| a.name().cmp(b.name()));
+                                current_schema_name = new_schema_name;
+                                current_schema_quoted = new_schema_quoted;
                             }
                             AlterSchemaOperation::OwnerTo { owner } => {
                                 // Update the authorization
@@ -1340,16 +1581,23 @@ impl ParserDB {
                                     | sqlparser::ast::Owner::SessionUser => continue,
                                 };
                                 let schemas = builder.schemas_mut();
-                                if let Some(idx) =
-                                    schemas.iter().position(|(s, ())| s.name() == schema_name)
-                                {
-                                    let (old_schema, ()) = schemas.remove(idx);
-                                    let new_schema = Schema::with_authorization(
-                                        old_schema.name().to_string(),
-                                        owner_name,
-                                    );
-                                    schemas.push((Arc::new(new_schema), ()));
-                                }
+                                let Some(idx) = schemas.iter().position(|(schema, ())| {
+                                    identifiers_match(
+                                        schema.name(),
+                                        schema.is_quoted(),
+                                        &current_schema_name,
+                                        current_schema_quoted,
+                                    )
+                                }) else {
+                                    continue;
+                                };
+                                let (old_schema, ()) = schemas.remove(idx);
+                                let new_schema = Schema::with_authorization_and_quoted(
+                                    old_schema.name().to_string(),
+                                    owner_name,
+                                    old_schema.is_quoted(),
+                                );
+                                schemas.push((Arc::new(new_schema), ()));
                             }
                             // Other operations don't affect our schema tracking
                             AlterSchemaOperation::SetDefaultCollate { .. }

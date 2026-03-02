@@ -197,7 +197,13 @@ impl Iterator for MaintenanceBodyIterator {
 
         // Column Name
         let col_name = match self.tokens.peek() {
-            Some(Token::Word(w)) => w.value.clone(),
+            Some(Token::Word(w)) => {
+                if w.quote_style.is_some() {
+                    format!("\"{}\"", w.value.replace('\"', "\"\""))
+                } else {
+                    w.value.clone()
+                }
+            }
             Some(Token::SingleQuotedString(s)) => s.clone(),
             _ => return Some(Err(())),
         };
