@@ -2,9 +2,12 @@
 
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
-use crate::traits::{
-    ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
-    PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
+use crate::{
+    traits::{
+        ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
+        PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
+    },
+    utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
 /// A trait for types that can be treated as SQL tables.
@@ -38,6 +41,14 @@ pub trait TableLike:
     /// # }
     /// ```
     fn table_name(&self) -> &str;
+
+    /// Returns whether the table identifier was quoted in SQL.
+    ///
+    /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
+    #[inline]
+    fn table_name_is_quoted(&self) -> bool {
+        false
+    }
 
     /// Returns whether the table has a snake_case name.
     ///
@@ -150,6 +161,14 @@ pub trait TableLike:
     /// # }
     /// ```
     fn table_schema(&self) -> Option<&str>;
+
+    /// Returns whether the schema identifier of this table was quoted in SQL.
+    ///
+    /// This only matters when [`Self::table_schema`] returns `Some`.
+    #[inline]
+    fn table_schema_is_quoted(&self) -> bool {
+        false
+    }
 
     /// Returns the table ID according to its position in the database's table
     /// iterator.
@@ -345,6 +364,36 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// PostgreSQL-style identifier resolution is applied:
+    ///
+    /// - Unquoted lookup names are case-insensitive.
+    /// - Quoted lookup names are case-sensitive.
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     r#"
+    ///     CREATE TABLE t (
+    ///         Foo INT,
+    ///         "ColA" INT
+    ///     );
+    ///     "#,
+    /// )?;
+    /// let table = db.table(None, "t").expect("Table should exist");
+    ///
+    /// assert!(table.column("foo", &db).is_some());
+    /// assert!(table.column("\"foo\"", &db).is_some());
+    /// assert!(table.column("\"Foo\"", &db).is_none());
+    ///
+    /// assert!(table.column("\"ColA\"", &db).is_some());
+    /// assert!(table.column("cola", &db).is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     fn column<'db>(
         &'db self,
@@ -354,7 +403,9 @@ pub trait TableLike:
     where
         Self: 'db,
     {
-        TableLike::columns(self, database).find(|col| col.column_name() == name)
+        TableLike::columns(self, database).find(|col| {
+            stored_identifier_matches_lookup(col.column_name(), col.column_name_is_quoted(), name)
+        })
     }
 
     /// Returns the corresponding column by ID position in the table's column
@@ -2772,6 +2823,10 @@ where
         T::table_name(self)
     }
 
+    fn table_name_is_quoted(&self) -> bool {
+        T::table_name_is_quoted(self)
+    }
+
     fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db,
@@ -2781,6 +2836,10 @@ where
 
     fn table_schema(&self) -> Option<&str> {
         T::table_schema(self)
+    }
+
+    fn table_schema_is_quoted(&self) -> bool {
+        T::table_schema_is_quoted(self)
     }
 
     fn table_id(&self, database: &Self::DB) -> Option<usize> {
@@ -2873,6 +2932,64 @@ mod tests {
 
     use super::*;
     use crate::prelude::*;
+
+    mod identifier_resolution {
+        use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+
+        use super::*;
+
+        fn parse_postgres(sql: &str) -> Result<ParserDB, crate::errors::Error> {
+            let dialect = PostgreSqlDialect {};
+            let statements = Parser::parse_sql(&dialect, sql)?;
+            ParserDB::from_statements(statements, "test".to_string())
+        }
+
+        #[test]
+        fn test_table_lookup_unquoted_identifier_is_case_insensitive() {
+            let db = parse_postgres("CREATE TABLE Foo (id INT);").expect("Failed to parse SQL");
+
+            assert!(db.table(None, "foo").is_some());
+            assert!(db.table(None, "FOO").is_some());
+            assert!(db.table(None, "\"foo\"").is_some());
+            assert!(db.table(None, "\"Foo\"").is_none());
+        }
+
+        #[test]
+        fn test_table_lookup_quoted_identifier_is_case_sensitive() {
+            let db = parse_postgres("CREATE TABLE \"Foo\" (id INT);").expect("Failed to parse SQL");
+
+            assert!(db.table(None, "\"Foo\"").is_some());
+            assert!(db.table(None, "\"foo\"").is_none());
+            assert!(db.table(None, "foo").is_none());
+            assert!(db.table(None, "FOO").is_none());
+        }
+
+        #[test]
+        fn test_column_lookup_respects_quoted_and_unquoted_rules() {
+            let db = parse_postgres(
+                "
+                CREATE TABLE t (
+                    Foo INT,
+                    \"ColA\" INT
+                );
+                ",
+            )
+            .expect("Failed to parse SQL");
+            let table = db.table(None, "t").expect("Table 't' should exist");
+
+            // Unquoted column created as Foo resolves as lowercase identifier.
+            assert!(table.column("foo", &db).is_some());
+            assert!(table.column("FOO", &db).is_some());
+            assert!(table.column("\"foo\"", &db).is_some());
+            assert!(table.column("\"Foo\"", &db).is_none());
+
+            // Quoted column keeps exact case.
+            assert!(table.column("\"ColA\"", &db).is_some());
+            assert!(table.column("\"cola\"", &db).is_none());
+            assert!(table.column("cola", &db).is_none());
+            assert!(table.column("COLA", &db).is_none());
+        }
+    }
 
     mod reference_impl {
         use super::*;
@@ -3210,6 +3327,30 @@ mod tests {
             // Table should exist with new schema
             let table = db.table(None, "my_table").expect("Table should exist");
             assert_eq!(table.columns(&db).count(), 2);
+        }
+
+        #[test]
+        fn test_drop_table_unquoted_name_is_case_insensitive() {
+            let sql = r"
+                CREATE TABLE Foo (id INT PRIMARY KEY);
+                DROP TABLE foo;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+            assert!(db.table(None, "foo").is_none());
+        }
+
+        #[test]
+        fn test_drop_table_quoted_name_is_case_sensitive() {
+            let sql = r#"
+                CREATE TABLE Foo (id INT PRIMARY KEY);
+                DROP TABLE "Foo";
+            "#;
+            let result = ParserDB::parse::<GenericDialect>(sql);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, crate::errors::Error::DropTableNotFound { table_name } if table_name == "Foo")
+            );
         }
     }
 

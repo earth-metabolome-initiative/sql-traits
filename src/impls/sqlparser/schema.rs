@@ -16,6 +16,10 @@ impl SchemaLike for Schema {
         Schema::name(self)
     }
 
+    fn name_is_quoted(&self) -> bool {
+        self.is_quoted()
+    }
+
     fn authorization(&self) -> Option<&str> {
         Schema::authorization(self)
     }

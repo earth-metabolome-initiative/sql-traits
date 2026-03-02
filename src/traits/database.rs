@@ -8,9 +8,12 @@ use geometric_traits::{
     traits::EdgesBuilder,
 };
 
-use crate::traits::{
-    CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-    PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+use crate::{
+    traits::{
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
+        PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+    },
+    utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
 /// A trait for types that can be treated as SQL databases.
@@ -359,6 +362,33 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// let table_without_schema = db.table(None, "my_table").unwrap();
     /// assert_eq!(table_without_schema.table_name(), "my_table");
     /// assert_eq!(table_without_schema.table_schema(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// PostgreSQL-style identifier resolution is applied:
+    ///
+    /// - Unquoted lookup names are case-insensitive.
+    /// - Quoted lookup names are case-sensitive.
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     r#"
+    ///     CREATE TABLE Foo (id INT);
+    ///     CREATE TABLE "Bar" (id INT);
+    ///     "#,
+    /// )?;
+    ///
+    /// assert!(db.table(None, "foo").is_some());
+    /// assert!(db.table(None, "\"foo\"").is_some());
+    /// assert!(db.table(None, "\"Foo\"").is_none());
+    ///
+    /// assert!(db.table(None, "\"Bar\"").is_some());
+    /// assert!(db.table(None, "bar").is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -818,8 +848,33 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # Arguments
     ///
     /// * `name` - Name of the schema to retrieve.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     r#"
+    ///     CREATE SCHEMA Foo;
+    ///     CREATE SCHEMA "Bar";
+    ///     "#,
+    /// )?;
+    ///
+    /// assert!(db.schema("foo").is_some());
+    /// assert!(db.schema("\"foo\"").is_some());
+    /// assert!(db.schema("\"Foo\"").is_none());
+    ///
+    /// assert!(db.schema("\"Bar\"").is_some());
+    /// assert!(db.schema("bar").is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
     fn schema(&self, name: &str) -> Option<&Self::Schema> {
-        self.schemas().find(|s| s.name() == name)
+        self.schemas()
+            .find(|s| stored_identifier_matches_lookup(s.name(), s.name_is_quoted(), name))
     }
 
     /// Returns whether the database has any schemas defined.

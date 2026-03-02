@@ -30,6 +30,14 @@ pub trait SchemaLike: Debug + Clone + Ord + Eq + Metadata + Send + Sync {
     /// ```
     fn name(&self) -> &str;
 
+    /// Returns whether the schema identifier was quoted in SQL.
+    ///
+    /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
+    #[inline]
+    fn name_is_quoted(&self) -> bool {
+        false
+    }
+
     /// Returns the authorization owner of the schema, if specified.
     ///
     /// In PostgreSQL, schemas can have an owner specified via the
@@ -57,6 +65,10 @@ impl<S: SchemaLike> SchemaLike for &S {
 
     fn name(&self) -> &str {
         (*self).name()
+    }
+
+    fn name_is_quoted(&self) -> bool {
+        (*self).name_is_quoted()
     }
 
     fn authorization(&self) -> Option<&str> {
@@ -164,6 +176,41 @@ mod tests {
     }
 
     #[test]
+    fn test_schema_lookup_unquoted_identifier_is_case_insensitive() {
+        let db = parse_postgres("CREATE SCHEMA Foo;").unwrap();
+
+        assert!(db.schema("foo").is_some());
+        assert!(db.schema("FOO").is_some());
+        assert!(db.schema("\"foo\"").is_some());
+        assert!(db.schema("\"Foo\"").is_none());
+    }
+
+    #[test]
+    fn test_schema_lookup_quoted_identifier_is_case_sensitive() {
+        let db = parse_postgres("CREATE SCHEMA \"Foo\";").unwrap();
+
+        assert!(db.schema("\"Foo\"").is_some());
+        assert!(db.schema("\"foo\"").is_none());
+        assert!(db.schema("foo").is_none());
+        assert!(db.schema("FOO").is_none());
+    }
+
+    #[test]
+    fn test_create_schema_duplicate_unquoted_and_quoted_equivalent_fails() {
+        let result = parse_postgres(
+            "
+            CREATE SCHEMA Foo;
+            CREATE SCHEMA \"foo\";
+            ",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::errors::Error::SchemaAlreadyExists { schema_name } if schema_name == "foo")
+        );
+    }
+
+    #[test]
     fn test_has_schemas() {
         let db_with_schemas = parse_postgres("CREATE SCHEMA my_schema;").unwrap();
         assert!(db_with_schemas.has_schemas());
@@ -202,6 +249,33 @@ mod tests {
         .unwrap();
 
         assert!(db.schema("my_schema").is_none());
+    }
+
+    #[test]
+    fn test_drop_schema_unquoted_name_is_case_insensitive() {
+        let db = parse_postgres(
+            "
+            CREATE SCHEMA Foo;
+            DROP SCHEMA foo;
+            ",
+        )
+        .unwrap();
+        assert!(db.schema("foo").is_none());
+    }
+
+    #[test]
+    fn test_drop_schema_quoted_name_is_case_sensitive() {
+        let result = parse_postgres(
+            "
+            CREATE SCHEMA Foo;
+            DROP SCHEMA \"Foo\";
+            ",
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, crate::errors::Error::DropSchemaNotFound { schema_name } if schema_name == "Foo")
+        );
     }
 
     #[test]

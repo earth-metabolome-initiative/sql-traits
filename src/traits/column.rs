@@ -39,6 +39,14 @@ pub trait ColumnLike:
     /// ```
     fn column_name(&self) -> &str;
 
+    /// Returns whether the column identifier was quoted in SQL.
+    ///
+    /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
+    #[inline]
+    fn column_name_is_quoted(&self) -> bool {
+        false
+    }
+
     /// Returns the documentation of the column, if any.
     ///
     /// # Arguments
@@ -1039,6 +1047,11 @@ where
     }
 
     #[inline]
+    fn column_name_is_quoted(&self) -> bool {
+        (*self).column_name_is_quoted()
+    }
+
+    #[inline]
     fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db,
@@ -1085,6 +1098,11 @@ where
     #[inline]
     fn column_name(&self) -> &str {
         (**self).column_name()
+    }
+
+    #[inline]
+    fn column_name_is_quoted(&self) -> bool {
+        (**self).column_name_is_quoted()
     }
 
     #[inline]

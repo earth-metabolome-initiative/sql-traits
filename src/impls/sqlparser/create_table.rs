@@ -1,7 +1,7 @@
 //! Submodule implementing the [`TableLike`] trait for `sqlparser`'s
 //! [`CreateTable`] struct.
 
-use ::sqlparser::ast::{CreateTable, Ident};
+use ::sqlparser::ast::{CreateTable, Ident, ObjectNamePart};
 use sql_docs::docs::TableDoc;
 
 use crate::{
@@ -24,6 +24,13 @@ impl TableLike for CreateTable {
     #[inline]
     fn table_name(&self) -> &str {
         last_str(&self.name)
+    }
+
+    #[inline]
+    fn table_name_is_quoted(&self) -> bool {
+        self.name.0.last().is_some_and(
+            |part| matches!(part, ObjectNamePart::Identifier(ident) if ident.quote_style.is_some()),
+        )
     }
 
     #[inline]
@@ -54,6 +61,16 @@ impl TableLike for CreateTable {
         } else {
             None
         }
+    }
+
+    #[inline]
+    fn table_schema_is_quoted(&self) -> bool {
+        if self.name.0.len() <= 1 {
+            return false;
+        }
+        self.name.0.first().is_some_and(
+            |part| matches!(part, ObjectNamePart::Identifier(ident) if ident.quote_style.is_some()),
+        )
     }
 
     fn columns<'db>(

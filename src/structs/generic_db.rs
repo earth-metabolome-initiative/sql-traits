@@ -9,9 +9,12 @@ use std::{fmt::Debug, sync::Arc};
 pub use builder::GenericDBBuilder;
 pub use sqlparser::{ParserDB, ParserDBBuilder};
 
-use crate::traits::{
-    CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-    PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+use crate::{
+    traits::{
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
+        PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+    },
+    utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
 /// A generic representation of a database schema.
@@ -625,12 +628,35 @@ where
     /// # Arguments
     ///
     /// * `name` - The name of the schema to retrieve.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     r#"
+    ///     CREATE SCHEMA Foo;
+    ///     CREATE SCHEMA "Bar";
+    ///     "#,
+    /// )?;
+    ///
+    /// assert!(db.schema("foo").is_some());
+    /// assert!(db.schema("\"foo\"").is_some());
+    /// assert!(db.schema("\"Foo\"").is_none());
+    /// assert!(db.schema("\"Bar\"").is_some());
+    /// assert!(db.schema("bar").is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn schema(&self, name: &str) -> Option<&S> {
-        self.schemas
-            .binary_search_by(|(s, _)| s.name().cmp(name))
-            .ok()
-            .map(|index| self.schemas[index].0.as_ref())
+        self.schemas.iter().find_map(|(s, _)| {
+            stored_identifier_matches_lookup(s.name(), s.name_is_quoted(), name)
+                .then_some(s.as_ref())
+        })
     }
 
     /// Returns a reference to the metadata of the specified schema, if it

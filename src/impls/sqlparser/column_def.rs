@@ -24,6 +24,11 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
     }
 
     #[inline]
+    fn column_name_is_quoted(&self) -> bool {
+        self.attribute().name.quote_style.is_some()
+    }
+
+    #[inline]
     fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
     where
         Self: 'db,

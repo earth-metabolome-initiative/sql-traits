@@ -7,6 +7,7 @@ use crate::{
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
         TriggerLike, UniqueIndexLike,
     },
+    utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
 impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> DatabaseLike
@@ -56,12 +57,23 @@ where
     }
 
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table> {
-        // The tables are sorted by schema and name, so we can use binary search.
-        let key = (schema, table_name);
-        self.tables
-            .binary_search_by_key(&key, |(table, _)| (table.table_schema(), table.table_name()))
-            .ok()
-            .map(|index| self.tables[index].0.as_ref())
+        self.tables.iter().map(|(table, _)| table.as_ref()).find(|table| {
+            stored_identifier_matches_lookup(
+                table.table_name(),
+                table.table_name_is_quoted(),
+                table_name,
+            ) && match (schema, table.table_schema()) {
+                (None, None) => true,
+                (Some(lookup_schema), Some(table_schema)) => {
+                    stored_identifier_matches_lookup(
+                        table_schema,
+                        table.table_schema_is_quoted(),
+                        lookup_schema,
+                    )
+                }
+                _ => false,
+            }
+        })
     }
 
     fn table_id(&self, table: &Self::Table) -> Option<usize> {
