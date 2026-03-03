@@ -3,6 +3,7 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
+    structs::{SchemaFingerprint, fingerprint::compute_persistence_v1},
     traits::{
         ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
         PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
@@ -227,12 +228,12 @@ pub trait TableLike:
     where
         Self: 'db;
 
-    /// Returns a fingerprint hash for the table schema.
+    /// Returns a deterministic SHA-256 fingerprint of the table's schema.
     ///
-    /// The fingerprint includes:
-    /// - Table schema and name
-    /// - Column names, types, and their order
-    /// - Primary key column names and their order
+    /// The fingerprint is stable across Rust versions and suitable for
+    /// persistence. It encodes the schema name, table name, columns
+    /// (ordinal, name, canonical type token, nullability), and primary-key
+    /// ordinals using a versioned binary format.
     ///
     /// # Arguments
     ///
@@ -255,35 +256,19 @@ pub trait TableLike:
     /// let users = db.table(None, "users").expect("users table should exist");
     /// let users_archive = db.table(None, "users_archive").expect("users_archive table should exist");
     ///
-    /// assert_ne!(users.fingerprint_hash(&db), users_archive.fingerprint_hash(&db));
+    /// // Different table names produce different fingerprints.
+    /// assert_ne!(users.schema_fingerprint(&db), users_archive.schema_fingerprint(&db));
+    ///
+    /// // Same SQL produces the same fingerprint (deterministic).
+    /// let db2 =
+    ///     ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);")?;
+    /// let users2 = db2.table(None, "users").unwrap();
+    /// assert_eq!(users.schema_fingerprint(&db), users2.schema_fingerprint(&db2));
     /// # Ok(())
     /// # }
     /// ```
-    fn fingerprint_hash(&self, database: &Self::DB) -> u64 {
-        use std::hash::{DefaultHasher, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-
-        b"table-schema".hash(&mut hasher);
-        self.table_schema().hash(&mut hasher);
-
-        b"table-name".hash(&mut hasher);
-        self.table_name().hash(&mut hasher);
-
-        b"columns".hash(&mut hasher);
-        for (position, column) in self.columns(database).enumerate() {
-            position.hash(&mut hasher);
-            column.column_name().hash(&mut hasher);
-            column.data_type(database).hash(&mut hasher);
-        }
-
-        b"primary-keys".hash(&mut hasher);
-        for (position, column) in self.primary_key_columns(database).enumerate() {
-            position.hash(&mut hasher);
-            column.column_name().hash(&mut hasher);
-        }
-
-        hasher.finish()
+    fn schema_fingerprint(&self, database: &Self::DB) -> SchemaFingerprint {
+        compute_persistence_v1(self, database)
     }
 
     /// Returns whether any of the columns of the table are generated.
@@ -3038,8 +3023,8 @@ mod tests {
                 table.foreign_keys(&db).count()
             );
             assert_eq!(
-                <&_ as TableLike>::fingerprint_hash(table_ref, &db),
-                table.fingerprint_hash(&db)
+                <&_ as TableLike>::schema_fingerprint(table_ref, &db),
+                table.schema_fingerprint(&db)
             );
         }
 
@@ -3109,64 +3094,229 @@ mod tests {
         }
     }
 
-    mod fingerprint {
+    mod schema_fingerprint {
         use super::*;
 
         #[test]
-        fn test_fingerprint_changes_with_column_order() {
+        fn test_determinism() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db_a = ParserDB::parse::<GenericDialect>(sql).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql).expect("parse B");
+
+            let table_a = db_a.table(None, "users").unwrap();
+            let table_b = db_b.table(None, "users").unwrap();
+
+            assert_eq!(table_a.schema_fingerprint(&db_a), table_b.schema_fingerprint(&db_b));
+        }
+
+        #[test]
+        fn test_sensitivity_column_order() {
             let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let sql_b = "CREATE TABLE users (name TEXT, id INT PRIMARY KEY);";
 
-            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("Failed to parse SQL A");
-            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("Failed to parse SQL B");
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let table_a = db_a.table(None, "users").expect("users in A should exist");
-            let table_b = db_b.table(None, "users").expect("users in B should exist");
+            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
+            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
 
-            assert_ne!(table_a.fingerprint_hash(&db_a), table_b.fingerprint_hash(&db_b));
+            assert_ne!(fp_a, fp_b);
         }
 
         #[test]
-        fn test_fingerprint_changes_with_column_types() {
+        fn test_sensitivity_column_type() {
             let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, score INT);";
             let sql_b = "CREATE TABLE users (id INT PRIMARY KEY, score TEXT);";
 
-            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("Failed to parse SQL A");
-            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("Failed to parse SQL B");
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let table_a = db_a.table(None, "users").expect("users in A should exist");
-            let table_b = db_b.table(None, "users").expect("users in B should exist");
+            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
+            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
 
-            assert_ne!(table_a.fingerprint_hash(&db_a), table_b.fingerprint_hash(&db_b));
+            assert_ne!(fp_a, fp_b);
         }
 
         #[test]
-        fn test_fingerprint_changes_with_primary_keys() {
-            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, external_id INT, name TEXT);";
-            let sql_b = "CREATE TABLE users (id INT, external_id INT PRIMARY KEY, name TEXT);";
+        fn test_sensitivity_pk_membership() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, ext_id INT, name TEXT);";
+            let sql_b = "CREATE TABLE users (id INT, ext_id INT PRIMARY KEY, name TEXT);";
 
-            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("Failed to parse SQL A");
-            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("Failed to parse SQL B");
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let table_a = db_a.table(None, "users").expect("users in A should exist");
-            let table_b = db_b.table(None, "users").expect("users in B should exist");
+            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
+            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
 
-            assert_ne!(table_a.fingerprint_hash(&db_a), table_b.fingerprint_hash(&db_b));
+            assert_ne!(fp_a, fp_b);
         }
 
         #[test]
-        fn test_fingerprint_changes_with_table_name() {
+        fn test_sensitivity_table_name() {
             let sql = "
                 CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
                 CREATE TABLE users_archive (id INT PRIMARY KEY, name TEXT);
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let users = db.table(None, "users").expect("users should exist");
-            let users_archive =
-                db.table(None, "users_archive").expect("users_archive should exist");
+            let fp_users = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp_archive = db.table(None, "users_archive").unwrap().schema_fingerprint(&db);
 
-            assert_ne!(users.fingerprint_hash(&db), users_archive.fingerprint_hash(&db));
+            assert_ne!(fp_users, fp_archive);
+        }
+
+        #[test]
+        fn test_sensitivity_nullability() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL);";
+            let sql_b = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
+
+            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
+            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
+
+            assert_ne!(fp_a, fp_b);
+        }
+
+        #[test]
+        fn test_truncation_fingerprint128() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            let full = fp.fingerprint256();
+            let truncated = fp.fingerprint128();
+            assert_eq!(&full[..16], &truncated);
+        }
+
+        #[test]
+        fn test_truncation_fingerprint64() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            let full = fp.fingerprint256();
+            let expected = u64::from_be_bytes(full[..8].try_into().unwrap());
+            assert_eq!(fp.fingerprint64(), expected);
+        }
+
+        #[test]
+        fn test_comparability() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+
+            let fp_a = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp_b = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            assert!(fp_a.is_comparable_to(&fp_b));
+        }
+
+        #[test]
+        fn test_hex_length() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            let hex = fp.to_hex();
+            assert_eq!(hex.len(), 64);
+            assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+
+        #[test]
+        fn test_version() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            assert_eq!(fp.version(), 1);
+        }
+
+        #[test]
+        fn test_golden_vector() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            // Pin the hex digest so any encoding change is caught.
+            let hex = fp.to_hex();
+            assert_eq!(
+                hex, "c5bd001f61732b9e7ac6f586c5779dacf847f8d8a4f2dd1f33c4d5aed57683c7",
+                "Golden vector mismatch — the fingerprint encoding has changed!"
+            );
+        }
+
+        #[test]
+        fn test_display_format() {
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            let display = format!("{fp}");
+            assert!(display.starts_with("v1:"));
+            assert_eq!(display.len(), 3 + 64); // "v1:" + 64 hex chars
+        }
+
+        #[test]
+        fn test_sensitivity_schema_name() {
+            let sql = "
+                CREATE TABLE schema_a.users (id INT PRIMARY KEY, name TEXT);
+                CREATE TABLE schema_b.users (id INT PRIMARY KEY, name TEXT);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+
+            let fp_a = db.table(Some("schema_a"), "users").unwrap().schema_fingerprint(&db);
+            let fp_b = db.table(Some("schema_b"), "users").unwrap().schema_fingerprint(&db);
+
+            assert_ne!(fp_a, fp_b);
+        }
+
+        #[test]
+        fn test_type_canonicalization() {
+            // VARCHAR and TEXT both map to STRING, so these tables should
+            // produce the same fingerprint.
+            let sql_a = "CREATE TABLE t (id INT PRIMARY KEY, val VARCHAR);";
+            let sql_b = "CREATE TABLE t (id INT PRIMARY KEY, val TEXT);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
+
+            let fp_a = db_a.table(None, "t").unwrap().schema_fingerprint(&db_a);
+            let fp_b = db_b.table(None, "t").unwrap().schema_fingerprint(&db_b);
+
+            assert_eq!(fp_a, fp_b);
+        }
+
+        #[test]
+        fn test_no_primary_key() {
+            let sql = "CREATE TABLE t (id INT, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "t").unwrap().schema_fingerprint(&db);
+
+            // Should produce a valid fingerprint with 64 hex chars.
+            assert_eq!(fp.to_hex().len(), 64);
+            assert_eq!(fp.version(), 1);
+        }
+
+        #[test]
+        fn test_eq_hash_contract() {
+            use std::hash::{DefaultHasher, Hash, Hasher};
+
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+
+            let fp_a = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp_b = db.table(None, "users").unwrap().schema_fingerprint(&db);
+
+            assert_eq!(fp_a, fp_b);
+
+            let hash_of = |fp: &crate::structs::SchemaFingerprint| {
+                let mut h = DefaultHasher::new();
+                fp.hash(&mut h);
+                h.finish()
+            };
+
+            assert_eq!(hash_of(&fp_a), hash_of(&fp_b));
         }
     }
 
