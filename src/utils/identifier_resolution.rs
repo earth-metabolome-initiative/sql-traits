@@ -12,7 +12,7 @@ pub struct LookupIdentifier<'a> {
     quoted: bool,
 }
 
-impl<'a> LookupIdentifier<'a> {
+impl LookupIdentifier<'_> {
     /// Returns the lookup identifier value (without surrounding quotes).
     #[must_use]
     pub fn value(&self) -> &str {
@@ -72,7 +72,12 @@ pub fn stored_identifier_matches_lookup(
     identifiers_match(stored_value, stored_quoted, lookup_ident.value(), lookup_ident.is_quoted())
 }
 
-fn normalize_identifier<'a>(value: &'a str, quoted: bool) -> Cow<'a, str> {
+/// Normalizes an identifier for comparison following PostgreSQL rules.
+///
+/// Quoted identifiers are returned as-is (case-sensitive). Unquoted
+/// identifiers are folded to lowercase.
+#[must_use]
+pub fn normalize_identifier(value: &str, quoted: bool) -> Cow<'_, str> {
     if quoted { Cow::Borrowed(value) } else { Cow::Owned(value.to_ascii_lowercase()) }
 }
 
