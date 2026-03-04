@@ -367,9 +367,9 @@ fn render_table_candidate(table: &CreateTable) -> String {
     }
 }
 
-fn object_name_identifiers<'a>(
-    object_name: &'a ObjectName,
-) -> Result<(Option<&'a Ident>, &'a Ident), LookupError> {
+fn object_name_identifiers(
+    object_name: &ObjectName,
+) -> Result<(Option<&Ident>, &Ident), LookupError> {
     if object_name.0.is_empty() {
         return Err(LookupError::InvalidObjectName {
             object_name: object_name.to_string(),
@@ -387,7 +387,7 @@ fn object_name_identifiers<'a>(
     for part in &object_name.0 {
         match part {
             ObjectNamePart::Identifier(ident) => idents.push(ident),
-            _ => {
+            ObjectNamePart::Function(_) => {
                 return Err(LookupError::InvalidObjectName {
                     object_name: object_name.to_string(),
                     reason: "all object name parts must be identifiers".to_string(),
@@ -429,9 +429,9 @@ fn table_matches_lookup_idents(
 
 fn resolve_table_from_candidates<'a>(
     object_name: &ObjectName,
-    candidates: Vec<&'a CreateTable>,
+    candidates: &[&'a CreateTable],
 ) -> Result<Option<&'a CreateTable>, LookupError> {
-    match candidates.as_slice() {
+    match candidates {
         [] => Ok(None),
         [table] => Ok(Some(*table)),
         _ => {
@@ -469,7 +469,7 @@ fn resolve_table_object_name_in_iter<'a>(
     let candidates: Vec<&CreateTable> = tables
         .filter(|table| table_matches_lookup_idents(table, schema_ident, table_ident))
         .collect();
-    resolve_table_from_candidates(object_name, candidates)
+    resolve_table_from_candidates(object_name, &candidates)
 }
 
 fn resolve_table_object_name_with_implicit_public_in_iter<'a>(
@@ -488,7 +488,7 @@ fn resolve_table_object_name_with_implicit_public_in_iter<'a>(
         .copied()
         .filter(|table| table_matches_lookup_idents(table, None, table_ident))
         .collect();
-    let unqualified = resolve_table_from_candidates(object_name, unqualified_candidates)?;
+    let unqualified = resolve_table_from_candidates(object_name, &unqualified_candidates)?;
 
     let public_candidates: Vec<&CreateTable> = table_refs
         .iter()
@@ -508,7 +508,7 @@ fn resolve_table_object_name_with_implicit_public_in_iter<'a>(
         ObjectNamePart::Identifier(Ident::new("public")),
         ObjectNamePart::Identifier(table_ident.clone()),
     ]);
-    let public = resolve_table_from_candidates(&public_lookup_name, public_candidates)?;
+    let public = resolve_table_from_candidates(&public_lookup_name, &public_candidates)?;
 
     match (unqualified, public) {
         (Some(unqualified), Some(public)) => {
@@ -548,12 +548,14 @@ fn table_matches_resolved_identity(
 
     match (table.table_schema(), schema_name) {
         (None, None) => true,
-        (Some(table_schema), Some(schema_name)) => identifiers_match(
-            table_schema,
-            table.table_schema_is_quoted(),
-            schema_name,
-            schema_quoted,
-        ),
+        (Some(table_schema), Some(schema_name)) => {
+            identifiers_match(
+                table_schema,
+                table.table_schema_is_quoted(),
+                schema_name,
+                schema_quoted,
+            )
+        }
         _ => false,
     }
 }
@@ -616,7 +618,7 @@ impl ParserDB {
     /// - unquoted identifiers are folded to lowercase.
     #[must_use]
     pub fn resolve_schema_ident(&self, ident: &Ident) -> Option<&Schema> {
-        resolve_schema_ident_in_iter(self.schemas.iter().map(|(schema, _)| schema.as_ref()), ident)
+        resolve_schema_ident_in_iter(self.schemas.iter().map(|(schema, ())| schema.as_ref()), ident)
     }
 
     /// Resolves a table from a one-part or two-part SQL object name.
@@ -787,9 +789,9 @@ impl ParserDB {
         renamed_table.name = new_name;
 
         builder = builder.add_table(Arc::new(renamed_table), meta)?;
-        builder
-            .tables_mut()
-            .sort_by(|(a, _), (b, _)| (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name())));
+        builder.tables_mut().sort_by(|(a, _), (b, _)| {
+            (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name()))
+        });
 
         Ok(builder)
     }
@@ -1485,10 +1487,11 @@ impl ParserDB {
                                 let resolved_table_quoted = resolved_table.table_name_is_quoted();
                                 let resolved_schema_name =
                                     resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+                                let resolved_schema_quoted =
+                                    resolved_table.table_schema_is_quoted();
 
-                                if let Some(entry) = builder.tables_mut().iter_mut().find(
-                                    |(table, _)| {
+                                if let Some(entry) =
+                                    builder.tables_mut().iter_mut().find(|(table, _)| {
                                         table_matches_resolved_identity(
                                             table.as_ref(),
                                             &resolved_table_name,
@@ -1496,8 +1499,8 @@ impl ParserDB {
                                             resolved_schema_name.as_deref(),
                                             resolved_schema_quoted,
                                         )
-                                    },
-                                ) {
+                                    })
+                                {
                                     entry.1.set_rls_enabled(true);
                                 }
                             }
@@ -1511,10 +1514,11 @@ impl ParserDB {
                                 let resolved_table_quoted = resolved_table.table_name_is_quoted();
                                 let resolved_schema_name =
                                     resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+                                let resolved_schema_quoted =
+                                    resolved_table.table_schema_is_quoted();
 
-                                if let Some(entry) = builder.tables_mut().iter_mut().find(
-                                    |(table, _)| {
+                                if let Some(entry) =
+                                    builder.tables_mut().iter_mut().find(|(table, _)| {
                                         table_matches_resolved_identity(
                                             table.as_ref(),
                                             &resolved_table_name,
@@ -1522,8 +1526,8 @@ impl ParserDB {
                                             resolved_schema_name.as_deref(),
                                             resolved_schema_quoted,
                                         )
-                                    },
-                                ) {
+                                    })
+                                {
                                     entry.1.set_rls_enabled(false);
                                 }
                             }
@@ -1537,10 +1541,11 @@ impl ParserDB {
                                 let resolved_table_quoted = resolved_table.table_name_is_quoted();
                                 let resolved_schema_name =
                                     resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+                                let resolved_schema_quoted =
+                                    resolved_table.table_schema_is_quoted();
 
-                                if let Some(entry) = builder.tables_mut().iter_mut().find(
-                                    |(table, _)| {
+                                if let Some(entry) =
+                                    builder.tables_mut().iter_mut().find(|(table, _)| {
                                         table_matches_resolved_identity(
                                             table.as_ref(),
                                             &resolved_table_name,
@@ -1548,8 +1553,8 @@ impl ParserDB {
                                             resolved_schema_name.as_deref(),
                                             resolved_schema_quoted,
                                         )
-                                    },
-                                ) {
+                                    })
+                                {
                                     entry.1.set_rls_forced(true);
                                 }
                             }
@@ -1563,10 +1568,11 @@ impl ParserDB {
                                 let resolved_table_quoted = resolved_table.table_name_is_quoted();
                                 let resolved_schema_name =
                                     resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+                                let resolved_schema_quoted =
+                                    resolved_table.table_schema_is_quoted();
 
-                                if let Some(entry) = builder.tables_mut().iter_mut().find(
-                                    |(table, _)| {
+                                if let Some(entry) =
+                                    builder.tables_mut().iter_mut().find(|(table, _)| {
                                         table_matches_resolved_identity(
                                             table.as_ref(),
                                             &resolved_table_name,
@@ -1574,16 +1580,15 @@ impl ParserDB {
                                             resolved_schema_name.as_deref(),
                                             resolved_schema_quoted,
                                         )
-                                    },
-                                ) {
+                                    })
+                                {
                                     entry.1.set_rls_forced(false);
                                 }
                             }
                             AlterTableOperation::RenameTable { table_name } => {
                                 let new_name = match table_name {
-                                    RenameTableNameKind::As(name) | RenameTableNameKind::To(name) => {
-                                        name
-                                    }
+                                    RenameTableNameKind::As(name)
+                                    | RenameTableNameKind::To(name) => name,
                                 };
                                 builder = Self::rename_table_checked(
                                     builder,
@@ -1734,7 +1739,8 @@ impl ParserDB {
                     if let Some(sqlparser::ast::GrantObjects::Tables(tables)) = &grant.objects {
                         for table_obj in tables {
                             let table_name = last_str(table_obj);
-                            let table_exists = builder.resolve_table_object_name(table_obj)?.is_some();
+                            let table_exists =
+                                builder.resolve_table_object_name(table_obj)?.is_some();
                             if !table_exists {
                                 return Err(crate::errors::Error::TableNotFoundForGrant {
                                     table_name: table_name.to_string(),
@@ -1833,8 +1839,8 @@ impl ParserDB {
                     let schema_name = last_str(&name);
 
                     // Check if schema exists
-                    let resolved_schema =
-                        object_name_last_identifier(&name).and_then(|ident| builder.resolve_schema_ident(ident));
+                    let resolved_schema = object_name_last_identifier(&name)
+                        .and_then(|ident| builder.resolve_schema_ident(ident));
 
                     let Some(resolved_schema) = resolved_schema else {
                         if if_exists {
@@ -1936,16 +1942,6 @@ impl ParserDB {
                             | AlterSchemaOperation::SetOptionsParens { .. } => {}
                         }
                     }
-                }
-                Statement::Comment { object_type: _, object_name: _, comment: _, if_exists: _ } => {
-                    // COMMENT ON statements set comments on database objects.
-                    // Currently, table documentation is extracted from SQL
-                    // comments (lines starting with --) via
-                    // the sql_docs crate. COMMENT ON
-                    // TABLE/COLUMN would be a different mechanism.
-                    // For now, we acknowledge but don't store these comments.
-                    // TODO: Store COMMENT ON statements when comment metadata
-                    // field is added to the appropriate metadata structs.
                 }
                 _ => {
                     // Ignored statements - no schema tracking needed
@@ -2258,14 +2254,13 @@ mod tests {
         #[test]
         fn alter_table_rls_lookup_uses_resolver_rules() {
             let db = parse_postgres(
-                r#"
+                r"
                 CREATE TABLE Foo (id INT);
                 ALTER TABLE FOO ENABLE ROW LEVEL SECURITY;
-                "#,
+                ",
             );
-            let foo = db
-                .table(None, "foo")
-                .expect("Expected `foo` table to exist after ALTER TABLE");
+            let foo =
+                db.table(None, "foo").expect("Expected `foo` table to exist after ALTER TABLE");
             assert!(
                 foo.has_row_level_security(&db),
                 "Unquoted ALTER TABLE lookup should resolve via identifier folding"
@@ -2277,9 +2272,8 @@ mod tests {
                 ALTER TABLE "Foo" ENABLE ROW LEVEL SECURITY;
                 "#,
             );
-            let foo = db
-                .table(None, "foo")
-                .expect("Expected `foo` table to exist after ALTER TABLE");
+            let foo =
+                db.table(None, "foo").expect("Expected `foo` table to exist after ALTER TABLE");
             assert!(
                 !foo.has_row_level_security(&db),
                 "Quoted ALTER TABLE name should not match unquoted table with different case"
@@ -2288,11 +2282,11 @@ mod tests {
 
         #[test]
         fn grant_table_lookup_uses_resolver_rules() {
-            let sql = r#"
+            let sql = r"
                 CREATE TABLE Foo (id INT);
                 CREATE ROLE app_role;
                 GRANT SELECT ON FOO TO app_role;
-            "#;
+            ";
             let result = ParserDB::parse::<PostgreSqlDialect>(sql);
             assert!(result.is_ok());
 
@@ -2311,13 +2305,13 @@ mod tests {
         #[test]
         fn create_index_attaches_to_correct_schema_table() {
             let db = parse_postgres(
-                r#"
+                r"
                 CREATE SCHEMA s1;
                 CREATE SCHEMA s2;
                 CREATE TABLE s1.t (id INT);
                 CREATE TABLE s2.t (id INT);
                 CREATE INDEX idx_s2_t_id ON s2.t (id);
-                "#,
+                ",
             );
 
             let s1_t = db
@@ -2360,10 +2354,10 @@ mod tests {
 
         #[test]
         fn rename_table_lookup_uses_resolver_rules() {
-            let sql = r#"
+            let sql = r"
                 CREATE TABLE Foo (id INT);
                 ALTER TABLE FOO RENAME TO bar;
-            "#;
+            ";
             let db = parse_postgres(sql);
             assert!(db.table(None, "foo").is_none());
             assert!(db.table(None, "bar").is_some());
@@ -2381,10 +2375,10 @@ mod tests {
 
         #[test]
         fn rename_table_statement_lookup_uses_resolver_rules() {
-            let sql = r#"
+            let sql = r"
                 CREATE TABLE Foo (id INT);
                 RENAME TABLE FOO TO bar;
-            "#;
+            ";
             let db = ParserDB::parse::<GenericDialect>(sql)
                 .expect("Expected unquoted RENAME TABLE lookup to resolve");
             assert!(db.table(None, "foo").is_none());
@@ -2403,11 +2397,11 @@ mod tests {
 
         #[test]
         fn alter_schema_rename_rejects_semantic_duplicate() {
-            let sql = r#"
+            let sql = r"
                 CREATE SCHEMA foo;
                 CREATE SCHEMA bar;
                 ALTER SCHEMA bar RENAME TO FOO;
-            "#;
+            ";
 
             let result = ParserDB::parse::<PostgreSqlDialect>(sql);
             assert!(matches!(
@@ -2485,10 +2479,10 @@ mod tests {
 
         #[test]
         fn ambiguous_unqualified_and_public_tables_fail_at_build_time() {
-            let sql = r#"
+            let sql = r"
                 CREATE TABLE t (id INT);
                 CREATE TABLE public.t (id INT);
-            "#;
+            ";
 
             let result = ParserDB::parse::<PostgreSqlDialect>(sql);
             assert!(matches!(
