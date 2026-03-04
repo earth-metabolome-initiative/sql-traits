@@ -3,12 +3,66 @@
 use std::sync::Arc;
 
 use crate::{
+    errors::LookupError,
     structs::GenericDB,
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
         PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
     },
+    utils::identifier_resolution::identifiers_match,
 };
+
+fn format_identifier(value: &str, quoted: bool) -> String {
+    if quoted { format!("\"{}\"", value.replace('\"', "\"\"")) } else { value.to_string() }
+}
+
+fn format_table_lookup_key<T: TableLike>(table: &T) -> String {
+    let table_name = format_identifier(table.table_name(), table.table_name_is_quoted());
+    match table.table_schema() {
+        Some(schema_name) => {
+            let schema_name = format_identifier(schema_name, table.table_schema_is_quoted());
+            format!("{schema_name}.{table_name}")
+        }
+        None => table_name,
+    }
+}
+
+fn table_names_match_semantically<T: TableLike>(left: &T, right: &T) -> bool {
+    identifiers_match(
+        left.table_name(),
+        left.table_name_is_quoted(),
+        right.table_name(),
+        right.table_name_is_quoted(),
+    )
+}
+
+fn table_schema_is_public<T: TableLike>(table: &T) -> bool {
+    table.table_schema().is_some_and(|schema_name| {
+        identifiers_match(schema_name, table.table_schema_is_quoted(), "public", false)
+    })
+}
+
+fn tables_share_semantic_identity<T: TableLike>(left: &T, right: &T) -> bool {
+    table_names_match_semantically(left, right)
+        && match (left.table_schema(), right.table_schema()) {
+            (None, None) => true,
+            (Some(left_schema), Some(right_schema)) => {
+                identifiers_match(
+                    left_schema,
+                    left.table_schema_is_quoted(),
+                    right_schema,
+                    right.table_schema_is_quoted(),
+                )
+            }
+            _ => false,
+        }
+}
+
+fn creates_implicit_public_ambiguity<T: TableLike>(left: &T, right: &T) -> bool {
+    table_names_match_semantically(left, right)
+        && ((left.table_schema().is_none() && table_schema_is_public(right))
+            || (right.table_schema().is_none() && table_schema_is_public(left)))
+}
 
 /// Builder for constructing a `GenericDB` instance.
 pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
@@ -216,6 +270,21 @@ where
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
+    fn ensure_table_lookup_invariants(&self, table: &T) -> Result<(), LookupError> {
+        for (existing, _) in self.tables() {
+            let existing = existing.as_ref();
+            if tables_share_semantic_identity(existing, table)
+                || creates_implicit_public_ambiguity(existing, table)
+            {
+                return Err(LookupError::TableLookupConflict {
+                    table: format_table_lookup_key(table),
+                    conflicting_table: format_table_lookup_key(existing),
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Sets the timezone for the database.
     #[must_use]
     #[inline]
@@ -225,17 +294,30 @@ where
     }
 
     /// Adds a table with its metadata to the builder.
-    #[must_use]
-    pub fn add_table(mut self, table: Arc<T>, metadata: T::Meta) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if adding the table would introduce semantic lookup
+    /// ambiguity.
+    pub fn add_table(mut self, table: Arc<T>, metadata: T::Meta) -> Result<Self, LookupError> {
+        self.ensure_table_lookup_invariants(table.as_ref())?;
         self.tables.push((table, metadata));
-        self
+        Ok(self)
     }
 
     /// Adds multiple tables with their metadata to the builder.
-    #[must_use]
-    pub fn add_tables(mut self, tables: impl IntoIterator<Item = (Arc<T>, T::Meta)>) -> Self {
-        self.tables.extend(tables);
-        self
+    ///
+    /// # Errors
+    ///
+    /// Returns an error as soon as one of the tables would introduce semantic
+    /// lookup ambiguity.
+    pub fn add_tables(
+        self,
+        tables: impl IntoIterator<Item = (Arc<T>, T::Meta)>,
+    ) -> Result<Self, LookupError> {
+        tables
+            .into_iter()
+            .try_fold(self, |builder, (table, metadata)| builder.add_table(table, metadata))
     }
 
     /// Adds a column with its metadata to the builder.

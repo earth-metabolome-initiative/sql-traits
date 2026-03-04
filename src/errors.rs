@@ -2,9 +2,43 @@
 
 use sqlparser::parser::ParserError;
 
+/// Errors produced by identifier-aware lookup and resolution APIs.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum LookupError {
+    /// The provided SQL object name is not supported by the resolver.
+    #[error("Invalid object name `{object_name}`: {reason}")]
+    InvalidObjectName {
+        /// Original object name as rendered by sqlparser.
+        object_name: String,
+        /// Human-readable reason describing why the object name is invalid.
+        reason: String,
+    },
+    /// Table resolution matched multiple candidates.
+    #[error("Ambiguous table lookup `{object_name}`; candidates: {candidates:?}")]
+    AmbiguousTableLookup {
+        /// Lookup object name as rendered by sqlparser.
+        object_name: String,
+        /// Deterministically ordered list of matching candidates.
+        candidates: Vec<String>,
+    },
+    /// Adding a table would create semantic lookup ambiguity.
+    #[error(
+        "Cannot add table `{table}` because it conflicts with existing table `{conflicting_table}`."
+    )]
+    TableLookupConflict {
+        /// Table being inserted.
+        table: String,
+        /// Existing conflicting table.
+        conflicting_table: String,
+    },
+}
+
 #[derive(Debug, thiserror::Error)]
 /// Defines the `Error` enum representing various error types
 pub enum Error {
+    /// Wrapper around identifier-aware lookup errors.
+    #[error(transparent)]
+    IdentifierLookupError(#[from] LookupError),
     #[error("Unknown column `{column_name}` in table `{table_name}`.")]
     /// A check constraint contained columns which do not exist in the table.
     UnknownColumnInCheckConstraint {
