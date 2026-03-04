@@ -3558,5 +3558,162 @@ mod tests {
             let table = db.table(None, "new_name").expect("Table should exist");
             assert_eq!(table.columns(&db).count(), 2);
         }
+
+        #[test]
+        fn test_rename_to_existing_semantic_name_fails() {
+            let sql = r"
+                CREATE TABLE foo (id INT);
+                CREATE TABLE bar (id INT);
+                RENAME TABLE bar TO foo;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(crate::errors::Error::IdentifierLookupError(
+                    crate::errors::LookupError::TableLookupConflict {
+                        table,
+                        conflicting_table
+                    }
+                )) if table == "foo" && conflicting_table == "foo"
+            ));
+        }
+
+        #[test]
+        fn test_rename_introducing_unqualified_public_ambiguity_fails() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE TABLE other (id INT);
+                RENAME TABLE other TO public.t;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(crate::errors::Error::IdentifierLookupError(
+                    crate::errors::LookupError::TableLookupConflict {
+                        table,
+                        conflicting_table
+                    }
+                )) if table == "public.t" && conflicting_table == "t"
+            ));
+        }
+
+        #[test]
+        fn test_rename_quoted_unquoted_equivalent_fails() {
+            let sql = r#"
+                CREATE TABLE foo (id INT);
+                CREATE TABLE bar (id INT);
+                RENAME TABLE bar TO "foo";
+            "#;
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(crate::errors::Error::IdentifierLookupError(
+                    crate::errors::LookupError::TableLookupConflict {
+                        table,
+                        conflicting_table
+                    }
+                )) if table == "\"foo\"" && conflicting_table == "foo"
+            ));
+        }
+
+        #[test]
+        fn test_alter_table_rename_table() {
+            let sql = r"
+                CREATE TABLE old_name (id INT PRIMARY KEY);
+                ALTER TABLE old_name RENAME TO new_name;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert!(db.table(None, "old_name").is_none());
+            let table = db.table(None, "new_name").expect("new_name should exist");
+            assert_eq!(table.table_name(), "new_name");
+        }
+
+        #[test]
+        fn test_alter_table_rename_nonexistent_table_fails() {
+            let sql = r"ALTER TABLE nonexistent RENAME TO other;";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, crate::errors::Error::RenameTableNotFound { table_name } if table_name == "nonexistent")
+            );
+        }
+
+        #[test]
+        fn test_alter_table_if_exists_rename_nonexistent_table_is_noop() {
+            let sql = r"
+                CREATE TABLE existing (id INT);
+                ALTER TABLE IF EXISTS nonexistent RENAME TO other;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert!(db.table(None, "existing").is_some());
+            assert!(db.table(None, "other").is_none());
+        }
+
+        #[test]
+        fn test_alter_table_rename_to_existing_semantic_name_fails() {
+            let sql = r"
+                CREATE TABLE foo (id INT);
+                CREATE TABLE bar (id INT);
+                ALTER TABLE bar RENAME TO foo;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(crate::errors::Error::IdentifierLookupError(
+                    crate::errors::LookupError::TableLookupConflict {
+                        table,
+                        conflicting_table
+                    }
+                )) if table == "foo" && conflicting_table == "foo"
+            ));
+        }
+
+        #[test]
+        fn test_alter_table_rename_introducing_unqualified_public_ambiguity_fails() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE TABLE other (id INT);
+                ALTER TABLE other RENAME TO public.t;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(crate::errors::Error::IdentifierLookupError(
+                    crate::errors::LookupError::TableLookupConflict {
+                        table,
+                        conflicting_table
+                    }
+                )) if table == "public.t" && conflicting_table == "t"
+            ));
+        }
+
+        #[test]
+        fn test_alter_table_rename_quoted_unquoted_equivalent_fails() {
+            let sql = r#"
+                CREATE TABLE foo (id INT);
+                CREATE TABLE bar (id INT);
+                ALTER TABLE bar RENAME TO "foo";
+            "#;
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(crate::errors::Error::IdentifierLookupError(
+                    crate::errors::LookupError::TableLookupConflict {
+                        table,
+                        conflicting_table
+                    }
+                )) if table == "\"foo\"" && conflicting_table == "foo"
+            ));
+        }
     }
 }

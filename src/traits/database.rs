@@ -392,6 +392,11 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// For SQL AST-aware lookup, use
+    /// [`ParserDB::resolve_table_object_name`](crate::structs::ParserDB::resolve_table_object_name)
+    /// or
+    /// [`ParserDB::resolve_table_object_name_with_implicit_public`](crate::structs::ParserDB::resolve_table_object_name_with_implicit_public).
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
 
     /// Returns the table ID for the given table object according to its
@@ -872,6 +877,9 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// For identifier-aware lookup from parsed SQL AST, use
+    /// [`ParserDB::resolve_schema_ident`](crate::structs::ParserDB::resolve_schema_ident).
     fn schema(&self, name: &str) -> Option<&Self::Schema> {
         self.schemas()
             .find(|s| stored_identifier_matches_lookup(s.name(), s.name_is_quoted(), name))
