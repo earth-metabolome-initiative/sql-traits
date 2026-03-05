@@ -12,9 +12,10 @@ use sqlparser::{
         AlterPolicy, AlterPolicyOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation,
         CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateFunctionBody, CreateIndex,
         CreatePolicy, CreateRole, CreateTable, CreateTrigger, DataType, ExactNumberInfo, Expr,
-        ForeignKeyConstraint, Grant, Ident, IndexColumn, ObjectName, ObjectNamePart,
-        OperateFunctionArg, OrderByExpr, OrderByOptions, RenameTableNameKind, SchemaName,
-        Statement, TableConstraint, TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
+        ForeignKeyConstraint, Grant, GranteeName, GranteesType, Ident, IndexColumn, ObjectName,
+        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, RenameTableNameKind,
+        SchemaName, Statement, TableConstraint, TimezoneInfo, UniqueConstraint, Value,
+        ValueWithSpan,
     },
     dialect::{Dialect, GenericDialect},
     parser::{Parser, ParserError},
@@ -59,29 +60,37 @@ impl ParserDBBuilder {
     /// - Check constraints (via their metadata)
     /// - Policies (via USING or WITH CHECK expressions)
     /// - Triggers (via EXECUTE FUNCTION)
-    fn is_function_used(&self, function_name: &str) -> bool {
+    fn is_function_used(&self, function_name: &str, function_name_quoted: bool) -> bool {
         use crate::traits::{FunctionLike, TriggerLike};
 
         // Check if any check constraint references the function
         for (_, metadata) in self.check_constraints() {
-            if metadata.functions().any(|f| f.name() == function_name) {
+            if metadata.functions().any(|f| {
+                identifiers_match(f.name(), f.name_is_quoted(), function_name, function_name_quoted)
+            }) {
                 return true;
             }
         }
 
         // Check if any policy references the function
         for (_, metadata) in self.policies() {
-            if metadata.using_functions().any(|f| f.name() == function_name) {
+            if metadata.using_functions().any(|f| {
+                identifiers_match(f.name(), f.name_is_quoted(), function_name, function_name_quoted)
+            }) {
                 return true;
             }
-            if metadata.check_functions().any(|f| f.name() == function_name) {
+            if metadata.check_functions().any(|f| {
+                identifiers_match(f.name(), f.name_is_quoted(), function_name, function_name_quoted)
+            }) {
                 return true;
             }
         }
 
         // Check if any trigger executes the function
         for (trigger, ()) in self.triggers() {
-            if trigger.function_name().is_some_and(|name| name == function_name) {
+            if trigger.function_name_ident().is_some_and(|(name, quoted)| {
+                identifiers_match(name, quoted, function_name, function_name_quoted)
+            }) {
                 return true;
             }
         }
@@ -94,29 +103,46 @@ impl ParserDBBuilder {
     ///
     /// Returns `true` if any other table has a foreign key pointing to this
     /// table.
-    fn is_table_referenced(&self, table_name: &str, table_name_quoted: bool) -> bool {
+    fn is_table_referenced(
+        &self,
+        table_name: &str,
+        table_name_quoted: bool,
+        schema_name: Option<&str>,
+        schema_quoted: bool,
+    ) -> bool {
         for (fk, ()) in self.foreign_keys() {
             // Check if this FK references the table being dropped
             // and is NOT from the same table (self-referential FKs are OK to drop)
-            let Some(referenced_table) = object_name_last_identifier(&fk.attribute().foreign_table)
-            else {
+            let Some(referenced_table) = resolve_table_object_name_in_iter(
+                self.tables().iter().map(|(table, _)| table.as_ref()),
+                &fk.attribute().foreign_table,
+            )
+            .ok()
+            .flatten() else {
                 continue;
             };
-            let Some(host_table) = object_name_last_identifier(&fk.table().name) else {
+            let Some(host_table) = resolve_table_object_name_in_iter(
+                self.tables().iter().map(|(table, _)| table.as_ref()),
+                &fk.table().name,
+            )
+            .ok()
+            .flatten() else {
                 continue;
             };
 
-            let referenced_matches = identifiers_match(
-                referenced_table.value.as_str(),
-                referenced_table.quote_style.is_some(),
+            let referenced_matches = table_matches_resolved_identity(
+                referenced_table,
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             );
-            let host_matches = identifiers_match(
-                host_table.value.as_str(),
-                host_table.quote_style.is_some(),
+            let host_matches = table_matches_resolved_identity(
+                host_table,
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             );
 
             if referenced_matches && !host_matches {
@@ -139,105 +165,112 @@ impl ParserDBBuilder {
     /// - All triggers on the table
     /// - All policies on the table
     /// - All grants on the table
-    fn remove_table(&mut self, table_name: &str, table_name_quoted: bool) {
-        use crate::traits::TableLike;
-
+    fn remove_table(
+        &mut self,
+        table_name: &str,
+        table_name_quoted: bool,
+        schema_name: Option<&str>,
+        schema_quoted: bool,
+    ) {
         // Remove the table
         self.tables_mut().retain(|(t, _)| {
-            !identifiers_match(
-                t.table_name(),
-                t.table_name_is_quoted(),
+            !table_matches_resolved_identity(
+                t,
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             )
         });
 
         // Remove columns belonging to this table
         self.columns_mut().retain(|(c, ())| {
-            !identifiers_match(
-                TableAttribute::table(c).table_name(),
-                TableAttribute::table(c).table_name_is_quoted(),
+            !table_matches_resolved_identity(
+                TableAttribute::table(c),
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             )
         });
 
         // Remove indices on this table
         self.indices_mut().retain(|(i, _)| {
-            !identifiers_match(
-                TableAttribute::table(i).table_name(),
-                TableAttribute::table(i).table_name_is_quoted(),
+            !table_matches_resolved_identity(
+                TableAttribute::table(i),
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             )
         });
 
         // Remove unique indices on this table
         self.unique_indices_mut().retain(|(u, _)| {
-            !identifiers_match(
-                TableAttribute::table(u).table_name(),
-                TableAttribute::table(u).table_name_is_quoted(),
+            !table_matches_resolved_identity(
+                TableAttribute::table(u),
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             )
         });
 
         // Remove foreign keys from this table
         self.foreign_keys_mut().retain(|(fk, ())| {
-            !identifiers_match(
-                TableAttribute::table(fk).table_name(),
-                TableAttribute::table(fk).table_name_is_quoted(),
+            !table_matches_resolved_identity(
+                TableAttribute::table(fk),
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             )
         });
 
         // Remove check constraints on this table
         self.check_constraints_mut().retain(|(c, _)| {
-            !identifiers_match(
-                TableAttribute::table(c).table_name(),
-                TableAttribute::table(c).table_name_is_quoted(),
+            !table_matches_resolved_identity(
+                TableAttribute::table(c),
                 table_name,
                 table_name_quoted,
+                schema_name,
+                schema_quoted,
             )
         });
 
         // Remove triggers on this table
         self.triggers_mut().retain(|(t, ())| {
-            object_name_last_identifier(&t.table_name).is_none_or(|ident| {
-                !identifiers_match(
-                    ident.value.as_str(),
-                    ident.quote_style.is_some(),
-                    table_name,
-                    table_name_quoted,
-                )
-            })
+            !object_name_matches_resolved_identity(
+                &t.table_name,
+                table_name,
+                table_name_quoted,
+                schema_name,
+                schema_quoted,
+            )
         });
 
         // Remove policies on this table
         self.policies_mut().retain(|(p, _)| {
-            object_name_last_identifier(&p.table_name).is_none_or(|ident| {
-                !identifiers_match(
-                    ident.value.as_str(),
-                    ident.quote_style.is_some(),
-                    table_name,
-                    table_name_quoted,
-                )
-            })
+            !object_name_matches_resolved_identity(
+                &p.table_name,
+                table_name,
+                table_name_quoted,
+                schema_name,
+                schema_quoted,
+            )
         });
 
         // Remove table grants for this table
         self.table_grants_mut().retain(|(g, ())| {
             use sqlparser::ast::GrantObjects;
             !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| {
-                object_name_last_identifier(t).is_some_and(|ident| {
-                    identifiers_match(
-                        ident.value.as_str(),
-                        ident.quote_style.is_some(),
-                        table_name,
-                        table_name_quoted,
-                    )
-                })
+                object_name_matches_resolved_identity(
+                    t,
+                    table_name,
+                    table_name_quoted,
+                    schema_name,
+                    schema_quoted,
+                )
             }))
         });
 
@@ -245,14 +278,13 @@ impl ParserDBBuilder {
         self.column_grants_mut().retain(|(g, ())| {
             use sqlparser::ast::GrantObjects;
             !matches!(&g.objects, Some(GrantObjects::Tables(tables)) if tables.iter().any(|t| {
-                object_name_last_identifier(t).is_some_and(|ident| {
-                    identifiers_match(
-                        ident.value.as_str(),
-                        ident.quote_style.is_some(),
-                        table_name,
-                        table_name_quoted,
-                    )
-                })
+                object_name_matches_resolved_identity(
+                    t,
+                    table_name,
+                    table_name_quoted,
+                    schema_name,
+                    schema_quoted,
+                )
             }))
         });
     }
@@ -260,14 +292,20 @@ impl ParserDBBuilder {
     /// Checks if a role with the given name is referenced by any grants.
     ///
     /// Returns `true` if the role is a grantee in any table or column grant.
-    fn is_role_referenced(&self, role_name: &str) -> bool {
-        use sqlparser::ast::GranteeName;
-
+    fn is_role_referenced(&self, role_name: &str, role_quoted: bool) -> bool {
         let check_grantees = |grantees: &[sqlparser::ast::Grantee]| -> bool {
             grantees.iter().any(|g| {
                 matches!(
                     &g.name,
-                    Some(GranteeName::ObjectName(name)) if last_str(name) == role_name
+                    Some(GranteeName::ObjectName(name))
+                        if object_name_last_identifier(name).is_some_and(|grantee_ident| {
+                            identifiers_match(
+                                grantee_ident.value.as_str(),
+                                grantee_ident.quote_style.is_some(),
+                                role_name,
+                                role_quoted,
+                            )
+                        })
                 )
             })
         };
@@ -340,6 +378,18 @@ fn object_name_last_identifier(object_name: &ObjectName) -> Option<&Ident> {
     match object_name.0.last() {
         Some(ObjectNamePart::Identifier(ident)) => Some(ident),
         _ => None,
+    }
+}
+
+fn object_name_last_part(object_name: &ObjectName) -> Option<(&str, bool)> {
+    match object_name.0.last() {
+        Some(ObjectNamePart::Identifier(ident)) => {
+            Some((ident.value.as_str(), ident.quote_style.is_some()))
+        }
+        Some(ObjectNamePart::Function(function_part)) => {
+            Some((function_part.name.value.as_str(), function_part.name.quote_style.is_some()))
+        }
+        None => None,
     }
 }
 
@@ -558,6 +608,116 @@ fn table_matches_resolved_identity(
         }
         _ => false,
     }
+}
+
+fn object_name_matches_resolved_identity(
+    object_name: &ObjectName,
+    table_name: &str,
+    table_name_quoted: bool,
+    schema_name: Option<&str>,
+    schema_quoted: bool,
+) -> bool {
+    let Ok((schema_ident, table_ident)) = object_name_identifiers(object_name) else {
+        return false;
+    };
+
+    if !identifiers_match(
+        table_ident.value.as_str(),
+        table_ident.quote_style.is_some(),
+        table_name,
+        table_name_quoted,
+    ) {
+        return false;
+    }
+
+    match (schema_ident, schema_name) {
+        (None, None) => true,
+        (Some(schema_ident), Some(schema_name)) => {
+            identifiers_match(
+                schema_ident.value.as_str(),
+                schema_ident.quote_style.is_some(),
+                schema_name,
+                schema_quoted,
+            )
+        }
+        _ => false,
+    }
+}
+
+fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
+    role.names.iter().any(|role_name| {
+        object_name_last_identifier(role_name).is_some_and(|role_ident| {
+            identifiers_match(
+                role_ident.value.as_str(),
+                role_ident.quote_style.is_some(),
+                lookup_ident.value.as_str(),
+                lookup_ident.quote_style.is_some(),
+            )
+        })
+    })
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RevokeStoreApplication {
+    matched_any: bool,
+    has_unsupported_column_scoped_revoke: bool,
+}
+
+fn apply_revoke_to_grant_store(
+    grants: &mut Vec<(Arc<Grant>, ())>,
+    revoke: &sqlparser::ast::Revoke,
+) -> RevokeStoreApplication {
+    let mut matched_any = false;
+    let mut has_unsupported_column_scoped_revoke = false;
+    let mut updated_grants = Vec::with_capacity(grants.len());
+    let original_grants = std::mem::take(grants);
+
+    for (grant, ()) in original_grants {
+        let (targeted_grantees, untouched_grantees) =
+            crate::impls::partition_grantees_for_revoke(&grant.grantees, &revoke.grantees);
+
+        if targeted_grantees.is_empty() {
+            updated_grants.push((grant, ()));
+            continue;
+        }
+
+        let mut targeted_grant = grant.as_ref().clone();
+        targeted_grant.grantees = targeted_grantees;
+
+        if crate::impls::has_unsupported_column_scoped_revoke(&targeted_grant, revoke) {
+            has_unsupported_column_scoped_revoke = true;
+            updated_grants.push((grant, ()));
+            continue;
+        }
+
+        let application = crate::impls::apply_revoke_to_grant(&targeted_grant, revoke);
+
+        if !application.matched {
+            updated_grants.push((grant, ()));
+            continue;
+        }
+        matched_any = true;
+
+        // Preserve the original storage entry when revoke matched but did not
+        // change the targeted grantee's privileges (e.g. ALL minus action).
+        if application.updated_grant.as_ref().is_some_and(|g| g == &targeted_grant) {
+            updated_grants.push((grant, ()));
+            continue;
+        }
+
+        if !untouched_grantees.is_empty() {
+            let mut untouched_grant = grant.as_ref().clone();
+            untouched_grant.grantees = untouched_grantees;
+            updated_grants.push((Arc::new(untouched_grant), ()));
+        }
+
+        if let Some(updated_grant) = application.updated_grant {
+            updated_grants.push((Arc::new(updated_grant), ()));
+        }
+    }
+
+    *grants = updated_grants;
+    RevokeStoreApplication { matched_any, has_unsupported_column_scoped_revoke }
 }
 
 /// A database schema parsed from SQL text.
@@ -1176,11 +1336,23 @@ impl ParserDB {
                 }
                 Statement::DropFunction(drop_function) => {
                     for func_desc in &drop_function.func_desc {
-                        let function_name = last_str(&func_desc.name);
+                        let Some((function_name, function_quoted)) =
+                            object_name_last_part(&func_desc.name)
+                        else {
+                            return Err(crate::errors::Error::DropFunctionNotFound {
+                                function_name: last_str(&func_desc.name).to_string(),
+                            });
+                        };
 
                         // Check if function exists
-                        let function_exists =
-                            builder.function_arc_vec().iter().any(|f| f.name() == function_name);
+                        let function_exists = builder.function_arc_vec().iter().any(|f| {
+                            identifiers_match(
+                                f.name(),
+                                f.name_is_quoted(),
+                                function_name,
+                                function_quoted,
+                            )
+                        });
 
                         if !function_exists {
                             if drop_function.if_exists {
@@ -1192,7 +1364,7 @@ impl ParserDB {
                         }
 
                         // Check for references in check constraints, policies, or triggers
-                        if builder.is_function_used(function_name) {
+                        if builder.is_function_used(function_name, function_quoted) {
                             return Err(crate::errors::Error::FunctionReferenced {
                                 function_name: function_name.to_string(),
                             });
@@ -1200,7 +1372,14 @@ impl ParserDB {
 
                         // Remove the function
                         let functions = builder.functions_mut();
-                        functions.retain(|(f, ())| f.name() != function_name);
+                        functions.retain(|(f, ())| {
+                            !identifiers_match(
+                                f.name(),
+                                f.name_is_quoted(),
+                                function_name,
+                                function_quoted,
+                            )
+                        });
                     }
                 }
                 Statement::Drop {
@@ -1226,11 +1405,17 @@ impl ParserDB {
                         };
                         let resolved_table_name = table.table_name().to_string();
                         let resolved_table_quoted = table.table_name_is_quoted();
+                        let resolved_schema_name = table.table_schema().map(str::to_string);
+                        let resolved_schema_quoted = table.table_schema_is_quoted();
 
                         // Check for references from other tables (unless CASCADE)
                         if !cascade
-                            && builder
-                                .is_table_referenced(&resolved_table_name, resolved_table_quoted)
+                            && builder.is_table_referenced(
+                                &resolved_table_name,
+                                resolved_table_quoted,
+                                resolved_schema_name.as_deref(),
+                                resolved_schema_quoted,
+                            )
                         {
                             return Err(crate::errors::Error::TableReferenced {
                                 table_name: resolved_table_name.clone(),
@@ -1238,7 +1423,12 @@ impl ParserDB {
                         }
 
                         // Remove the table and all associated objects
-                        builder.remove_table(&resolved_table_name, resolved_table_quoted);
+                        builder.remove_table(
+                            &resolved_table_name,
+                            resolved_table_quoted,
+                            resolved_schema_name.as_deref(),
+                            resolved_schema_quoted,
+                        );
                     }
                 }
                 Statement::Drop {
@@ -1293,9 +1483,22 @@ impl ParserDB {
                     }
 
                     if let Some(exec_body) = &create_trigger.exec_body {
-                        let function_name = last_str(&exec_body.func_desc.name);
-                        let function_exists =
-                            builder.function_arc_vec().iter().any(|f| f.name() == function_name);
+                        let Some((function_name, function_quoted)) =
+                            object_name_last_part(&exec_body.func_desc.name)
+                        else {
+                            return Err(crate::errors::Error::FunctionNotFoundForTrigger {
+                                function_name: last_str(&exec_body.func_desc.name).to_string(),
+                                trigger_name: last_str(&create_trigger.name).to_string(),
+                            });
+                        };
+                        let function_exists = builder.function_arc_vec().iter().any(|f| {
+                            identifiers_match(
+                                f.name(),
+                                f.name_is_quoted(),
+                                function_name,
+                                function_quoted,
+                            )
+                        });
 
                         if !function_exists {
                             return Err(crate::errors::Error::FunctionNotFoundForTrigger {
@@ -1354,12 +1557,17 @@ impl ParserDB {
                     // Note: DROP ROLE doesn't support CASCADE/RESTRICT in PostgreSQL syntax.
                     // We always use RESTRICT semantics (fail if role is referenced).
                     for name in names {
-                        let role_name = last_str(&name);
+                        let Some(role_ident) = object_name_last_identifier(&name) else {
+                            continue;
+                        };
+                        let role_name = role_ident.value.as_str();
+                        let role_quoted = role_ident.quote_style.is_some();
 
                         // Check if role exists
-                        let role_exists = builder.roles().iter().any(|(r, ())| {
-                            r.names.first().is_some_and(|n| last_str(n) == role_name)
-                        });
+                        let role_exists = builder
+                            .roles()
+                            .iter()
+                            .any(|(role, ())| role_matches_lookup_ident(role, role_ident));
 
                         if !role_exists {
                             if if_exists {
@@ -1371,16 +1579,16 @@ impl ParserDB {
                         }
 
                         // Check for references from grants
-                        if builder.is_role_referenced(role_name) {
+                        if builder.is_role_referenced(role_name, role_quoted) {
                             return Err(crate::errors::Error::RoleReferenced {
                                 role_name: role_name.to_string(),
                             });
                         }
 
                         // Remove the role
-                        builder.roles_mut().retain(|(r, ())| {
-                            r.names.first().is_none_or(|n| last_str(n) != role_name)
-                        });
+                        builder
+                            .roles_mut()
+                            .retain(|(r, ())| !role_matches_lookup_ident(r, role_ident));
                     }
                 }
                 Statement::Drop {
@@ -1433,12 +1641,28 @@ impl ParserDB {
                                     })
                                 })
                                 .map(|(t, _)| {
-                                    (t.table_name().to_string(), t.table_name_is_quoted())
+                                    (
+                                        t.table_name().to_string(),
+                                        t.table_name_is_quoted(),
+                                        t.table_schema().map(str::to_string),
+                                        t.table_schema_is_quoted(),
+                                    )
                                 })
                                 .collect();
 
-                            for (table_name, table_name_quoted) in tables_to_remove {
-                                builder.remove_table(&table_name, table_name_quoted);
+                            for (
+                                table_name,
+                                table_name_quoted,
+                                table_schema_name,
+                                table_schema_quoted,
+                            ) in tables_to_remove
+                            {
+                                builder.remove_table(
+                                    &table_name,
+                                    table_name_quoted,
+                                    table_schema_name.as_deref(),
+                                    table_schema_quoted,
+                                );
                             }
                         }
 
@@ -1713,25 +1937,32 @@ impl ParserDB {
                 Statement::Grant(grant) => {
                     // Validate grantees exist (closed world assumption)
                     for grantee in &grant.grantees {
-                        let grantee_name = match &grantee.name {
-                            Some(sqlparser::ast::GranteeName::ObjectName(name)) => {
-                                Some(last_str(name))
-                            }
-                            _ => None,
+                        if grantee.grantee_type == GranteesType::Public {
+                            continue;
+                        }
+
+                        let Some(GranteeName::ObjectName(grantee_name)) = &grantee.name else {
+                            continue;
+                        };
+                        let Some(grantee_ident) = object_name_last_identifier(grantee_name) else {
+                            continue;
                         };
 
-                        if let Some(name) = grantee_name {
-                            // Skip PUBLIC pseudo-role
-                            if name.to_uppercase() != "PUBLIC" {
-                                let role_exists = builder.roles().iter().any(|(r, ())| {
-                                    r.names.first().is_some_and(|n| last_str(n) == name)
-                                });
-                                if !role_exists {
-                                    return Err(crate::errors::Error::RoleNotFoundForGrant {
-                                        role_name: name.to_string(),
-                                    });
-                                }
-                            }
+                        // Skip PUBLIC pseudo-role spelled as identifier.
+                        if grantee_ident.quote_style.is_none()
+                            && grantee_ident.value.eq_ignore_ascii_case("PUBLIC")
+                        {
+                            continue;
+                        }
+
+                        let role_exists = builder
+                            .roles()
+                            .iter()
+                            .any(|(role, ())| role_matches_lookup_ident(role, grantee_ident));
+                        if !role_exists {
+                            return Err(crate::errors::Error::RoleNotFoundForGrant {
+                                role_name: grantee_ident.value.clone(),
+                            });
                         }
                     }
 
@@ -1753,20 +1984,27 @@ impl ParserDB {
                     builder = builder.add_column_grant(Arc::new(grant), ());
                 }
                 Statement::Revoke(revoke) => {
-                    // Find and remove matching grants from both table and column grants
-                    let table_grants = builder.table_grants_mut();
-                    let original_len = table_grants.len();
-                    table_grants.retain(|(grant, ())| {
-                        !crate::impls::grant_matches_revoke(grant.as_ref(), &revoke)
-                    });
-                    let table_grants_removed = table_grants.len() < original_len;
+                    // Apply revoke semantics to both canonical grant stores.
+                    let table_application =
+                        apply_revoke_to_grant_store(builder.table_grants_mut(), &revoke);
+                    let column_application =
+                        apply_revoke_to_grant_store(builder.column_grants_mut(), &revoke);
 
-                    let column_grants = builder.column_grants_mut();
-                    column_grants.retain(|(grant, ())| {
-                        !crate::impls::grant_matches_revoke(grant.as_ref(), &revoke)
-                    });
+                    // We fail fast on revoke shapes that this model cannot
+                    // represent (for example column-subset revoke from a
+                    // table-wide action grant).
+                    if table_application.has_unsupported_column_scoped_revoke
+                        || column_application.has_unsupported_column_scoped_revoke
+                    {
+                        return Err(crate::errors::Error::UnsupportedRevoke {
+                            statement: revoke.to_string(),
+                            reason: "column-scoped REVOKE against a table-wide action grant is \
+                                     not representable in this model"
+                                .to_string(),
+                        });
+                    }
 
-                    if !table_grants_removed {
+                    if !table_application.matched_any && !column_application.matched_any {
                         return Err(crate::errors::Error::RevokeNotFound(format!(
                             "No matching grant found for REVOKE: {revoke}"
                         )));
@@ -2574,6 +2812,32 @@ mod tests {
                 Err(Error::FunctionReferenced { function_name }) if function_name == "is_valid"
             ));
         }
+
+        #[test]
+        fn test_drop_quoted_function_succeeds() {
+            let sql = r#"
+                CREATE FUNCTION "FooBar"() RETURNS INT AS 'SELECT 1;';
+                DROP FUNCTION "FooBar";
+            "#;
+            let db = ParserDB::parse::<GenericDialect>(sql)
+                .expect("Quoted DROP FUNCTION should match quoted CREATE FUNCTION");
+
+            assert!(db.function("\"FooBar\"").is_none());
+        }
+
+        #[test]
+        fn test_drop_unquoted_does_not_match_quoted_function() {
+            let sql = r#"
+                CREATE FUNCTION "FooBar"() RETURNS INT AS 'SELECT 1;';
+                DROP FUNCTION foobar;
+            "#;
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::DropFunctionNotFound { function_name }) if function_name == "foobar"
+            ));
+        }
     }
 
     mod drop_table_errors {
@@ -2677,6 +2941,46 @@ mod tests {
                 Err(Error::TableReferenced { table_name }) if table_name == "parent"
             ));
         }
+
+        #[test]
+        fn test_drop_table_with_same_name_in_other_schema_only_removes_target() {
+            let sql = r"
+                CREATE SCHEMA s1;
+                CREATE SCHEMA s2;
+                CREATE TABLE s1.t (id INT PRIMARY KEY);
+                CREATE TABLE s2.t (id INT PRIMARY KEY);
+                CREATE INDEX idx_s2_t_id ON s2.t (id);
+                DROP TABLE s1.t;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert!(db.table(Some("s1"), "t").is_none());
+            let s2_t = db.table(Some("s2"), "t").expect("s2.t should still exist");
+            assert_eq!(
+                s2_t.indices(&db).count(),
+                1,
+                "Dropping s1.t must not remove indices attached to s2.t",
+            );
+        }
+
+        #[test]
+        fn test_drop_table_reference_check_is_schema_aware() {
+            let sql = r"
+                CREATE SCHEMA s1;
+                CREATE SCHEMA s2;
+                CREATE TABLE s1.parent (id INT PRIMARY KEY);
+                CREATE TABLE s1.child (id INT, parent_id INT REFERENCES s1.parent(id));
+                CREATE TABLE s2.parent (id INT PRIMARY KEY);
+                DROP TABLE s2.parent;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect(
+                "References to s1.parent must not block dropping same-name table s2.parent",
+            );
+
+            assert!(db.table(Some("s2"), "parent").is_none());
+            assert!(db.table(Some("s1"), "parent").is_some());
+            assert!(db.table(Some("s1"), "child").is_some());
+        }
     }
 
     mod is_function_used_tests {
@@ -2764,6 +3068,110 @@ mod tests {
             let drop_sql = format!("{sql}\nDROP FUNCTION trigger_fn;");
             let result = ParserDB::parse::<GenericDialect>(&drop_sql);
             assert!(matches!(result, Err(Error::FunctionReferenced { .. })));
+        }
+
+        #[test]
+        fn test_function_used_by_schema_qualified_call() {
+            let sql = r"
+                CREATE SCHEMA s;
+                CREATE FUNCTION check_access() RETURNS BOOLEAN AS 'SELECT true;';
+                CREATE TABLE t (id INT CHECK (s.check_access()));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            assert!(db.function("check_access").is_some());
+
+            let drop_sql = format!("{sql}\nDROP FUNCTION check_access;");
+            let result = ParserDB::parse::<GenericDialect>(&drop_sql);
+            assert!(matches!(result, Err(Error::FunctionReferenced { .. })));
+        }
+
+        #[test]
+        fn test_quoted_function_used_by_check_constraint() {
+            let sql = r#"
+                CREATE FUNCTION "FooBar"(x INT) RETURNS BOOLEAN AS 'SELECT x > 0;';
+                CREATE TABLE t (id INT CHECK ("FooBar"(id)));
+                DROP FUNCTION "FooBar";
+            "#;
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::FunctionReferenced { function_name }) if function_name == "FooBar"
+            ));
+        }
+
+        #[test]
+        fn test_quoted_function_used_by_policy() {
+            let sql = r#"
+                CREATE FUNCTION "FooBar"() RETURNS BOOLEAN AS 'SELECT true;';
+                CREATE TABLE t (id INT);
+                CREATE POLICY p ON t USING ("FooBar"());
+                DROP FUNCTION "FooBar";
+            "#;
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::FunctionReferenced { function_name }) if function_name == "FooBar"
+            ));
+        }
+
+        #[test]
+        fn test_quoted_function_used_by_trigger() {
+            let sql = r#"
+                CREATE TABLE t (id INT);
+                CREATE FUNCTION "FooBar"() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+                CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION "FooBar"();
+                DROP FUNCTION "FooBar";
+            "#;
+            let result = ParserDB::parse::<GenericDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::FunctionReferenced { function_name }) if function_name == "FooBar"
+            ));
+        }
+    }
+
+    mod function_lookup_identifier_semantics {
+        use super::*;
+        use crate::traits::DatabaseLike;
+
+        #[test]
+        fn quoted_function_lookup_requires_exact_quoted_name() {
+            let sql = r#"
+                CREATE FUNCTION "FooBar"() RETURNS INT AS 'SELECT 1;';
+            "#;
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            assert!(db.function("\"FooBar\"").is_some());
+            assert!(db.function("foobar").is_none());
+            assert!(db.function("\"foobar\"").is_none());
+        }
+
+        #[test]
+        fn unquoted_function_lookup_uses_identifier_folding() {
+            let sql = r"
+                CREATE FUNCTION foobar() RETURNS INT AS 'SELECT 1;';
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            assert!(db.function("foobar").is_some());
+            assert!(db.function("FOOBAR").is_some());
+            assert!(db.function("\"FOOBAR\"").is_none());
+        }
+
+        #[test]
+        fn database_like_function_lookup_is_identifier_aware() {
+            let sql = r#"
+                CREATE FUNCTION "FooBar"() RETURNS INT AS 'SELECT 1;';
+            "#;
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
+
+            assert!(<ParserDB as DatabaseLike>::function(&db, "\"FooBar\"").is_some());
+            assert!(<ParserDB as DatabaseLike>::function(&db, "foobar").is_none());
+            assert!(<ParserDB as DatabaseLike>::function(&db, "\"foobar\"").is_none());
         }
     }
 
@@ -3457,6 +3865,286 @@ mod tests {
 
             // Role should exist again
             assert!(db.role("my_role").is_some());
+        }
+    }
+
+    mod grant_revoke_semantics {
+        use sqlparser::{ast::Action, dialect::PostgreSqlDialect};
+
+        use super::*;
+        use crate::traits::{GrantLike, TableLike};
+
+        #[test]
+        fn test_revoke_partial_privilege_preserves_other_actions() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE my_role;
+                GRANT SELECT, INSERT ON t TO my_role;
+                REVOKE SELECT ON t FROM my_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let grants: Vec<_> = db.table_grants().collect();
+            assert_eq!(grants.len(), 1);
+            let grant = grants[0];
+            assert!(!grant.is_all_privileges());
+
+            let remaining_privileges: Vec<_> = grant.privileges(&db).collect();
+            assert_eq!(remaining_privileges.len(), 1);
+            assert!(matches!(remaining_privileges[0], Action::Insert { .. }));
+
+            let table = db.table(None, "t").expect("Table should exist");
+            let role = db.role("my_role").expect("Role should exist");
+            assert!(!table.can_select(role, &db), "SELECT should be revoked while INSERT remains");
+            assert!(table.can_insert(role, &db));
+        }
+
+        #[test]
+        fn test_revoke_column_scoped_against_table_wide_action_is_unsupported() {
+            let sql = r"
+                CREATE TABLE t (id INT, name TEXT);
+                CREATE ROLE my_role;
+                GRANT SELECT ON t TO my_role;
+                REVOKE SELECT (id) ON t FROM my_role;
+            ";
+            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::UnsupportedRevoke { reason, .. })
+                    if reason.contains("column-scoped REVOKE against a table-wide action grant")
+            ));
+        }
+
+        #[test]
+        fn test_revoke_column_scoped_from_column_scoped_grant_keeps_remaining_columns() {
+            let sql = r"
+                CREATE TABLE t (id INT, name TEXT);
+                CREATE ROLE my_role;
+                GRANT SELECT (id, name) ON t TO my_role;
+                REVOKE SELECT (id) ON t FROM my_role;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("Failed to parse SQL");
+
+            let grant = db.table_grants().next().expect("Expected a remaining grant");
+            let remaining_privileges: Vec<_> = grant.privileges(&db).collect();
+
+            assert_eq!(remaining_privileges.len(), 1);
+            match remaining_privileges[0] {
+                Action::Select { columns: Some(columns) } => {
+                    assert_eq!(columns.len(), 1);
+                    assert_eq!(columns[0].value, "name");
+                }
+                other => panic!("Expected SELECT with one remaining column, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn test_revoke_from_first_grantee_keeps_second_grantee_privileges() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE a;
+                CREATE ROLE b;
+                GRANT SELECT ON t TO a, b;
+                REVOKE SELECT ON t FROM a;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let table = db.table(None, "t").expect("Table should exist");
+            let role_a = db.role("a").expect("Role a should exist");
+            let role_b = db.role("b").expect("Role b should exist");
+
+            assert!(!table.can_select(role_a, &db), "SELECT should be revoked for a");
+            assert!(table.can_select(role_b, &db), "SELECT should remain for b");
+        }
+
+        #[test]
+        fn test_revoke_from_second_grantee_keeps_first_grantee_privileges() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE a;
+                CREATE ROLE b;
+                GRANT SELECT ON t TO a, b;
+                REVOKE SELECT ON t FROM b;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let table = db.table(None, "t").expect("Table should exist");
+            let role_a = db.role("a").expect("Role a should exist");
+            let role_b = db.role("b").expect("Role b should exist");
+
+            assert!(table.can_select(role_a, &db), "SELECT should remain for a");
+            assert!(!table.can_select(role_b, &db), "SELECT should be revoked for b");
+        }
+
+        #[test]
+        fn test_revoke_partial_privilege_from_one_grantee_preserves_other_grantee_actions() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE a;
+                CREATE ROLE b;
+                GRANT SELECT, INSERT ON t TO a, b;
+                REVOKE SELECT ON t FROM a;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let table = db.table(None, "t").expect("Table should exist");
+            let role_a = db.role("a").expect("Role a should exist");
+            let role_b = db.role("b").expect("Role b should exist");
+
+            assert_eq!(db.table_grants().count(), 2);
+            assert!(!table.can_select(role_a, &db), "SELECT should be revoked for a");
+            assert!(table.can_insert(role_a, &db), "INSERT should remain for a");
+            assert!(table.can_select(role_b, &db), "SELECT should remain for b");
+            assert!(table.can_insert(role_b, &db), "INSERT should remain for b");
+        }
+
+        #[test]
+        fn test_revoke_all_from_one_grantee_preserves_other_grantee_actions() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE a;
+                CREATE ROLE b;
+                GRANT SELECT, INSERT ON t TO a, b;
+                REVOKE ALL ON t FROM a;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let table = db.table(None, "t").expect("Table should exist");
+            let role_a = db.role("a").expect("Role a should exist");
+            let role_b = db.role("b").expect("Role b should exist");
+
+            assert!(!table.can_select(role_a, &db), "SELECT should be revoked for a");
+            assert!(!table.can_insert(role_a, &db), "INSERT should be revoked for a");
+            assert!(table.can_select(role_b, &db), "SELECT should remain for b");
+            assert!(table.can_insert(role_b, &db), "INSERT should remain for b");
+        }
+
+        #[test]
+        fn test_revoke_all_removes_matching_grants() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE my_role;
+                GRANT SELECT, INSERT ON t TO my_role;
+                REVOKE ALL ON t FROM my_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert_eq!(db.table_grants().count(), 0);
+            assert_eq!(db.column_grants().count(), 0);
+        }
+
+        #[test]
+        fn test_public_grant_applies_to_non_public_role() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE app_user;
+                GRANT SELECT ON t TO PUBLIC;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let table = db.table(None, "t").expect("Table should exist");
+            let app_user = db.role("app_user").expect("Role should exist");
+            assert!(table.can_select(app_user, &db));
+        }
+
+        #[test]
+        fn test_schema_qualified_grant_applies_only_to_target_table() {
+            let sql = r"
+                CREATE SCHEMA s1;
+                CREATE SCHEMA s2;
+                CREATE TABLE s1.t (id INT);
+                CREATE TABLE s2.t (id INT);
+                CREATE ROLE app_role;
+                GRANT SELECT ON s1.t TO app_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let role = db.role("app_role").expect("Role should exist");
+            let s1_t = db.table(Some("s1"), "t").expect("s1.t should exist");
+            let s2_t = db.table(Some("s2"), "t").expect("s2.t should exist");
+
+            assert!(s1_t.can_select(role, &db));
+            assert!(!s2_t.can_select(role, &db));
+        }
+
+        #[test]
+        fn test_revoke_object_matching_is_case_insensitive_for_unquoted_identifiers() {
+            let sql = r"
+                CREATE TABLE T (id INT);
+                CREATE ROLE my_role;
+                GRANT SELECT ON T TO my_role;
+                REVOKE SELECT ON t FROM my_role;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("Failed to parse SQL");
+
+            let table = db.table(None, "t").expect("Table should exist");
+            let role = db.role("my_role").expect("Role should exist");
+            assert!(!table.can_select(role, &db));
+            assert_eq!(db.table_grants().count(), 0);
+        }
+
+        #[test]
+        fn test_revoke_object_matching_preserves_quoted_identifier_semantics() {
+            let sql = r#"
+                CREATE TABLE T (id INT);
+                CREATE ROLE my_role;
+                GRANT SELECT ON T TO my_role;
+                REVOKE SELECT ON "T" FROM my_role;
+            "#;
+            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+
+            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+        }
+
+        #[test]
+        fn test_revoke_object_matching_does_not_match_quoted_grant_with_unquoted_lookup() {
+            let sql = r#"
+                CREATE TABLE "T" (id INT);
+                CREATE ROLE my_role;
+                GRANT SELECT ON "T" TO my_role;
+                REVOKE SELECT ON t FROM my_role;
+            "#;
+            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+
+            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+        }
+
+        #[test]
+        fn test_revoke_function_object_matching_is_case_insensitive_for_unquoted_identifiers() {
+            let sql = r"
+                CREATE ROLE my_role;
+                GRANT EXECUTE ON FUNCTION F() TO my_role;
+                REVOKE EXECUTE ON FUNCTION f() FROM my_role;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("Failed to parse SQL");
+
+            assert_eq!(db.table_grants().count(), 0);
+            assert_eq!(db.column_grants().count(), 0);
+        }
+
+        #[test]
+        fn test_revoke_function_object_matching_preserves_quoted_identifier_semantics() {
+            let sql = r#"
+                CREATE ROLE my_role;
+                GRANT EXECUTE ON FUNCTION F() TO my_role;
+                REVOKE EXECUTE ON FUNCTION "F"() FROM my_role;
+            "#;
+            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+
+            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+        }
+
+        #[test]
+        fn test_revoke_function_object_matching_does_not_match_quoted_grant_with_unquoted_lookup() {
+            let sql = r#"
+                CREATE ROLE my_role;
+                GRANT EXECUTE ON FUNCTION "F"() TO my_role;
+                REVOKE EXECUTE ON FUNCTION f() FROM my_role;
+            "#;
+            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+
+            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
         }
     }
 }

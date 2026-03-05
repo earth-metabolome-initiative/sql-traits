@@ -135,6 +135,15 @@ pub enum Error {
     /// statement.
     #[error("Revoke not found: {0}")]
     RevokeNotFound(String),
+    /// Error indicating that a REVOKE statement uses semantics we cannot
+    /// represent in the current grant model.
+    #[error("Unsupported revoke statement `{statement}`: {reason}")]
+    UnsupportedRevoke {
+        /// The original REVOKE statement rendered by sqlparser.
+        statement: String,
+        /// Human-readable explanation of the unsupported semantics.
+        reason: String,
+    },
     #[error("Role `{role_name}` not found for grant.")]
     /// Error indicating that a grant references a role that does not exist.
     RoleNotFoundForGrant {

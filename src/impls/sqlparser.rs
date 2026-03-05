@@ -14,4 +14,5 @@ mod grant;
 mod schema;
 mod unique_constraint;
 
-pub use grant::grant_matches_revoke;
+pub use grant::apply_revoke_to_grant;
+pub(crate) use grant::{has_unsupported_column_scoped_revoke, partition_grantees_for_revoke};
