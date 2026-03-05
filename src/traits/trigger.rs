@@ -360,6 +360,15 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// triggers with inline statements).
     fn function_name(&self) -> Option<&str>;
 
+    /// Returns the trigger function identifier and its quotedness.
+    ///
+    /// The default implementation falls back to [`Self::function_name`]
+    /// and treats it as unquoted.
+    #[inline]
+    fn function_name_ident(&self) -> Option<(&str, bool)> {
+        self.function_name().map(|name| (name, false))
+    }
+
     /// Returns whether the trigger is a maintenance trigger.
     ///
     /// A maintenance trigger is defined as a trigger that solely consists of
@@ -524,6 +533,10 @@ impl<T: TriggerLike> TriggerLike for &T {
 
     fn function_name(&self) -> Option<&str> {
         (*self).function_name()
+    }
+
+    fn function_name_ident(&self) -> Option<(&str, bool)> {
+        (*self).function_name_ident()
     }
 
     fn is_maintenance_trigger<'db>(&'db self, database: &'db Self::DB) -> bool {

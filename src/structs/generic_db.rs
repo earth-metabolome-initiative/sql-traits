@@ -338,10 +338,10 @@ where
     /// ```
     #[must_use]
     pub fn function(&self, name: &str) -> Option<&Func> {
-        self.functions
-            .binary_search_by(|(f, _)| f.name().cmp(name))
-            .ok()
-            .map(|index| self.functions[index].0.as_ref())
+        self.functions.iter().find_map(|(function, _)| {
+            stored_identifier_matches_lookup(function.name(), function.name_is_quoted(), name)
+                .then_some(function.as_ref())
+        })
     }
 
     /// Returns a reference to the metadata of the specified function, if it
@@ -366,9 +366,8 @@ where
     /// ```
     pub fn function_metadata(&self, function: &Func) -> Option<&Func::Meta> {
         self.functions
-            .binary_search_by(|(f, _)| f.name().cmp(function.name()))
-            .ok()
-            .map(|index| &self.functions[index].1)
+            .iter()
+            .find_map(|(candidate, metadata)| (candidate.as_ref() == function).then_some(metadata))
     }
 
     /// Returns a reference of the trigger by name.

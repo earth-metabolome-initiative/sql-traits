@@ -722,7 +722,13 @@ pub trait CheckConstraintLike:
         database: &'db Self::DB,
         name: &str,
     ) -> Option<&'db <Self::DB as DatabaseLike>::Function> {
-        self.functions(database).find(|f| f.name() == name)
+        self.functions(database).find(|f| {
+            crate::utils::identifier_resolution::stored_identifier_matches_lookup(
+                f.name(),
+                f.name_is_quoted(),
+                name,
+            )
+        })
     }
 
     /// Returns whether the check constraint involves any functions.
@@ -1257,5 +1263,41 @@ mod tests {
         assert!(functions.contains(&"gen_random_uuid".to_string()));
         assert!(functions.contains(&"uuidv4".to_string()));
         assert!(functions.contains(&"uuidv7".to_string()));
+    }
+
+    #[test]
+    fn test_check_constraint_function_lookup_respects_quoted_identifiers() {
+        let sql = r#"
+            CREATE FUNCTION "FooBar"(x INT) RETURNS BOOLEAN AS 'SELECT x > 0;';
+            CREATE TABLE t (id INT CHECK ("FooBar"(id)));
+        "#;
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "t").expect("Table 't' not found");
+        let constraint = table
+            .check_constraints(&db)
+            .next()
+            .expect("Expected one check constraint on table 't'");
+
+        assert!(constraint.function(&db, "\"FooBar\"").is_some());
+        assert!(constraint.function(&db, "foobar").is_none());
+        assert!(constraint.function(&db, "\"foobar\"").is_none());
+    }
+
+    #[test]
+    fn test_check_constraint_function_lookup_respects_unquoted_folding() {
+        let sql = r"
+            CREATE FUNCTION foobar(x INT) RETURNS BOOLEAN AS 'SELECT x > 0;';
+            CREATE TABLE t (id INT CHECK (foobar(id)));
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "t").expect("Table 't' not found");
+        let constraint = table
+            .check_constraints(&db)
+            .next()
+            .expect("Expected one check constraint on table 't'");
+
+        assert!(constraint.function(&db, "foobar").is_some());
+        assert!(constraint.function(&db, "FOOBAR").is_some());
+        assert!(constraint.function(&db, "\"FOOBAR\"").is_none());
     }
 }

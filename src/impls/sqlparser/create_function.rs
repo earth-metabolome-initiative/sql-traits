@@ -1,7 +1,9 @@
 //! Implementation of the `FunctionLike` trait for sqlparser's `CreateFunction`
 //! type.
 
-use sqlparser::ast::{CreateFunction, CreateFunctionBody, Expr, Value, ValueWithSpan};
+use sqlparser::ast::{
+    CreateFunction, CreateFunctionBody, Expr, ObjectNamePart, Value, ValueWithSpan,
+};
 
 use crate::{
     structs::ParserDB,
@@ -19,6 +21,17 @@ impl FunctionLike for CreateFunction {
     #[inline]
     fn name(&self) -> &str {
         last_str(&self.name)
+    }
+
+    #[inline]
+    fn name_is_quoted(&self) -> bool {
+        match self.name.0.last() {
+            Some(ObjectNamePart::Identifier(ident)) => ident.quote_style.is_some(),
+            Some(ObjectNamePart::Function(function_part)) => {
+                function_part.name.quote_style.is_some()
+            }
+            None => false,
+        }
     }
 
     #[inline]

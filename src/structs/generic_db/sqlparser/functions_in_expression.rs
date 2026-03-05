@@ -2,9 +2,37 @@
 
 use std::sync::Arc;
 
-use sqlparser::ast::Expr;
+use sqlparser::ast::{Expr, ObjectName, ObjectNamePart};
 
-use crate::traits::{DatabaseLike, function_like::FunctionLike};
+use crate::{
+    traits::{DatabaseLike, function_like::FunctionLike},
+    utils::identifier_resolution::identifiers_match,
+};
+
+fn function_matches_object_name<DB: DatabaseLike>(
+    function: &DB::Function,
+    object_name: &ObjectName,
+) -> bool {
+    match object_name.0.last() {
+        Some(ObjectNamePart::Identifier(ident)) => {
+            identifiers_match(
+                function.name(),
+                function.name_is_quoted(),
+                ident.value.as_str(),
+                ident.quote_style.is_some(),
+            )
+        }
+        Some(ObjectNamePart::Function(function_part)) => {
+            identifiers_match(
+                function.name(),
+                function.name_is_quoted(),
+                function_part.name.value.as_str(),
+                function_part.name.quote_style.is_some(),
+            )
+        }
+        None => false,
+    }
+}
 
 pub(super) fn functions_in_expression<DB: DatabaseLike>(
     expr: &Expr,
@@ -14,11 +42,13 @@ pub(super) fn functions_in_expression<DB: DatabaseLike>(
 
     match expr {
         Expr::Function(func) => {
-            // Extract the function name from the ObjectName
-            let function_name = func.name.to_string();
-
-            // Find matching functions by name
-            result.extend(functions.iter().filter(|f| f.name() == function_name.as_str()).cloned());
+            // Match by function identifier, ignoring optional schema qualifiers.
+            result.extend(
+                functions
+                    .iter()
+                    .filter(|f| function_matches_object_name::<DB>(f.as_ref(), &func.name))
+                    .cloned(),
+            );
 
             // Recursively check function arguments for nested function calls
             if let sqlparser::ast::FunctionArguments::List(args) = &func.args {

@@ -32,6 +32,15 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// ```
     fn name(&self) -> &str;
 
+    /// Returns whether the function name was quoted in SQL.
+    ///
+    /// Implementations that do not preserve quotedness can rely on the
+    /// default `false`.
+    #[inline]
+    fn name_is_quoted(&self) -> bool {
+        false
+    }
+
     /// Returns the argument type names (if any) of the function as strings.
     ///
     /// # Example

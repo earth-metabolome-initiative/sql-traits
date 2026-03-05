@@ -1,12 +1,12 @@
 //! Implementation of the `TriggerLike` trait for sqlparser's `CreateTrigger`
 //! type.
 
-use sqlparser::ast::CreateTrigger;
+use sqlparser::ast::{CreateTrigger, ObjectNamePart};
 
 use crate::{
     structs::ParserDB,
-    traits::{DatabaseLike, Metadata, TriggerLike},
-    utils::last_str,
+    traits::{DatabaseLike, FunctionLike, Metadata, TriggerLike},
+    utils::{identifier_resolution::identifiers_match, last_str},
 };
 
 impl Metadata for CreateTrigger {
@@ -52,11 +52,33 @@ impl TriggerLike for CreateTrigger {
     where
         Self: 'db,
     {
-        self.exec_body.as_ref().and_then(|body| database.function(last_str(&body.func_desc.name)))
+        let (function_name, function_quoted) = self.function_name_ident()?;
+        database.functions().find(|function| {
+            identifiers_match(
+                function.name(),
+                function.name_is_quoted(),
+                function_name,
+                function_quoted,
+            )
+        })
     }
 
     #[inline]
     fn function_name(&self) -> Option<&str> {
-        self.exec_body.as_ref().map(|body| last_str(&body.func_desc.name))
+        self.function_name_ident().map(|(name, _)| name)
+    }
+
+    #[inline]
+    fn function_name_ident(&self) -> Option<(&str, bool)> {
+        let body = self.exec_body.as_ref()?;
+        match body.func_desc.name.0.last() {
+            Some(ObjectNamePart::Identifier(ident)) => {
+                Some((ident.value.as_str(), ident.quote_style.is_some()))
+            }
+            Some(ObjectNamePart::Function(function_part)) => {
+                Some((function_part.name.value.as_str(), function_part.name.quote_style.is_some()))
+            }
+            None => None,
+        }
     }
 }

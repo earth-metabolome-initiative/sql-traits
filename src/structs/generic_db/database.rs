@@ -104,10 +104,10 @@ where
     }
 
     fn function(&self, name: &str) -> Option<&Self::Function> {
-        self.functions
-            .binary_search_by(|(f, _)| f.name().cmp(name))
-            .ok()
-            .map(|index| self.functions[index].0.as_ref())
+        self.functions.iter().find_map(|(function, _)| {
+            stored_identifier_matches_lookup(function.name(), function.name_is_quoted(), name)
+                .then_some(function.as_ref())
+        })
     }
 
     fn policies(&self) -> impl Iterator<Item = &Self::Policy> {
