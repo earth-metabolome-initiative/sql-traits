@@ -1,9 +1,13 @@
 //! Identifier resolution helpers with PostgreSQL matching semantics.
 //!
 //! PostgreSQL folds unquoted identifiers to lowercase and treats quoted
-//! identifiers as exact/case-sensitive.
+//! identifiers as exact/case-sensitive. Identifiers are additionally
+//! Unicode-NFC-normalized and whitespace-trimmed per
+//! FINGERPRINT_SPEC §7.1.
 
 use std::borrow::Cow;
+
+use unicode_normalization::UnicodeNormalization;
 
 /// Parsed lookup identifier from a textual query.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,18 +76,93 @@ pub fn stored_identifier_matches_lookup(
     identifiers_match(stored_value, stored_quoted, lookup_ident.value(), lookup_ident.is_quoted())
 }
 
-/// Normalizes an identifier for comparison following PostgreSQL rules.
+/// Normalizes an identifier for comparison and fingerprint encoding.
 ///
-/// Quoted identifiers are returned as-is (case-sensitive). Unquoted
-/// identifiers are folded to lowercase.
+/// Applies the FINGERPRINT_SPEC §7.1 / audit §5 rules:
+/// 1. Trim surrounding ASCII whitespace.
+/// 2. Apply Unicode NFC normalization so that byte-distinct but
+///    canonically-equal identifiers produce the same normalized form (e.g.
+///    precomposed `é` vs `e` + combining acute).
+/// 3. ASCII-lowercase unquoted identifiers (matching PostgreSQL folding);
+///    quoted identifiers retain their case post-NFC.
 #[must_use]
 pub fn normalize_identifier(value: &str, quoted: bool) -> Cow<'_, str> {
-    if quoted { Cow::Borrowed(value) } else { Cow::Owned(value.to_ascii_lowercase()) }
+    let trimmed = value.trim();
+    let needs_nfc = !trimmed.is_ascii();
+    let after_nfc: Cow<'_, str> =
+        if needs_nfc { Cow::Owned(trimmed.nfc().collect()) } else { Cow::Borrowed(trimmed) };
+
+    if quoted {
+        // Preserve case; only the trim+NFC pass applies.
+        if needs_nfc || trimmed.len() != value.len() {
+            Cow::Owned(after_nfc.into_owned())
+        } else {
+            Cow::Borrowed(trimmed)
+        }
+    } else {
+        // PostgreSQL-style ASCII lowercase folding.
+        Cow::Owned(after_nfc.to_ascii_lowercase())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{identifiers_match, parse_lookup_identifier, stored_identifier_matches_lookup};
+    use super::{
+        identifiers_match, normalize_identifier, parse_lookup_identifier,
+        stored_identifier_matches_lookup,
+    };
+
+    // ---------------------------------------------------------------
+    // Spec §7.1 normalization tests (audit §5, P-02).
+    //
+    // `normalize_identifier` must trim surrounding whitespace, apply
+    // Unicode NFC normalization to all identifiers, and lowercase only
+    // unquoted identifiers (quoted preserve case after NFC).
+    // ---------------------------------------------------------------
+
+    /// INV-001: surrounding whitespace must be stripped before any
+    /// downstream comparison or fingerprint encoding.
+    #[test]
+    fn test_inv_001_normalize_trims_whitespace() {
+        assert_eq!(normalize_identifier("  users  ", false), normalize_identifier("users", false));
+        assert_eq!(normalize_identifier("  Users  ", true), normalize_identifier("Users", true));
+    }
+
+    /// NFC equivalence: byte-distinct but canonically-equal Unicode
+    /// identifiers must normalize to the same string. The fixture
+    /// pairs precomposed `é` (U+00E9) with `e` + combining acute
+    /// (U+0065 U+0301).
+    #[test]
+    fn test_nfc_normalization_unquoted() {
+        let precomposed = "caf\u{00e9}";
+        let decomposed = "cafe\u{0301}";
+        assert_eq!(
+            normalize_identifier(precomposed, false),
+            normalize_identifier(decomposed, false)
+        );
+    }
+
+    /// Same NFC equivalence applies to quoted identifiers (post-NFC
+    /// case is preserved, but the underlying code points are
+    /// normalized).
+    #[test]
+    fn test_nfc_normalization_quoted() {
+        let precomposed = "caf\u{00e9}";
+        let decomposed = "cafe\u{0301}";
+        assert_eq!(normalize_identifier(precomposed, true), normalize_identifier(decomposed, true));
+    }
+
+    /// Quoted identifiers retain case after NFC.
+    #[test]
+    fn test_quoted_preserves_case_after_nfc() {
+        let s = "caf\u{00e9}";
+        let normalized = normalize_identifier(s, true);
+        assert!(normalized.contains('c'));
+        // Quoted should keep the lowercase 'c' from the input;
+        // and should NOT lowercase any letter (it's a no-op on already-lowercase
+        // here, but the contract is "preserve case").
+        assert_eq!(normalize_identifier("Foo", true), "Foo");
+    }
 
     #[test]
     fn test_parse_lookup_identifier_unquoted() {

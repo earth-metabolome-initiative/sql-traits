@@ -3,7 +3,10 @@
 use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
-    structs::{SchemaFingerprint, fingerprint::compute_persistence_v1},
+    structs::{
+        SchemaFingerprint,
+        fingerprint::{FingerprintError, compute_persistence_v1},
+    },
     traits::{
         ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
         PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
@@ -232,13 +235,22 @@ pub trait TableLike:
     ///
     /// The fingerprint is stable across Rust versions and suitable for
     /// persistence. It encodes the schema name, table name, columns
-    /// (ordinal, name, canonical type token, nullability), and primary-key
-    /// ordinals using a versioned binary format.
+    /// (ordinal, name, canonical type token, nullability, generated flag),
+    /// and primary-key ordinals using a versioned binary format.
+    ///
+    /// Returns [`FingerprintError`] if the canonical model is malformed
+    /// (non-contiguous column ordinals, duplicate primary-key ordinals, or
+    /// primary-key ordinals out of range). See FINGERPRINT_SPEC §10.2.
     ///
     /// # Arguments
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FingerprintError`] when the input table fails validation;
+    /// no digest is produced.
     ///
     /// # Example
     ///
@@ -257,17 +269,20 @@ pub trait TableLike:
     /// let users_archive = db.table(None, "users_archive").expect("users_archive table should exist");
     ///
     /// // Different table names produce different fingerprints.
-    /// assert_ne!(users.schema_fingerprint(&db), users_archive.schema_fingerprint(&db));
+    /// assert_ne!(users.schema_fingerprint(&db)?, users_archive.schema_fingerprint(&db)?);
     ///
     /// // Same SQL produces the same fingerprint (deterministic).
     /// let db2 =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);")?;
     /// let users2 = db2.table(None, "users").unwrap();
-    /// assert_eq!(users.schema_fingerprint(&db), users2.schema_fingerprint(&db2));
+    /// assert_eq!(users.schema_fingerprint(&db)?, users2.schema_fingerprint(&db2)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn schema_fingerprint(&self, database: &Self::DB) -> SchemaFingerprint {
+    fn schema_fingerprint(
+        &self,
+        database: &Self::DB,
+    ) -> Result<SchemaFingerprint, FingerprintError> {
         compute_persistence_v1(self, database)
     }
 
@@ -3117,8 +3132,10 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
-            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
+            let fp_a =
+                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -3131,8 +3148,10 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
-            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
+            let fp_a =
+                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -3145,8 +3164,10 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
-            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
+            let fp_a =
+                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -3159,8 +3180,13 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let fp_users = db.table(None, "users").unwrap().schema_fingerprint(&db);
-            let fp_archive = db.table(None, "users_archive").unwrap().schema_fingerprint(&db);
+            let fp_users =
+                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp_archive = db
+                .table(None, "users_archive")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             assert_ne!(fp_users, fp_archive);
         }
@@ -3173,8 +3199,10 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a = db_a.table(None, "users").unwrap().schema_fingerprint(&db_a);
-            let fp_b = db_b.table(None, "users").unwrap().schema_fingerprint(&db_b);
+            let fp_a =
+                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -3183,7 +3211,7 @@ mod tests {
         fn test_truncation_fingerprint128() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             let full = fp.fingerprint256();
             let truncated = fp.fingerprint128();
@@ -3194,7 +3222,7 @@ mod tests {
         fn test_truncation_fingerprint64() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             let full = fp.fingerprint256();
             let expected = u64::from_be_bytes(full[..8].try_into().unwrap());
@@ -3206,8 +3234,10 @@ mod tests {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let fp_a = db.table(None, "users").unwrap().schema_fingerprint(&db);
-            let fp_b = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp_a =
+                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp_b =
+                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             assert!(fp_a.is_comparable_to(&fp_b));
         }
@@ -3216,7 +3246,7 @@ mod tests {
         fn test_hex_length() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             let hex = fp.to_hex();
             assert_eq!(hex.len(), 64);
@@ -3227,21 +3257,21 @@ mod tests {
         fn test_version() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
-            assert_eq!(fp.version(), 1);
+            assert_eq!(fp.canonicalization_version(), 1);
         }
 
         #[test]
         fn test_golden_vector() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             // Pin the hex digest so any encoding change is caught.
             let hex = fp.to_hex();
             assert_eq!(
-                hex, "c5bd001f61732b9e7ac6f586c5779dacf847f8d8a4f2dd1f33c4d5aed57683c7",
+                hex, "961dddeb22561e74e0e58c55b43afd875c5eb6b1b030facb48ec1237acf6f9d3",
                 "Golden vector mismatch — the fingerprint encoding has changed!"
             );
         }
@@ -3250,11 +3280,14 @@ mod tests {
         fn test_display_format() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             let display = format!("{fp}");
-            assert!(display.starts_with("v1:"));
-            assert_eq!(display.len(), 3 + 64); // "v1:" + 64 hex chars
+            // Format: "<algorithm>:v<canonicalization_version>:p<profile_id>:<hex>"
+            assert!(display.starts_with("sha2-256:v1:p1:"));
+            assert!(display.ends_with(&fp.to_hex()));
+            // "sha2-256" (8) + ":" + "v1" (2) + ":" + "p1" (2) + ":" + 64 hex chars
+            assert_eq!(display.len(), 8 + 1 + 2 + 1 + 2 + 1 + 64);
         }
 
         #[test]
@@ -3265,8 +3298,16 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let fp_a = db.table(Some("schema_a"), "users").unwrap().schema_fingerprint(&db);
-            let fp_b = db.table(Some("schema_b"), "users").unwrap().schema_fingerprint(&db);
+            let fp_a = db
+                .table(Some("schema_a"), "users")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
+            let fp_b = db
+                .table(Some("schema_b"), "users")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -3281,8 +3322,10 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a = db_a.table(None, "t").unwrap().schema_fingerprint(&db_a);
-            let fp_b = db_b.table(None, "t").unwrap().schema_fingerprint(&db_b);
+            let fp_a =
+                db_a.table(None, "t").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "t").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
 
             assert_eq!(fp_a, fp_b);
         }
@@ -3291,11 +3334,11 @@ mod tests {
         fn test_no_primary_key() {
             let sql = "CREATE TABLE t (id INT, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "t").unwrap().schema_fingerprint(&db);
+            let fp = db.table(None, "t").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             // Should produce a valid fingerprint with 64 hex chars.
             assert_eq!(fp.to_hex().len(), 64);
-            assert_eq!(fp.version(), 1);
+            assert_eq!(fp.canonicalization_version(), 1);
         }
 
         #[test]
@@ -3305,8 +3348,10 @@ mod tests {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let fp_a = db.table(None, "users").unwrap().schema_fingerprint(&db);
-            let fp_b = db.table(None, "users").unwrap().schema_fingerprint(&db);
+            let fp_a =
+                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp_b =
+                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             assert_eq!(fp_a, fp_b);
 
@@ -3318,6 +3363,546 @@ mod tests {
 
             assert_eq!(hash_of(&fp_a), hash_of(&fp_b));
         }
+
+        // ---------------------------------------------------------------
+        // Spec §10.1 envelope-layout tests (audit §3, P-04 / P-05).
+        //
+        // These tests pin the canonical byte layout of the v1 envelope so
+        // that any future encoding drift is caught before SHA-256 hides it.
+        // ---------------------------------------------------------------
+
+        /// Inline-construct the canonical bytes for `users(id INT PRIMARY KEY,
+        /// name TEXT)` per FINGERPRINT_SPEC §10.1 and assert that
+        /// SHA-256 of those bytes equals `schema_fingerprint(...).
+        /// fingerprint256()`.
+        ///
+        /// Envelope:
+        ///   bytes[4]  magic = "SFP1"
+        ///   u16       canonicalization_version (big-endian)
+        ///   u16       profile_id               (big-endian)
+        ///   str       schema_name_norm         (u32 BE length, then bytes)
+        ///   str       table_name_norm
+        ///   u32       column_count
+        ///   repeat:
+        ///     u32   ordinal
+        ///     str   column_name_norm
+        ///     str   canonical_type_token
+        ///     u8    nullable_flag
+        ///     u8    generated_flag
+        ///   u32       pk_count
+        ///   repeat:
+        ///     u32   pk_ordinal
+        #[test]
+        fn test_envelope_layout_spec_10_1() {
+            use sha2::{Digest, Sha256};
+
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+
+            let mut buf: Vec<u8> = Vec::new();
+            buf.extend_from_slice(b"SFP1");
+            buf.extend_from_slice(&1u16.to_be_bytes()); // canonicalization_version
+            buf.extend_from_slice(&1u16.to_be_bytes()); // profile_id
+
+            // schema_name_norm = "" (no schema qualifier)
+            buf.extend_from_slice(&0u32.to_be_bytes());
+
+            // table_name_norm = "users"
+            buf.extend_from_slice(&5u32.to_be_bytes());
+            buf.extend_from_slice(b"users");
+
+            // column_count = 2
+            buf.extend_from_slice(&2u32.to_be_bytes());
+
+            // col 0: id INT PRIMARY KEY (nullable=0, generated=0)
+            buf.extend_from_slice(&0u32.to_be_bytes());
+            buf.extend_from_slice(&2u32.to_be_bytes());
+            buf.extend_from_slice(b"id");
+            buf.extend_from_slice(&3u32.to_be_bytes());
+            buf.extend_from_slice(b"INT");
+            buf.push(0); // nullable
+            buf.push(0); // generated
+
+            // col 1: name TEXT (nullable=1, generated=0)
+            buf.extend_from_slice(&1u32.to_be_bytes());
+            buf.extend_from_slice(&4u32.to_be_bytes());
+            buf.extend_from_slice(b"name");
+            buf.extend_from_slice(&6u32.to_be_bytes());
+            buf.extend_from_slice(b"STRING");
+            buf.push(1); // nullable
+            buf.push(0); // generated
+
+            // pk_count = 1, pk_ordinal = 0
+            buf.extend_from_slice(&1u32.to_be_bytes());
+            buf.extend_from_slice(&0u32.to_be_bytes());
+
+            let expected: [u8; 32] = Sha256::digest(&buf).into();
+            assert_eq!(
+                fp.fingerprint256(),
+                expected,
+                "fingerprint encoding diverges from FINGERPRINT_SPEC §10.1"
+            );
+        }
+
+        /// `is_generated` participates in the envelope: SERIAL and plain INT
+        /// produce the same canonical type token (`INT`) and the same
+        /// nullability (NOT NULL — both are primary keys), so the only field
+        /// distinguishing them is `generated_flag`. Their fingerprints MUST
+        /// therefore differ. (Audit §3.3.)
+        #[test]
+        fn test_sensitivity_generated_flag() {
+            let sql_serial = "CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);";
+            let sql_plain = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+
+            let db_serial = ParserDB::parse::<GenericDialect>(sql_serial).expect("parse serial");
+            let db_plain = ParserDB::parse::<GenericDialect>(sql_plain).expect("parse plain");
+
+            let fp_serial = db_serial
+                .table(None, "users")
+                .unwrap()
+                .schema_fingerprint(&db_serial)
+                .expect("fingerprint");
+            let fp_plain = db_plain
+                .table(None, "users")
+                .unwrap()
+                .schema_fingerprint(&db_plain)
+                .expect("fingerprint");
+
+            assert_ne!(fp_serial, fp_plain, "generated/identity flag must affect the fingerprint");
+        }
+
+        // ---------------------------------------------------------------
+        // Spec §12 envelope-aware comparability tests (audit §7, P-13).
+        //
+        // Two fingerprints are comparable only if their (algorithm_id,
+        // canonicalization_version, profile_id) triple matches. Equality
+        // requires comparability AND digest match — comparing across
+        // envelopes is a category error.
+        // ---------------------------------------------------------------
+
+        /// MIG-001: identical digest under different `canonicalization_version`
+        /// values is not comparable and not equal.
+        #[test]
+        fn test_mig_001_canonicalization_version_mismatch() {
+            use crate::structs::{SchemaFingerprint, fingerprint::AlgorithmId};
+
+            let digest = [0u8; 32];
+            let fp_v1 = SchemaFingerprint::new(AlgorithmId::Sha2_256, 1, 1, digest);
+            let fp_v2 = SchemaFingerprint::new(AlgorithmId::Sha2_256, 2, 1, digest);
+
+            assert!(
+                !fp_v1.is_comparable_to(&fp_v2),
+                "different canonicalization_version must not be comparable",
+            );
+            assert_ne!(
+                fp_v1, fp_v2,
+                "PartialEq must require comparability — cross-version equality is a category error",
+            );
+        }
+
+        /// MIG-002: identical digest under different `profile_id` values is
+        /// not comparable and not equal.
+        #[test]
+        fn test_mig_002_profile_id_mismatch() {
+            use crate::structs::{SchemaFingerprint, fingerprint::AlgorithmId};
+
+            let digest = [0u8; 32];
+            let fp_p1 = SchemaFingerprint::new(AlgorithmId::Sha2_256, 1, 1, digest);
+            let fp_p2 = SchemaFingerprint::new(AlgorithmId::Sha2_256, 1, 2, digest);
+
+            assert!(!fp_p1.is_comparable_to(&fp_p2), "different profile_id must not be comparable");
+            assert_ne!(
+                fp_p1, fp_p2,
+                "PartialEq must require comparability — cross-profile equality is a category error",
+            );
+        }
+
+        /// MIG-003: identical digest under different `algorithm_id` values is
+        /// not comparable and not equal.
+        #[test]
+        fn test_mig_003_algorithm_id_mismatch() {
+            use crate::structs::{SchemaFingerprint, fingerprint::AlgorithmId};
+
+            let digest = [0u8; 32];
+            let fp_sha2 = SchemaFingerprint::new(AlgorithmId::Sha2_256, 1, 1, digest);
+            let fp_sha3 = SchemaFingerprint::new(AlgorithmId::Sha3_256, 1, 1, digest);
+
+            assert!(
+                !fp_sha2.is_comparable_to(&fp_sha3),
+                "different algorithm_id must not be comparable",
+            );
+            assert_ne!(
+                fp_sha2, fp_sha3,
+                "PartialEq must require comparability — cross-algorithm equality is a category error",
+            );
+        }
+
+        /// Envelope accessors expose the metadata used for comparability.
+        #[test]
+        fn test_envelope_accessors() {
+            use crate::structs::fingerprint::AlgorithmId;
+
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+
+            assert_eq!(fp.algorithm_id(), AlgorithmId::Sha2_256);
+            assert_eq!(fp.canonicalization_version(), 1);
+            assert_eq!(fp.profile_id(), 1);
+        }
+
+        /// `TableLike::schema_fingerprint` must propagate the validator's
+        /// errors (audit §4, P-12). This test pins the API shape: the
+        /// return type is `Result<SchemaFingerprint, FingerprintError>`.
+        /// For a well-formed table it must return `Ok`.
+        #[test]
+        fn test_schema_fingerprint_is_fallible() {
+            use crate::structs::{SchemaFingerprint, fingerprint::FingerprintError};
+
+            let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let table = db.table(None, "users").unwrap();
+
+            let fp_result: Result<SchemaFingerprint, FingerprintError> =
+                table.schema_fingerprint(&db);
+            assert!(fp_result.is_ok(), "well-formed table must produce a fingerprint");
+        }
+
+        /// SEN-007 (audit §8): composite-PK column order matters. Two
+        /// tables with identical columns but PK declared as `(a, b)` vs
+        /// `(b, a)` produce PK-ordinal lists `[0, 1]` vs `[1, 0]` and so
+        /// must yield distinct fingerprints. This regression-guards any
+        /// future "sort PK ordinals for stability" refactor that would
+        /// silently collapse the two.
+        #[test]
+        fn test_sen_007_pk_order_sensitivity() {
+            let sql_ab = "CREATE TABLE t (a INT, b INT, PRIMARY KEY (a, b));";
+            let sql_ba = "CREATE TABLE t (a INT, b INT, PRIMARY KEY (b, a));";
+
+            let db_ab = ParserDB::parse::<GenericDialect>(sql_ab).expect("parse ab");
+            let db_ba = ParserDB::parse::<GenericDialect>(sql_ba).expect("parse ba");
+
+            let fp_ab =
+                db_ab.table(None, "t").unwrap().schema_fingerprint(&db_ab).expect("fingerprint");
+            let fp_ba =
+                db_ba.table(None, "t").unwrap().schema_fingerprint(&db_ba).expect("fingerprint");
+
+            assert_ne!(fp_ab, fp_ba, "composite-PK declaration order must affect the fingerprint");
+        }
+
+        // ---------------------------------------------------------------
+        // Audit §10 conformance gap fill (Step 7).
+        //
+        // These tests close the §13 conformance matrix entries listed
+        // in the audit as "No" or "Partial" and that don't require
+        // a CI-matrix harness or a second `DatabaseLike` impl. With the
+        // earlier steps in place they all pass against the current
+        // encoding; their role is regression coverage.
+        //
+        // Out-of-scope here (require external infrastructure — see
+        // TODO block at the end of this module):
+        //   • DET-002 (cross-process)
+        //   • DET-003 (cross-platform)
+        //   • DET-004 (cross-toolchain)
+        //   • DIFF-001 (parser vs DB-introspection parity)
+        //   • COL-001 (1 M random corpus collision smoke)
+        // ---------------------------------------------------------------
+
+        /// INV-003: source-statement order does not affect any individual
+        /// table's fingerprint. Reordering `CREATE TABLE` statements
+        /// rearranges the database's table iteration but each per-table
+        /// digest depends only on that table's own canonical model.
+        #[test]
+        fn test_inv_003_source_ordering_invariance() {
+            let sql_a = "
+                CREATE TABLE t1 (id INT PRIMARY KEY, name TEXT);
+                CREATE TABLE t2 (id INT PRIMARY KEY, value INT);
+                CREATE TABLE t3 (id INT, x TEXT);
+            ";
+            let sql_b = "
+                CREATE TABLE t3 (id INT, x TEXT);
+                CREATE TABLE t1 (id INT PRIMARY KEY, name TEXT);
+                CREATE TABLE t2 (id INT PRIMARY KEY, value INT);
+            ";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
+
+            for name in ["t1", "t2", "t3"] {
+                let fp_a =
+                    db_a.table(None, name).unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+                let fp_b =
+                    db_b.table(None, name).unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+                assert_eq!(fp_a, fp_b, "fingerprint for `{name}` must be source-order-invariant");
+            }
+        }
+
+        /// SEN-001a: adding a column changes the fingerprint.
+        #[test]
+        fn test_sen_001_column_add_changes_fingerprint() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let sql_b = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT, email TEXT);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
+
+            let fp_a =
+                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+
+            assert_ne!(fp_a, fp_b, "adding a column must change the fingerprint");
+        }
+
+        /// SEN-001b: dropping a column changes the fingerprint.
+        #[test]
+        fn test_sen_001_column_drop_changes_fingerprint() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT, email TEXT);";
+            let sql_b = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
+
+            let fp_a =
+                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+
+            assert_ne!(fp_a, fp_b, "dropping a column must change the fingerprint");
+        }
+
+        /// SEN-002: renaming a column (with type and position unchanged)
+        /// changes the fingerprint, because column names participate in
+        /// the canonical encoding.
+        #[test]
+        fn test_sen_002_column_rename_changes_fingerprint() {
+            let sql_a = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let sql_b = "CREATE TABLE users (id INT PRIMARY KEY, full_name TEXT);";
+
+            let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
+            let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
+
+            let fp_a =
+                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
+            let fp_b =
+                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+
+            assert_ne!(fp_a, fp_b, "renaming a column must change the fingerprint");
+        }
+
+        /// DIFF-002: a SQL identifier wrapped in matching-case double
+        /// quotes is canonically equivalent to its unquoted form
+        /// (post-NFC, post-lowercase-fold). Their fingerprints must
+        /// match. (Quoted identifiers whose case differs from the
+        /// folded form are NOT equivalent — that's the Postgres
+        /// semantics already covered by other tests.)
+        #[test]
+        fn test_diff_002_quoted_unquoted_equivalence() {
+            let sql_unq = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
+            let sql_qtd = "CREATE TABLE \"users\" (\"id\" INT PRIMARY KEY, \"name\" TEXT);";
+
+            let db_unq = ParserDB::parse::<GenericDialect>(sql_unq).expect("parse unquoted");
+            let db_qtd = ParserDB::parse::<GenericDialect>(sql_qtd).expect("parse quoted");
+
+            let fp_unq = db_unq
+                .table(None, "users")
+                .unwrap()
+                .schema_fingerprint(&db_unq)
+                .expect("fingerprint");
+            let fp_qtd = db_qtd
+                .table(None, "users")
+                .unwrap()
+                .schema_fingerprint(&db_qtd)
+                .expect("fingerprint");
+
+            assert_eq!(
+                fp_unq, fp_qtd,
+                "quoted-lowercase identifiers must fingerprint identically to unquoted",
+            );
+        }
+
+        /// DET-001: in-process repeatability. Bumped from the legacy
+        /// 2-iteration smoke (`test_determinism`) to the spec-mandated
+        /// 1000 iterations.
+        #[test]
+        fn test_det_001_repeatability_in_process() {
+            let sql = "
+                CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+                CREATE TABLE products (id INT PRIMARY KEY, price INT, sku TEXT);
+            ";
+
+            let baseline = {
+                let db = ParserDB::parse::<GenericDialect>(sql).expect("baseline parse");
+                (
+                    db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint"),
+                    db.table(None, "products")
+                        .unwrap()
+                        .schema_fingerprint(&db)
+                        .expect("fingerprint"),
+                )
+            };
+
+            for i in 0..1000 {
+                let db = ParserDB::parse::<GenericDialect>(sql).expect("iter parse");
+                let users_fp =
+                    db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+                let products_fp = db
+                    .table(None, "products")
+                    .unwrap()
+                    .schema_fingerprint(&db)
+                    .expect("fingerprint");
+                assert_eq!(users_fp, baseline.0, "iter {i}: users fingerprint diverged");
+                assert_eq!(products_fp, baseline.1, "iter {i}: products fingerprint diverged");
+            }
+        }
+
+        /// COL-002: per-field near-neighbor adversarial coverage. For each
+        /// mutable field of the v1 canonical envelope, mutate ONLY that
+        /// field while holding the others identical, and assert the
+        /// resulting fingerprint differs from the baseline. SHA-256
+        /// avalanche guarantees any one-bit canonical-byte difference
+        /// propagates to the digest, so this proves the encoding has no
+        /// "absorbing" field whose mutation is silently lost.
+        ///
+        /// Field coverage:
+        /// - `schema_name`     → `schema_name_norm`
+        /// - `table_name`      → `table_name_norm`
+        /// - `column_count_*`  → `column_count`
+        /// - `column_name`     → per-column name
+        /// - `column_type`     → per-column canonical type token
+        /// - `nullable_flag`   → per-column nullable byte
+        /// - `generated_flag`  → per-column generated byte
+        /// - `column_ordinal`  → per-column ordinal (column reorder)
+        /// - `pk_count`        → `pk_count`
+        /// - `pk_order`        → `pk_ordinal` slot ordering
+        ///
+        /// `magic`, `canonicalization_version`, and `profile_id` are
+        /// constants in v1 — already covered by MIG-001/002.
+        #[test]
+        fn test_col_002_per_field_adversarial() {
+            let baseline_sql =
+                "CREATE TABLE users (id INT PRIMARY KEY, name TEXT, score INT NOT NULL);";
+
+            // (mutated_field_label, mutated_sql, lookup_schema, lookup_table_name)
+            let mutations: &[(&str, &str, Option<&str>, &str)] = &[
+                (
+                    "schema_name",
+                    "CREATE TABLE myschema.users (id INT PRIMARY KEY, name TEXT, score INT NOT NULL);",
+                    Some("myschema"),
+                    "users",
+                ),
+                (
+                    "table_name",
+                    "CREATE TABLE u (id INT PRIMARY KEY, name TEXT, score INT NOT NULL);",
+                    None,
+                    "u",
+                ),
+                (
+                    "column_count_drop",
+                    "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);",
+                    None,
+                    "users",
+                ),
+                (
+                    "column_count_add",
+                    "CREATE TABLE users (id INT PRIMARY KEY, name TEXT, score INT NOT NULL, extra INT);",
+                    None,
+                    "users",
+                ),
+                (
+                    "column_name",
+                    "CREATE TABLE users (id INT PRIMARY KEY, full_name TEXT, score INT NOT NULL);",
+                    None,
+                    "users",
+                ),
+                (
+                    "column_type",
+                    "CREATE TABLE users (id INT PRIMARY KEY, name INT, score INT NOT NULL);",
+                    None,
+                    "users",
+                ),
+                (
+                    "nullable_flag",
+                    "CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL, score INT NOT NULL);",
+                    None,
+                    "users",
+                ),
+                (
+                    "generated_flag",
+                    "CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT, score INT NOT NULL);",
+                    None,
+                    "users",
+                ),
+                (
+                    "column_ordinal",
+                    "CREATE TABLE users (name TEXT, id INT PRIMARY KEY, score INT NOT NULL);",
+                    None,
+                    "users",
+                ),
+                (
+                    "pk_count",
+                    "CREATE TABLE users (id INT, name TEXT, score INT NOT NULL, PRIMARY KEY (id, name));",
+                    None,
+                    "users",
+                ),
+                (
+                    "pk_order",
+                    "CREATE TABLE users (id INT, name TEXT, score INT NOT NULL, PRIMARY KEY (name, id));",
+                    None,
+                    "users",
+                ),
+            ];
+
+            let baseline_db =
+                ParserDB::parse::<GenericDialect>(baseline_sql).expect("baseline parse");
+            let baseline_fp = baseline_db
+                .table(None, "users")
+                .unwrap()
+                .schema_fingerprint(&baseline_db)
+                .expect("baseline fingerprint");
+
+            for (field, sql, schema, name) in mutations {
+                let db = ParserDB::parse::<GenericDialect>(sql)
+                    .unwrap_or_else(|e| panic!("[{field}] parse failed: {e:?}"));
+                let fp = db
+                    .table(*schema, name)
+                    .unwrap_or_else(|| panic!("[{field}] table `{name}` not found"))
+                    .schema_fingerprint(&db)
+                    .expect("fingerprint");
+                assert_ne!(fp, baseline_fp, "mutation of `{field}` left fingerprint unchanged");
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Out-of-scope conformance gates (audit §10).
+        //
+        // The following test gates from FINGERPRINT_SPEC §13 are NOT
+        // covered by in-process unit tests because they require
+        // external infrastructure beyond this crate's scope:
+        //
+        //   • DET-002 (cross-process determinism): needs a small CLI
+        //     harness that emits hex digests; verify two separate
+        //     processes agree on the digest for a fixed fixture.
+        //
+        //   • DET-003 (cross-platform determinism): CI matrix gate —
+        //     run the existing fingerprint tests on Linux + macOS +
+        //     Windows and compare golden hex.
+        //
+        //   • DET-004 (cross-toolchain determinism): CI matrix gate —
+        //     stable / beta / nightly / MSRV.
+        //
+        //   • DIFF-001 (parser vs DB-introspection parity): requires a
+        //     second `DatabaseLike` implementation (e.g. live PostgreSQL
+        //     introspection) to compare against `ParserDB` output for
+        //     the same schema. Tracked downstream in `pg_diesel`.
+        //
+        //   • COL-001 (1 M random-corpus collision smoke): scheduled CI
+        //     job, not a per-PR unit test. Generates 1 M synthetic
+        //     schemas via `arbitrary` and verifies that
+        //     `fingerprint64` collisions remain below the birthday
+        //     bound for SHA-256-truncated digests.
+        // ---------------------------------------------------------------
     }
 
     mod drop_table_tests {

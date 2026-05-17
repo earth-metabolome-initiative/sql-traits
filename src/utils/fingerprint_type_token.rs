@@ -5,8 +5,10 @@
 
 /// Returns a canonical type token for the given SQL data type string.
 ///
-/// Known types are mapped without allocation. Unknown types are returned as
-/// `OTHER:<uppercase>`.
+/// Known families map to fixed uppercase tokens (`INT`, `STRING`, …).
+/// Unknown types are emitted as `OTHER:<lowercase-normalized-db-type>`
+/// with internal whitespace collapsed to a single ASCII space, per
+/// FINGERPRINT_SPEC §7.2.1.
 ///
 /// # Examples
 ///
@@ -16,7 +18,8 @@
 /// assert_eq!(canonical_type_token("INT"), "INT");
 /// assert_eq!(canonical_type_token("integer"), "INT");
 /// assert_eq!(canonical_type_token("VARCHAR"), "STRING");
-/// assert_eq!(canonical_type_token("geometry"), "OTHER:GEOMETRY");
+/// assert_eq!(canonical_type_token("geometry"), "OTHER:geometry");
+/// assert_eq!(canonical_type_token("INTERVAL  YEAR  TO  MONTH"), "OTHER:interval year to month");
 /// ```
 #[must_use]
 pub fn canonical_type_token(sql_type: &str) -> String {
@@ -28,12 +31,22 @@ pub fn canonical_type_token(sql_type: &str) -> String {
         return token.to_owned();
     }
 
-    // Unknown type: emit OTHER:<UPPERCASE>.
+    // Unknown type: emit `OTHER:<lowercase-normalized-db-type>` with
+    // internal whitespace runs collapsed to a single ASCII space.
     let mut result = String::with_capacity(6 + trimmed.len());
     result.push_str("OTHER:");
+    let mut prev_was_space = false;
     for ch in trimmed.chars() {
-        for upper in ch.to_uppercase() {
-            result.push(upper);
+        if ch.is_whitespace() {
+            if !prev_was_space {
+                result.push(' ');
+                prev_was_space = true;
+            }
+        } else {
+            for lower in ch.to_lowercase() {
+                result.push(lower);
+            }
+            prev_was_space = false;
         }
     }
     result
@@ -255,9 +268,23 @@ mod tests {
 
     #[test]
     fn test_unknown_type() {
-        assert_eq!(canonical_type_token("geometry"), "OTHER:GEOMETRY");
-        assert_eq!(canonical_type_token("HSTORE"), "OTHER:HSTORE");
-        assert_eq!(canonical_type_token("citext"), "OTHER:CITEXT");
+        // Spec §7.2.1: OTHER tokens are lowercase.
+        assert_eq!(canonical_type_token("geometry"), "OTHER:geometry");
+        assert_eq!(canonical_type_token("HSTORE"), "OTHER:hstore");
+        assert_eq!(canonical_type_token("citext"), "OTHER:citext");
+        // Mixed case folds to lowercase too.
+        assert_eq!(canonical_type_token("Geometry"), "OTHER:geometry");
+    }
+
+    #[test]
+    fn test_unknown_type_collapses_whitespace() {
+        // Spec §7.2.1: internal whitespace runs collapse to a single ASCII space.
+        assert_eq!(
+            canonical_type_token("INTERVAL  YEAR  TO  MONTH"),
+            "OTHER:interval year to month"
+        );
+        // Tabs and other whitespace also collapse.
+        assert_eq!(canonical_type_token("foo\tbar  \t baz"), "OTHER:foo bar baz");
     }
 
     #[test]
