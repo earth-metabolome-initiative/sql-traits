@@ -76,8 +76,7 @@ impl fmt::Display for AlgorithmId {
 /// schema is non-conformant.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FingerprintError {
-    /// Column ordinals (as reported by
-    /// [`ColumnLike::column_id`](crate::traits::ColumnLike::column_id))
+    /// Column ordinals (as reported by [`ColumnLike::column_id`])
     /// do not form a contiguous range `[0, column_count)`. The first
     /// position whose reported ordinal disagrees with the iteration
     /// index is recorded.
@@ -106,9 +105,8 @@ pub enum FingerprintError {
 /// Validates the canonical layout used by the v1 persistence profile.
 ///
 /// `column_ordinals` is the per-column ordinal as reported by
-/// [`ColumnLike::column_id`](crate::traits::ColumnLike::column_id), in
-/// iteration order. `pk_ordinals` is the list of primary-key column
-/// ordinals (also from `column_id`).
+/// [`ColumnLike::column_id`], in iteration order. `pk_ordinals` is the
+/// list of primary-key column ordinals (also from `column_id`).
 fn validate_v1_layout_inner(
     column_count: u32,
     column_ordinals: &[u32],
