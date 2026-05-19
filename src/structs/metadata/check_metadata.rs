@@ -1,6 +1,6 @@
 //! Submodule defining a generic `IndexMetadata` struct.
 
-use std::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use sqlparser::ast::Expr;
 
@@ -48,12 +48,12 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     /// Returns an iterator over the columns involved in the constraint.
     #[inline]
     pub fn columns(&self) -> impl Iterator<Item = &<U::DB as DatabaseLike>::Column> {
-        self.columns.iter().map(std::convert::AsRef::as_ref)
+        self.columns.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns an iterator over the functions involved in the constraint.
     #[inline]
     pub fn functions(&self) -> impl Iterator<Item = &<U::DB as DatabaseLike>::Function> {
-        self.functions.iter().map(std::convert::AsRef::as_ref)
+        self.functions.iter().map(core::convert::AsRef::as_ref)
     }
 }

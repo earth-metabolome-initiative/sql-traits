@@ -3,7 +3,7 @@
 pub mod column;
 pub mod database;
 pub mod table;
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 pub use column::ColumnLike;
 pub mod index;
@@ -39,7 +39,7 @@ impl<M: Metadata> Metadata for &M {
     type Meta = M::Meta;
 }
 
-impl<M: Metadata> Metadata for std::sync::Arc<M> {
+impl<M: Metadata> Metadata for alloc::sync::Arc<M> {
     type Meta = M::Meta;
 }
 

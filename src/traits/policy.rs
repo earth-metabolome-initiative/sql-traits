@@ -1,6 +1,6 @@
 //! Submodule providing a trait for describing SQL Policy-like entities.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use sqlparser::ast::{CreatePolicyCommand, Expr, Owner};
 

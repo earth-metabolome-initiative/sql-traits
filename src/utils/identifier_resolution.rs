@@ -5,7 +5,7 @@
 //! Unicode-NFC-normalized and whitespace-trimmed per
 //! FINGERPRINT_SPEC §7.1.
 
-use std::borrow::Cow;
+use alloc::borrow::Cow;
 
 use unicode_normalization::UnicodeNormalization;
 

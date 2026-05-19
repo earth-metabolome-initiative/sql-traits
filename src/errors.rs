@@ -1,5 +1,7 @@
 //! Error enumeration used in the `sql_traits` crate.
 
+use alloc::{string::String, vec::Vec};
+
 use sqlparser::parser::ParserError;
 
 /// Errors produced by identifier-aware lookup and resolution APIs.
@@ -114,18 +116,23 @@ pub enum Error {
         trigger_name: String,
     },
     /// Wrapper around SQL parser errors.
-    #[error("SQL parser error: {error} in {file:?}")]
+    #[cfg_attr(feature = "std", error("SQL parser error: {error} in {file:?}"))]
+    #[cfg_attr(not(feature = "std"), error("SQL parser error: {error}"))]
     SqlParserError {
         /// The error from the SQL parser.
         #[source]
         error: ParserError,
-        /// The file containing the offending code.
+        /// The file containing the offending code (only carried under the `std`
+        /// feature; `no_std` consumers receive `None`).
+        #[cfg(feature = "std")]
         file: Option<std::path::PathBuf>,
     },
-    /// Wrapper around git errors.
+    /// Wrapper around git errors. Only available with the `std` feature.
+    #[cfg(feature = "std")]
     #[error("Git error: {0}")]
     GitError(#[from] git2::Error),
-    /// Wrapper around IO errors.
+    /// Wrapper around IO errors. Only available with the `std` feature.
+    #[cfg(feature = "std")]
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     /// Wrapper around sql_doc errors
@@ -266,6 +273,10 @@ pub enum Error {
 
 impl From<ParserError> for Error {
     fn from(error: ParserError) -> Self {
-        Error::SqlParserError { error, file: None }
+        Error::SqlParserError {
+            error,
+            #[cfg(feature = "std")]
+            file: None,
+        }
     }
 }

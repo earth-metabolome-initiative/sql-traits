@@ -1,6 +1,6 @@
 //! Submodule defining a generic `TableMetadata` struct.
 
-use std::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::traits::{DatabaseLike, DocumentationMetadata, TableLike};
 
@@ -83,7 +83,7 @@ impl<T: TableLike> TableMetadata<T> {
     /// Returns an iterator over the references of columns of the table.
     #[inline]
     pub fn columns(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::Column> {
-        self.columns.iter().map(std::convert::AsRef::as_ref)
+        self.columns.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns an iterator over the Arc of columns of the table.
@@ -104,7 +104,7 @@ impl<T: TableLike> TableMetadata<T> {
     pub fn check_constraints(
         &self,
     ) -> impl Iterator<Item = &<T::DB as DatabaseLike>::CheckConstraint> {
-        self.check_constraints.iter().map(std::convert::AsRef::as_ref)
+        self.check_constraints.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns an iterator over the Arc of check constraints of the table.
@@ -118,7 +118,7 @@ impl<T: TableLike> TableMetadata<T> {
     /// Returns an iterator over the indices of the table.
     #[inline]
     pub fn indices(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::Index> {
-        self.indices.iter().map(std::convert::AsRef::as_ref)
+        self.indices.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns an iterator over the Arc of indices of the table.
@@ -130,7 +130,7 @@ impl<T: TableLike> TableMetadata<T> {
     /// Returns an iterator over the unique indices of the table.
     #[inline]
     pub fn unique_indices(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::UniqueIndex> {
-        self.unique_indices.iter().map(std::convert::AsRef::as_ref)
+        self.unique_indices.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns an iterator over the Arc of unique indices of the table.
@@ -144,7 +144,7 @@ impl<T: TableLike> TableMetadata<T> {
     /// Returns an iterator over the foreign keys of the table.
     #[inline]
     pub fn foreign_keys(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::ForeignKey> {
-        self.foreign_keys.iter().map(std::convert::AsRef::as_ref)
+        self.foreign_keys.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns an iterator over the Arc of foreign keys of the table.
@@ -159,7 +159,7 @@ impl<T: TableLike> TableMetadata<T> {
     /// table.
     #[inline]
     pub fn primary_key_columns(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::Column> {
-        self.primary_key.iter().map(std::convert::AsRef::as_ref)
+        self.primary_key.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns the documentation, if exists, for the table

@@ -9,7 +9,7 @@
 //! - [`ColumnGrantLike`]: For column-level grants (`GRANT ... (col1, col2) ON
 //!   table`)
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use sqlparser::ast::{Action, Grantee};
 

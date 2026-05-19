@@ -1,5 +1,7 @@
 //! Submodule providing a function for normalizing `SQLParser` data types.
 
+use alloc::string::ToString;
+
 use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 
 /// Normalizes `SQLParser` data types to a standard representation.

@@ -1,6 +1,8 @@
 //! Submodule implementing the [`ColumnLike`] trait for `sqlparser`'s
 //! [`ColumnDef`] struct.
 
+use alloc::string::{String, ToString};
+
 use sqlparser::ast::{ColumnDef, CreateTable};
 
 use crate::{

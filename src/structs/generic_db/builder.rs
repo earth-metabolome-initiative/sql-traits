@@ -1,6 +1,10 @@
 //! Builder for constructing a `GenericDB` instance.
 
-use std::sync::Arc;
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use crate::{
     errors::LookupError,
@@ -549,7 +553,7 @@ where
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
             (
-                table.table_schema().map(std::string::ToString::to_string),
+                table.table_schema().map(alloc::string::ToString::to_string),
                 table.table_name().to_string(),
             )
         });

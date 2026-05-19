@@ -1,7 +1,8 @@
 //! Submodule for objects whose main metadata is just that they are part of a
 //! table.
 
-use std::{fmt::Display, sync::Arc};
+use alloc::sync::Arc;
+use core::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 /// A struct associating a table with one of its attributes, such as a column or
@@ -17,7 +18,7 @@ impl<T, A> Display for TableAttribute<T, A>
 where
     A: Display,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.attribute)
     }
 }

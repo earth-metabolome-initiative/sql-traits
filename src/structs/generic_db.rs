@@ -4,7 +4,12 @@ mod builder;
 mod database;
 mod sqlparser;
 
-use std::{fmt::Debug, sync::Arc};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::fmt::Debug;
 
 pub use builder::GenericDBBuilder;
 pub use sqlparser::{ParserDB, ParserDBBuilder};
@@ -83,7 +88,7 @@ where
     TG: TableGrantLike,
     CG: ColumnGrantLike,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("GenericDB")
             .field("catalog_name", &self.catalog_name)
             .field("timezone", &self.timezone)
@@ -193,12 +198,12 @@ where
         self.tables
             .binary_search_by_key(
                 &(
-                    table.table_schema().map(std::string::ToString::to_string),
+                    table.table_schema().map(alloc::string::ToString::to_string),
                     table.table_name().to_string(),
                 ),
                 |(t, _)| {
                     (
-                        t.table_schema().map(std::string::ToString::to_string),
+                        t.table_schema().map(alloc::string::ToString::to_string),
                         t.table_name().to_string(),
                     )
                 },

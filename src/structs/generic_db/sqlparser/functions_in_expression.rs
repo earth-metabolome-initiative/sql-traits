@@ -1,6 +1,6 @@
 //! Functions to extract functions from SQL expressions.
 
-use std::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use sqlparser::ast::{Expr, ObjectName, ObjectNamePart};
 
@@ -102,8 +102,10 @@ pub(super) fn functions_in_expression<DB: DatabaseLike>(
         _ => {}
     }
 
-    // Remove duplicates while preserving order
-    let mut seen = std::collections::HashSet::new();
+    // Remove duplicates while preserving order. BTreeSet works on raw
+    // pointers (which implement `Ord`) and keeps the helper `alloc`-only
+    // for a no_std-compatible build.
+    let mut seen: alloc::collections::BTreeSet<*const ()> = alloc::collections::BTreeSet::new();
     result
         .into_iter()
         .filter(|func| {

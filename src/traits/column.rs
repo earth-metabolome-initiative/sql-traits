@@ -1,6 +1,7 @@
 //! Submodule providing a trait for describing SQL Column-like entities.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use alloc::{string::String, vec::Vec};
+use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
     traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
@@ -1088,7 +1089,7 @@ where
     }
 }
 
-impl<C> ColumnLike for std::sync::Arc<C>
+impl<C> ColumnLike for alloc::sync::Arc<C>
 where
     C: ColumnLike<DB: DatabaseLike>,
     Self: Borrow<<<C as ColumnLike>::DB as DatabaseLike>::Column>,
@@ -1144,7 +1145,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use alloc::sync::Arc;
 
     use sqlparser::dialect::GenericDialect;
 

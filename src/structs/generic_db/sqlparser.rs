@@ -1,12 +1,19 @@
 //! Implementations for [`ParserDB`] - a database schema parsed from SQL text.
 
-use std::{
-    path::{Path, PathBuf},
+use alloc::{
+    borrow::ToOwned,
+    string::{String, ToString},
     sync::Arc,
+    vec::Vec,
 };
+#[cfg(feature = "std")]
+use std::path::{Path, PathBuf};
 
+#[cfg(feature = "std")]
 use git2::Repository;
 use sql_docs::SqlDoc;
+#[cfg(feature = "std")]
+use sqlparser::parser::ParserError;
 use sqlparser::{
     ast::{
         AlterPolicy, AlterPolicyOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation,
@@ -18,7 +25,7 @@ use sqlparser::{
         UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::{Dialect, GenericDialect},
-    parser::{Parser, ParserError},
+    parser::Parser,
     tokenizer::Span,
 };
 
@@ -562,7 +569,7 @@ fn resolve_table_object_name_with_implicit_public_in_iter<'a>(
 
     match (unqualified, public) {
         (Some(unqualified), Some(public)) => {
-            if std::ptr::eq(unqualified, public) {
+            if core::ptr::eq(unqualified, public) {
                 Ok(Some(unqualified))
             } else {
                 let mut candidates =
@@ -670,7 +677,7 @@ fn apply_revoke_to_grant_store(
     let mut matched_any = false;
     let mut has_unsupported_column_scoped_revoke = false;
     let mut updated_grants = Vec::with_capacity(grants.len());
-    let original_grants = std::mem::take(grants);
+    let original_grants = core::mem::take(grants);
 
     for (grant, ()) in original_grants {
         let (targeted_grantees, untouched_grantees) =
@@ -1076,7 +1083,7 @@ impl ParserDB {
                 .tables()
                 .iter()
                 .map(|(t, _)| t.as_ref())
-                .chain(std::iter::once(create_table.as_ref())),
+                .chain(core::iter::once(create_table.as_ref())),
             &fk.foreign_table,
         )?;
         let Some(referenced_table) = referenced_table else {
@@ -2255,6 +2262,7 @@ impl ParserDB {
     ///
     /// Returns an error if the repository cannot be cloned or if the SQL files
     /// cannot be parsed.
+    #[cfg(feature = "std")]
     pub fn from_git_url<D: Dialect + Default>(url: &str) -> Result<Self, crate::errors::Error> {
         let dir = tempfile::tempdir()?;
         Repository::clone(url, dir.path())?;
@@ -2267,6 +2275,7 @@ impl ParserDB {
     ///
     /// Returns an error if the repository cannot be cloned or if the SQL files
     /// cannot be parsed.
+    #[cfg(feature = "std")]
     pub fn from_git_url_with_dialect<D: Dialect + Default>(
         url: &str,
     ) -> Result<Self, crate::errors::Error> {
@@ -2300,6 +2309,7 @@ impl ParserDB {
     ///
     /// let db = ParserDB::from_path::<PostgreSqlDialect>(Path::new("migrations/")).unwrap();
     /// ```
+    #[cfg(feature = "std")]
     pub fn from_path<D: Dialect + Default>(path: &Path) -> Result<Self, crate::errors::Error> {
         Self::from_paths::<D>(&[path])
     }
@@ -2315,6 +2325,7 @@ impl ParserDB {
     ///
     /// Returns an error if any path doesn't exist, files can't be read, or
     /// parsing fails.
+    #[cfg(feature = "std")]
     pub fn from_paths<D: Dialect + Default>(paths: &[&Path]) -> Result<Self, crate::errors::Error> {
         let mut statements = Vec::new();
         let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
@@ -2366,6 +2377,7 @@ impl ParserDB {
     }
 }
 
+#[cfg(feature = "std")]
 fn search_sql_documents(path: &Path) -> Vec<PathBuf> {
     let mut sql_files = Vec::new();
     if path.is_dir() {

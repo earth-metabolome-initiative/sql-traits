@@ -1,5 +1,7 @@
 //! Functions to extract columns from SQL expressions.
 
+use alloc::{string::ToString, vec::Vec};
+
 use sqlparser::ast::Expr;
 
 use crate::traits::column::ColumnLike;
@@ -111,13 +113,13 @@ pub fn columns_in_expression<C: ColumnLike + Clone>(
     }
 
     // Remove duplicates while preserving order
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: alloc::collections::BTreeSet<_> = alloc::collections::BTreeSet::new();
     Ok(result.into_iter().filter(|col| seen.insert(col.clone())).collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use alloc::sync::Arc;
 
     use sqlparser::{
         ast::{

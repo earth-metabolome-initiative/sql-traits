@@ -1,6 +1,7 @@
 //! Submodule providing a trait for describing SQL Trigger-like entities.
 
-use std::fmt::Debug;
+use alloc::vec::Vec;
+use core::fmt::Debug;
 
 use crate::{
     traits::{DatabaseLike, FunctionLike, Metadata},

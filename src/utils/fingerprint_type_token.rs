@@ -3,6 +3,8 @@
 //! The canonical tokens ensure that equivalent types across different SQL
 //! dialects produce the same fingerprint.
 
+use alloc::{borrow::ToOwned, string::String};
+
 /// Returns a canonical type token for the given SQL data type string.
 ///
 /// Known families map to fixed uppercase tokens (`INT`, `STRING`, …).

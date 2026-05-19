@@ -1,6 +1,7 @@
 //! Submodule providing a trait for describing SQL Table-like entities.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use alloc::vec::Vec;
+use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
     structs::{
@@ -1654,7 +1655,7 @@ pub trait TableLike:
         let sorted_dag = database
             .table_dag()
             .into_iter()
-            .map(std::borrow::Borrow::borrow)
+            .map(core::borrow::Borrow::borrow)
             .collect::<Vec<&<Self::DB as DatabaseLike>::Table>>();
 
         ancestral_extended_tables.sort_by_key(|table| {

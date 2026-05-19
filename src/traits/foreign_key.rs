@@ -1,6 +1,7 @@
 //! Submodule definining the `ForeignKeyLike` trait for SQL referenced keys.
 
-use std::{borrow::Borrow, fmt::Debug};
+use alloc::vec::Vec;
+use core::{borrow::Borrow, fmt::Debug};
 
 use sqlparser::ast::ConstraintReferenceMatchKind;
 

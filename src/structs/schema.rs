@@ -1,5 +1,7 @@
 //! Schema struct for storing parsed schema information.
 
+use alloc::string::String;
+
 /// A database schema parsed from a CREATE SCHEMA statement.
 ///
 /// This struct stores the schema name and optional authorization owner.

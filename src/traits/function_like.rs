@@ -1,6 +1,7 @@
 //! Submodule providing a trait for describing SQL Function-like entities.
 
-use std::{fmt::Debug, hash::Hash};
+use alloc::vec::Vec;
+use core::{fmt::Debug, hash::Hash};
 
 use crate::{
     traits::{DatabaseLike, Metadata},

@@ -10,15 +10,34 @@ readme = "README.md"
 keywords = ["sql", "traits", "parser", "geometry"]
 categories = ["database", "parsing", "geometry"]
 
+[features]
+default = ["std"]
+# Re-enables the standard library and the I/O surface that needs it:
+# filesystem-backed `ParserDB::from_path*`, git-backed `from_git_url*`,
+# and the `Error::IoError`/`SqlParserError.file` PathBuf carriers.
+# Also forwards `sqlparser/recursive-protection`, which is itself
+# `std`-only — keeping the stack-overflow guard for deeply nested parse
+# trees in std builds, and dropping it (along with the `recursive` →
+# `stacker` → `psm` → `libc` chain) for no_std consumers.
+std = [
+    "sqlparser/std",
+    "sqlparser/recursive-protection",
+    "geometric-traits/std",
+    "thiserror/std",
+    "sql_docs/std",
+    "dep:git2",
+    "dep:tempfile",
+]
+
 [dependencies]
-sqlparser = "0.62"
-geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geometric-traits", branch = "main" }
-thiserror = "2.0"
-git2 = "0.20.3"
-tempfile = "3.25"
-sql_docs = { version = "1.0.11", git = "https://github.com/LucaCappelletti94/sql-docs", branch = "main" }
-sha2 = "0.10"
-unicode-normalization = "0.1"
+sqlparser = { version = "0.62", default-features = false }
+geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geometric-traits", branch = "main", default-features = false, features = ["alloc"] }
+thiserror = { version = "2.0", default-features = false }
+git2 = { version = "0.20.3", optional = true }
+tempfile = { version = "3.25", optional = true }
+sql_docs = { version = "1.0.11", git = "https://github.com/LucaCappelletti94/sql-docs", branch = "main", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+unicode-normalization = { version = "0.1", default-features = false }
 
 [lints.rust]
 missing_docs = "forbid"

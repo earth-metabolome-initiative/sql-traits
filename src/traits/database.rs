@@ -1,6 +1,7 @@
 //! Submodule providing a trait for describing SQL Database-like entities.
 
-use std::{borrow::Borrow, fmt::Debug};
+use alloc::vec::Vec;
+use core::{borrow::Borrow, fmt::Debug};
 
 use geometric_traits::{
     impls::CSR2D,

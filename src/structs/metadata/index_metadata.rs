@@ -1,6 +1,6 @@
 //! Submodule defining a generic `IndexMetadata` struct.
 
-use std::sync::Arc;
+use alloc::sync::Arc;
 
 use sqlparser::ast::Expr;
 

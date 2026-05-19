@@ -4,7 +4,8 @@
 //! by the same `Grant` struct. This module implements all grant traits
 //! on `Grant` to support both use cases.
 
-use std::mem;
+use alloc::{boxed::Box, vec::Vec};
+use core::mem;
 
 use sqlparser::ast::{
     Action, CreateRole, Grant, GrantObjects, Grantee, GranteeName, GranteesType, Ident, ObjectName,
@@ -543,7 +544,7 @@ impl TableGrantLike for Grant {
                         schemas.iter().any(|schema_name| schema_matches_table(schema_name, *table))
                     }))
                 }
-                _ => Box::new(std::iter::empty()),
+                _ => Box::new(core::iter::empty()),
             };
         direct_tables
     }

@@ -1,5 +1,7 @@
 //! Implement the [`ForeignKeyConstraint`] trait for the `sqlparser` crate's
 
+use alloc::{string::ToString, vec::Vec};
+
 use sqlparser::ast::{ConstraintReferenceMatchKind, CreateTable, ForeignKeyConstraint};
 
 use crate::{

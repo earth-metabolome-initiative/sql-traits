@@ -1,7 +1,8 @@
 //! SHA-256 based schema fingerprint for deterministic, persistable table
 //! identity.
 
-use std::fmt;
+use alloc::{string::String, vec::Vec};
+use core::fmt;
 
 use sha2::{Digest, Sha256};
 
@@ -120,7 +121,7 @@ fn validate_v1_layout_inner(
         }
     }
 
-    let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut seen: alloc::collections::BTreeSet<u32> = alloc::collections::BTreeSet::new();
     for &pk in pk_ordinals {
         if pk >= column_count {
             return Err(FingerprintError::PkOrdinalOutOfRange { ordinal: pk, column_count });
@@ -252,8 +253,8 @@ impl SchemaFingerprint {
     }
 }
 
-impl std::hash::Hash for SchemaFingerprint {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl core::hash::Hash for SchemaFingerprint {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.algorithm_id.hash(state);
         self.canonicalization_version.hash(state);
         self.profile_id.hash(state);

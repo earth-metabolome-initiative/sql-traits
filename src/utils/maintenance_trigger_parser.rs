@@ -1,6 +1,7 @@
 //! Utilities for parsing maintenance trigger bodies.
 
-use std::iter::Filter;
+use alloc::{boxed::Box, string::String, vec::Vec};
+use core::iter::Filter;
 
 use sqlparser::{
     ast::Expr,
@@ -84,11 +85,11 @@ pub enum MaintenanceToken {
     End,
 }
 
-type TokenFilterIter = Filter<std::vec::IntoIter<Token>, fn(&Token) -> bool>;
+type TokenFilterIter = Filter<alloc::vec::IntoIter<Token>, fn(&Token) -> bool>;
 
 /// An iterator over the high-level tokens of a maintenance trigger body.
 struct MaintenanceBodyIterator {
-    tokens: std::iter::Peekable<TokenFilterIter>,
+    tokens: core::iter::Peekable<TokenFilterIter>,
 }
 
 /// Predicate to skip whitespace tokens.

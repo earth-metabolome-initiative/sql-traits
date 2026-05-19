@@ -1,6 +1,6 @@
 //! Submodule providing a trait for describing SQL Role-like entities.
 
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use crate::traits::{DatabaseLike, Metadata};
 

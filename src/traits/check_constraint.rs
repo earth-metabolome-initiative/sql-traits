@@ -1,7 +1,11 @@
 //! Submodule definining the `CheckConstraintLike` trait for SQL check
 //! constraints.
 
-use std::{borrow::Borrow, fmt::Debug};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
+use core::{borrow::Borrow, fmt::Debug};
 
 use sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Value,
@@ -205,8 +209,8 @@ where
             direction,
         ) {
             bound_agg = match (bound_agg, direction) {
-                (Some(current), BoundDirection::Upper) => Some(std::cmp::min(current, bound)),
-                (Some(current), BoundDirection::Lower) => Some(std::cmp::max(current, bound)),
+                (Some(current), BoundDirection::Upper) => Some(core::cmp::min(current, bound)),
+                (Some(current), BoundDirection::Lower) => Some(core::cmp::max(current, bound)),
                 (None, _) => Some(bound),
             };
         }
@@ -392,9 +396,9 @@ where
                 );
                 return match (l, r, direction) {
                     // AND + Upper: Minimize (most restrictive limit)
-                    (Some(a), Some(b), BoundDirection::Upper) => Some(std::cmp::min(a, b)),
+                    (Some(a), Some(b), BoundDirection::Upper) => Some(core::cmp::min(a, b)),
                     // AND + Lower: Maximize (most restrictive minimum)
-                    (Some(a), Some(b), BoundDirection::Lower) => Some(std::cmp::max(a, b)),
+                    (Some(a), Some(b), BoundDirection::Lower) => Some(core::cmp::max(a, b)),
                     (Some(a), None, _) => Some(a),
                     (None, Some(b), _) => Some(b),
                     _ => None,
@@ -420,7 +424,7 @@ where
                 );
                 return match (l, r, direction) {
                     // OR + Lower: Minimize (least restrictive minimum)
-                    (Some(a), Some(b), BoundDirection::Lower) => Some(std::cmp::min(a, b)),
+                    (Some(a), Some(b), BoundDirection::Lower) => Some(core::cmp::min(a, b)),
                     _ => None,
                 };
             }

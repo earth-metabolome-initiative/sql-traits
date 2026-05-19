@@ -1,6 +1,7 @@
 //! Submodule defining the `IndexLike` trait for SQL indices.
 
-use std::fmt::Debug;
+use alloc::vec::Vec;
+use core::fmt::Debug;
 
 use sqlparser::ast::Expr;
 
