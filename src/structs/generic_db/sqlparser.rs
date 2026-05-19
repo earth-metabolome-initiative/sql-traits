@@ -12,10 +12,10 @@ use sqlparser::{
         AlterPolicy, AlterPolicyOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation,
         CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateFunctionBody, CreateIndex,
         CreatePolicy, CreateRole, CreateTable, CreateTrigger, DataType, ExactNumberInfo, Expr,
-        ForeignKeyConstraint, Grant, GranteeName, GranteesType, Ident, IndexColumn, ObjectName,
-        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, RenameTableNameKind,
-        SchemaName, Statement, TableConstraint, TimezoneInfo, UniqueConstraint, Value,
-        ValueWithSpan,
+        ForeignKeyConstraint, FunctionReturnType, Grant, GranteeName, GranteesType, Ident,
+        IndexColumn, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions,
+        RenameTableNameKind, SchemaName, Statement, TableConstraint, TimezoneInfo,
+        UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::{Dialect, GenericDialect},
     parser::{Parser, ParserError},
@@ -1307,7 +1307,7 @@ impl ParserDB {
                 if_not_exists: false,
                 name: ObjectName(vec![ObjectNamePart::Identifier(Ident::new(name))]),
                 args: Some(args),
-                return_type: Some(return_type),
+                return_type: Some(FunctionReturnType::DataType(return_type)),
                 function_body: Some(CreateFunctionBody::AsBeforeOptions {
                     body: Expr::Value(ValueWithSpan {
                         value: Value::SingleQuotedString(String::new()),

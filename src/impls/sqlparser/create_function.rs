@@ -2,7 +2,8 @@
 //! type.
 
 use sqlparser::ast::{
-    CreateFunction, CreateFunctionBody, Expr, ObjectNamePart, Value, ValueWithSpan,
+    CreateFunction, CreateFunctionBody, Expr, FunctionReturnType, ObjectNamePart, Value,
+    ValueWithSpan,
 };
 
 use crate::{
@@ -46,7 +47,17 @@ impl FunctionLike for CreateFunction {
 
     #[inline]
     fn return_type_name<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db str> {
-        self.return_type.as_ref().map(normalize_sqlparser_type)
+        // `FunctionReturnType` was introduced in sqlparser 0.62: `RETURNS T`
+        // and `RETURNS SETOF T` are distinct variants wrapping a `DataType`.
+        // The canonical type name discards the SETOF marker — semantics here
+        // match the pre-0.62 behavior where `return_type` was `Option<DataType>`.
+        self.return_type.as_ref().map(|rt| {
+            match rt {
+                FunctionReturnType::DataType(dt) | FunctionReturnType::SetOf(dt) => {
+                    normalize_sqlparser_type(dt)
+                }
+            }
+        })
     }
 
     #[inline]

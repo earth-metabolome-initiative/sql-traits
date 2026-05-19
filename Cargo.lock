@@ -814,16 +814,17 @@ dependencies = [
 
 [[package]]
 name = "sql_docs"
-version = "1.2.1"
-source = "git+https://github.com/LucaCappelletti94/sql-docs?branch=main#02b95a44ed5c6f46d0cff857617edd131c19a863"
+version = "1.3.2"
+source = "git+https://github.com/LucaCappelletti94/sql-docs?branch=main#3726103d08c1b213872fdaff274a5e52ff80c843"
 dependencies = [
  "sqlparser",
 ]
 
 [[package]]
 name = "sqlparser"
-version = "0.61.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#1da2ff779c0e71932fc882fe7ae4e6d674b8cc76"
+version = "0.62.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13c6d1b651dc4edf07eead2a0c6c78016ce971bc2c10da5266861b13f25e7cec"
 dependencies = [
  "log",
  "recursive",
