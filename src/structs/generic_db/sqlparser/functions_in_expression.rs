@@ -179,4 +179,47 @@ mod tests {
         assert!(names.contains(&"outer_fn"), "outer function attributed");
         assert!(names.contains(&"inner_fn"), "inner function attributed via recursion");
     }
+
+    /// `Expr::InList` branch in `functions_in_expression`: a function
+    /// call appearing inside an `IN (...)` list is attributed via the
+    /// `list_expr` recursion.
+    #[test]
+    fn test_in_list_function_call_is_attributed() {
+        let sql = "
+            CREATE FUNCTION classify(x INT) RETURNS INT AS 'SELECT $1';
+            CREATE TABLE t (
+                id INT,
+                CHECK (id IN (classify(1), classify(2), 3))
+            );
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let t = db.table(None, "t").unwrap();
+        let check = t.check_constraints(&db).next().expect("check");
+        let meta = db.check_constraint_metadata(check).expect("check meta");
+        let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
+        assert!(names.contains(&"classify"));
+    }
+
+    /// `Expr::Between` branch: function calls in any of the three
+    /// sub-expressions (`expr`, `low`, `high`) are all attributed.
+    #[test]
+    fn test_between_function_calls_in_all_three_positions() {
+        let sql = "
+            CREATE FUNCTION lo() RETURNS INT AS 'SELECT 1';
+            CREATE FUNCTION hi() RETURNS INT AS 'SELECT 10';
+            CREATE FUNCTION mid(x INT) RETURNS INT AS 'SELECT $1';
+            CREATE TABLE t (
+                id INT,
+                CHECK (mid(id) BETWEEN lo() AND hi())
+            );
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let t = db.table(None, "t").unwrap();
+        let check = t.check_constraints(&db).next().expect("check");
+        let meta = db.check_constraint_metadata(check).expect("check meta");
+        let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
+        assert!(names.contains(&"lo"));
+        assert!(names.contains(&"hi"));
+        assert!(names.contains(&"mid"));
+    }
 }
