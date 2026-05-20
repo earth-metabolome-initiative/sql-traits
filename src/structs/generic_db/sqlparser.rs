@@ -4397,6 +4397,49 @@ mod tests {
             assert!(!grant.applies_to_table(out_of_scope, &db));
         }
 
+        /// `grant_objects_inner_match` Sequences object-list arm:
+        /// GRANT USAGE ON SEQUENCE + matching REVOKE traverses the
+        /// merged ObjectName-list arm (covers another row of the merged
+        /// pattern at lines ~239–261).
+        #[test]
+        fn test_revoke_usage_on_sequence_matches_grant() {
+            let sql = r"
+                CREATE ROLE r;
+                GRANT USAGE ON SEQUENCE my_seq TO r;
+                REVOKE USAGE ON SEQUENCE my_seq FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 0);
+        }
+
+        /// `grant_objects_inner_match` All-future-tables-in-schema arm.
+        #[test]
+        fn test_revoke_all_sequences_in_schema_matches_grant() {
+            let sql = r"
+                CREATE SCHEMA s;
+                CREATE ROLE r;
+                GRANT USAGE ON ALL SEQUENCES IN SCHEMA s TO r;
+                REVOKE USAGE ON ALL SEQUENCES IN SCHEMA s FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 0);
+        }
+
+        /// `grant_objects_inner_match` fallback arm (`(left, right) =>
+        /// left == right`): a GRANT and REVOKE on the same simple
+        /// pseudo-object that doesn't match a specific variant goes
+        /// through the structural-equality arm.
+        #[test]
+        fn test_revoke_on_database_object_matches_grant() {
+            let sql = r"
+                CREATE ROLE r;
+                GRANT CREATE ON DATABASE my_db TO r;
+                REVOKE CREATE ON DATABASE my_db FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 0);
+        }
+
         /// `ColumnGrantLike::columns` per-action branches: a multi-action
         /// column grant (`INSERT (a), UPDATE (b), REFERENCES (c)`) surfaces
         /// the union of columns across all three arms in `columns()`.
