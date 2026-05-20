@@ -114,3 +114,69 @@ pub(super) fn functions_in_expression<DB: DatabaseLike>(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    //! These tests exercise `functions_in_expression` indirectly by parsing
+    //! schemas whose CHECK constraints reference user-defined functions in
+    //! the shapes that drive the un-tested branches: no-arg calls, nested
+    //! calls, and call-twice-dedup.
+
+    use sqlparser::dialect::GenericDialect;
+
+    use crate::{
+        prelude::ParserDB,
+        traits::{DatabaseLike, FunctionLike, TableLike},
+    };
+
+    /// `FunctionArguments::None` branch — a no-argument function call in a
+    /// CHECK expression is correctly attributed to the defining function.
+    #[test]
+    fn test_no_arg_function_call_is_attributed() {
+        let sql = "
+            CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';
+            CREATE TABLE t (id INT, CHECK (ping()));
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let t = db.table(None, "t").unwrap();
+        let check = t.check_constraints(&db).next().expect("check");
+        let meta = db.check_constraint_metadata(check).expect("check meta");
+        let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
+        assert!(names.contains(&"ping"));
+    }
+
+    /// Same function used twice in one expression is deduplicated (BTreeSet
+    /// over `Arc::as_ptr` keeps a single entry).
+    #[test]
+    fn test_same_function_used_twice_is_deduped() {
+        let sql = "
+            CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';
+            CREATE TABLE t (id INT, CHECK (ping() AND ping()));
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let t = db.table(None, "t").unwrap();
+        let check = t.check_constraints(&db).next().expect("check");
+        let meta = db.check_constraint_metadata(check).expect("check meta");
+        let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
+        assert_eq!(names.len(), 1, "ping() appears twice in source but dedups to one");
+        assert_eq!(names[0], "ping");
+    }
+
+    /// Nested function calls (`f(g(...))`) — the recursion walks into the
+    /// inner arg list and attributes both functions.
+    #[test]
+    fn test_nested_function_calls_are_both_attributed() {
+        let sql = "
+            CREATE FUNCTION inner_fn(x INT) RETURNS INT AS 'SELECT $1';
+            CREATE FUNCTION outer_fn(x INT) RETURNS BOOLEAN AS 'SELECT $1 > 0';
+            CREATE TABLE t (id INT, CHECK (outer_fn(inner_fn(id))));
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let t = db.table(None, "t").unwrap();
+        let check = t.check_constraints(&db).next().expect("check");
+        let meta = db.check_constraint_metadata(check).expect("check meta");
+        let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
+        assert!(names.contains(&"outer_fn"), "outer function attributed");
+        assert!(names.contains(&"inner_fn"), "inner function attributed via recursion");
+    }
+}

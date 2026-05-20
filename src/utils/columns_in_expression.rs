@@ -293,4 +293,46 @@ mod tests {
             _ => panic!("Unexpected error type"),
         }
     }
+
+    /// `CompoundIdentifier` error path — the last component of a
+    /// `schema.bad_column` reference must resolve, otherwise the
+    /// walker returns `UnknownColumnInCheckConstraint`.
+    #[test]
+    fn test_columns_in_expression_compound_identifier_unknown() {
+        let col_a = create_column("a");
+        let columns = vec![col_a.clone()];
+        // `t.b` — last ident is `b`, not in our column list.
+        let expr = Expr::CompoundIdentifier(vec![Ident::new("t"), Ident::new("b")]);
+
+        let result = columns_in_expression(&expr, "t", &columns);
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            crate::errors::Error::UnknownColumnInCheckConstraint { column_name, table_name } => {
+                assert_eq!(column_name, "b");
+                assert_eq!(table_name, "t");
+            }
+            other => panic!("Unexpected error type: {other:?}"),
+        }
+    }
+
+    /// `Expr::Tuple` branch — every element is walked, columns inside the
+    /// tuple are surfaced, and the result is deduped.
+    #[test]
+    fn test_columns_in_expression_tuple() {
+        let col_a = create_column("a");
+        let col_b = create_column("b");
+        let col_c = create_column("c");
+        let columns = vec![col_a.clone(), col_b.clone(), col_c.clone()];
+        // `(a, b, c)` as an expression tuple.
+        let expr = Expr::Tuple(vec![
+            Expr::Identifier(Ident::new("a")),
+            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new("c")),
+        ]);
+
+        let result =
+            columns_in_expression(&expr, "t", &columns).expect("tuple of known columns parses");
+        let names: Vec<&str> = result.iter().map(ColumnLike::column_name).collect();
+        assert_eq!(names, vec!["a", "b", "c"]);
+    }
 }
