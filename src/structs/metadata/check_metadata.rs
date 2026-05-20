@@ -46,12 +46,49 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     }
 
     /// Returns an iterator over the columns involved in the constraint.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (a INT, b INT, CHECK (a < b));")?;
+    /// let t = db.table(None, "t").unwrap();
+    /// let check = t.check_constraints(&db).next().unwrap();
+    /// let meta = db.check_constraint_metadata(check).unwrap();
+    /// let names: Vec<&str> = meta.columns().map(|c| c.column_name()).collect();
+    /// assert!(names.contains(&"a") && names.contains(&"b"));
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn columns(&self) -> impl Iterator<Item = &<U::DB as DatabaseLike>::Column> {
         self.columns.iter().map(core::convert::AsRef::as_ref)
     }
 
     /// Returns an iterator over the functions involved in the constraint.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    ///     CREATE FUNCTION is_valid(x INT) RETURNS BOOLEAN AS 'SELECT $1 > 0';
+    ///     CREATE TABLE t (id INT, CHECK (is_valid(id)));
+    ///     ",
+    /// )?;
+    /// let t = db.table(None, "t").unwrap();
+    /// let check = t.check_constraints(&db).next().unwrap();
+    /// let meta = db.check_constraint_metadata(check).unwrap();
+    /// let names: Vec<&str> = meta.functions().map(|f| f.name()).collect();
+    /// assert!(names.contains(&"is_valid"));
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn functions(&self) -> impl Iterator<Item = &<U::DB as DatabaseLike>::Function> {
         self.functions.iter().map(core::convert::AsRef::as_ref)
