@@ -314,6 +314,22 @@ where
 
     /// Returns a reference to the metadata of the specified index, if it exists
     /// in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT); CREATE INDEX my_idx ON t(id);",
+    /// )?;
+    /// let table = db.table(None, "t").unwrap();
+    /// let index = table.indices(&db).next().expect("index should exist");
+    /// assert!(db.index_metadata(index).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn index_metadata(&self, index: &I) -> Option<&I::Meta> {
         self.indices
             .binary_search_by(|(i, _)| i.as_ref().cmp(index))
@@ -442,6 +458,24 @@ where
 
     /// Returns a reference to the metadata of the specified policy, if it
     /// exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    ///     CREATE TABLE t (id INT);
+    ///     CREATE POLICY my_policy ON t USING (id > 0);
+    ///     ",
+    /// )?;
+    /// let policy = db.policies().next().expect("policy should exist");
+    /// assert!(db.policy_metadata(policy).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn policy_metadata(&self, policy: &P) -> Option<&P::Meta> {
         self.policies
             .binary_search_by(|(p, _)| p.name().cmp(policy.name()))
@@ -669,6 +703,19 @@ where
     /// # Arguments
     ///
     /// * `schema` - The schema to retrieve metadata for.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE SCHEMA my_schema;")?;
+    /// let schema = db.schema("my_schema").expect("schema should exist");
+    /// assert!(db.schema_metadata(schema).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn schema_metadata(&self, schema: &S) -> Option<&S::Meta> {
         self.schemas
             .binary_search_by(|(s, _)| s.name().cmp(schema.name()))
@@ -677,6 +724,19 @@ where
     }
 
     /// Iterates over the schemas and their metadata.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE SCHEMA a; CREATE SCHEMA b;")?;
+    /// let names: Vec<&str> = db.schemas().map(|(s, _)| s.name()).collect();
+    /// assert_eq!(names.len(), 2);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn schemas(&self) -> impl Iterator<Item = (&S, &S::Meta)> {
         self.schemas.iter().map(|(s, m)| (s.as_ref(), m))
     }
