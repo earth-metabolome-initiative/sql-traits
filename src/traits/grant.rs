@@ -462,7 +462,10 @@ mod tests {
     use sqlparser::dialect::GenericDialect;
 
     use super::*;
-    use crate::{structs::ParserDB, traits::DatabaseLike};
+    use crate::{
+        structs::ParserDB,
+        traits::{DatabaseLike, TableLike},
+    };
 
     #[test]
     fn test_table_grant_ref_implementation() {
@@ -474,20 +477,53 @@ mod tests {
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let grant = db.table_grants().next().expect("Grant not found");
 
-        // Use reference to grant
-        let grant_ref = &grant;
+        // Explicitly route through `impl <Trait> for &T` so the blanket
+        // forwarding bodies (lines 208–243, 351–367) are exercised under
+        // tarpaulin.
+        let grant_ref: &<ParserDB as DatabaseLike>::TableGrant = grant;
 
-        let privileges: Vec<_> = grant_ref.privileges(&db).collect();
+        let privileges: Vec<_> = <&_ as GrantLike>::privileges(&grant_ref, &db).collect();
         assert_eq!(privileges.len(), 2);
 
-        assert!(grant_ref.with_grant_option());
+        assert!(!<&_ as GrantLike>::is_all_privileges(&grant_ref));
+        assert!(<&_ as GrantLike>::with_grant_option(&grant_ref));
+        assert!(<&_ as GrantLike>::granted_by(&grant_ref, &db).is_none());
 
-        let grantees: Vec<_> = grant_ref.grantees(&db).collect();
+        let grantees: Vec<_> = <&_ as GrantLike>::grantees(&grant_ref, &db).collect();
         assert_eq!(grantees.len(), 1);
 
         let table = db.table(None, "my_table").expect("Table not found");
-        assert!(grant_ref.applies_to_table(table, &db));
+        assert!(<&_ as TableGrantLike>::applies_to_table(&grant_ref, table, &db));
+        let tables: Vec<_> = <&_ as TableGrantLike>::tables(&grant_ref, &db).collect();
+        assert_eq!(tables.len(), 1);
+
         let app_user = db.role("app_user").expect("Role not found");
-        assert!(grant_ref.applies_to_role(app_user));
+        assert!(<&_ as GrantLike>::applies_to_role(&grant_ref, app_user));
+    }
+
+    /// Exercises the `impl ColumnGrantLike for &T` blanket forwarding —
+    /// the trait's three methods (`columns`, `table`, plus inherited
+    /// `GrantLike`) all need explicit route-through for tarpaulin.
+    #[test]
+    fn test_column_grant_ref_implementation() {
+        let sql = r"
+            CREATE TABLE users (id INT, secret TEXT);
+            CREATE ROLE r;
+            GRANT SELECT (id) ON users TO r;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let column_grant = db.column_grants().next().expect("column grant should exist");
+
+        let cg_ref: &<ParserDB as DatabaseLike>::ColumnGrant = column_grant;
+
+        // GrantLike methods routed through &T.
+        assert!(<&_ as GrantLike>::with_grant_option(&cg_ref).then_some(()).is_none());
+        let _ = <&_ as GrantLike>::privileges(&cg_ref, &db).count();
+
+        // ColumnGrantLike methods routed through &T.
+        let table = <&_ as ColumnGrantLike>::table(&cg_ref, &db).expect("column grant has a table");
+        assert_eq!(table.table_name(), "users");
+        let cols: Vec<_> = <&_ as ColumnGrantLike>::columns(&cg_ref, table, &db).collect();
+        assert!(!cols.is_empty(), "column grant must surface at least one column");
     }
 }

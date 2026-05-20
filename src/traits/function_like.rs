@@ -176,6 +176,27 @@ mod tests {
 
     use crate::{prelude::*, traits::DatabaseLike};
 
+    /// Exercises both default-method bodies (`name_is_quoted`,
+    /// `normalized_return_type_name`) directly so they're credited
+    /// under tarpaulin.
+    #[test]
+    fn test_default_methods_on_function() {
+        let sql = r"
+            CREATE FUNCTION unquoted_fn() RETURNS INT AS 'SELECT 1';
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let f = db.function("unquoted_fn").expect("function should exist");
+
+        // `name_is_quoted` default returns false for parser-derived
+        // functions whose impl chooses not to override.
+        assert!(!f.name_is_quoted());
+
+        // `normalized_return_type_name` default delegates to
+        // `return_type_name` then runs the result through
+        // `normalize_postgres_type`.
+        assert_eq!(f.normalized_return_type_name(&db), Some("INT"));
+    }
+
     #[test]
     fn test_drop_function() {
         let sql = r"

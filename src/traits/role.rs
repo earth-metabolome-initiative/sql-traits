@@ -360,23 +360,35 @@ mod tests {
     #[test]
     fn test_role_ref_implementation() {
         let sql = r"
+            CREATE TABLE t (id INT);
             CREATE ROLE parent_role;
-            CREATE ROLE test_role SUPERUSER CREATEDB CREATEROLE LOGIN IN ROLE parent_role;
+            CREATE ROLE test_role SUPERUSER CREATEDB CREATEROLE LOGIN IN ROLE parent_role
+                CONNECTION LIMIT 5;
+            CREATE POLICY p ON t TO test_role USING (id > 0);
         ";
         let db = parse_postgres(sql);
         let role = db.role("test_role").expect("Role not found");
 
-        // Use reference to role
-        let role_ref = &role;
+        // Use reference to role and explicitly route every call through
+        // `impl RoleLike for &T` so the blanket forwarding bodies (lines
+        // 292–344) are exercised under tarpaulin.
+        let role_ref: &<ParserDB as DatabaseLike>::Role = role;
 
-        assert_eq!(role_ref.name(), "test_role");
-        assert!(role_ref.is_superuser());
-        assert!(role_ref.can_create_db());
-        assert!(role_ref.can_create_role());
-        assert!(role_ref.can_login());
+        assert_eq!(<&_ as RoleLike>::name(&role_ref), "test_role");
+        assert!(<&_ as RoleLike>::is_superuser(&role_ref));
+        assert!(<&_ as RoleLike>::can_create_db(&role_ref));
+        assert!(<&_ as RoleLike>::can_create_role(&role_ref));
+        assert!(<&_ as RoleLike>::inherits(&role_ref));
+        assert!(<&_ as RoleLike>::can_login(&role_ref));
+        assert!(!<&_ as RoleLike>::can_bypass_rls(&role_ref));
+        assert!(!<&_ as RoleLike>::is_replication(&role_ref));
+        assert_eq!(<&_ as RoleLike>::connection_limit(&role_ref), Some(5));
 
-        let memberships: Vec<_> = role_ref.member_of(&db).collect();
+        let memberships: Vec<_> = <&_ as RoleLike>::member_of(&role_ref, &db).collect();
         assert_eq!(memberships.len(), 1);
         assert_eq!(memberships[0].name(), "parent_role");
+
+        let policies: Vec<_> = <&_ as RoleLike>::policies(&role_ref, &db).collect();
+        assert_eq!(policies.len(), 1);
     }
 }
