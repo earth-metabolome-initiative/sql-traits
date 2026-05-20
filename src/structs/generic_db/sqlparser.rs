@@ -4326,5 +4326,107 @@ mod tests {
             assert!(!table.can_select(r1, &db), "r1 should have had SELECT revoked");
             assert!(table.can_select(r2, &db), "r2 should still have SELECT");
         }
+
+        /// `grant_objects_inner_match` schema-list arm: REVOKE on
+        /// `ALL TABLES IN SCHEMA` matching a same-shape GRANT goes
+        /// through the giant merged arm that covers AllSequences/
+        /// AllTables/AllViews/AllMaterializedViews/... InSchema.
+        #[test]
+        fn test_revoke_all_tables_in_schema_matches_corresponding_grant() {
+            let sql = r"
+                CREATE SCHEMA s;
+                CREATE TABLE s.t (id INT);
+                CREATE ROLE r;
+                GRANT SELECT ON ALL TABLES IN SCHEMA s TO r;
+                REVOKE SELECT ON ALL TABLES IN SCHEMA s FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 0, "matching revoke removes the grant");
+        }
+
+        /// `grant_objects_inner_match` Schemas object-list arm:
+        /// GRANT USAGE ON SCHEMA + matching REVOKE traverses the
+        /// merged ObjectName-list arm.
+        #[test]
+        fn test_revoke_usage_on_schema_matches_grant() {
+            let sql = r"
+                CREATE SCHEMA s;
+                CREATE ROLE r;
+                GRANT USAGE ON SCHEMA s TO r;
+                REVOKE USAGE ON SCHEMA s FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 0);
+        }
+
+        /// `grant_objects_inner_match` Function arm: REVOKE on a
+        /// specific function-by-signature matches the corresponding
+        /// GRANT EXECUTE on that function.
+        #[test]
+        fn test_revoke_execute_on_function_matches_grant() {
+            let sql = r"
+                CREATE FUNCTION f(x INT) RETURNS INT AS 'SELECT $1';
+                CREATE ROLE r;
+                GRANT EXECUTE ON FUNCTION f(INT) TO r;
+                REVOKE EXECUTE ON FUNCTION f(INT) FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            assert_eq!(db.table_grants().count(), 0);
+        }
+
+        /// `applies_to_table` AllTablesInSchema branch: querying whether
+        /// an `ALL TABLES IN SCHEMA s` grant applies to a specific table
+        /// returns true iff the table's schema matches.
+        #[test]
+        fn test_all_tables_in_schema_grant_applies_to_matching_table() {
+            use crate::traits::TableGrantLike;
+
+            let sql = r"
+                CREATE SCHEMA s;
+                CREATE TABLE s.in_scope (id INT);
+                CREATE TABLE out_of_scope (id INT);
+                CREATE ROLE r;
+                GRANT SELECT ON ALL TABLES IN SCHEMA s TO r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            let grant = db.table_grants().next().expect("grant");
+            let in_scope = db.table(Some("s"), "in_scope").expect("in_scope table");
+            let out_of_scope = db.table(None, "out_of_scope").expect("out_of_scope table");
+
+            assert!(grant.applies_to_table(in_scope, &db));
+            assert!(!grant.applies_to_table(out_of_scope, &db));
+        }
+
+        /// `ColumnGrantLike::columns` per-action branches: a multi-action
+        /// column grant (`INSERT (a), UPDATE (b), REFERENCES (c)`) surfaces
+        /// the union of columns across all three arms in `columns()`.
+        #[test]
+        fn test_column_grant_columns_iterator_covers_all_action_arms() {
+            use crate::traits::ColumnGrantLike;
+
+            let sql = r"
+                CREATE TABLE t (a INT, b INT, c INT);
+                CREATE ROLE r;
+                GRANT INSERT (a), UPDATE (b), REFERENCES (c) ON t TO r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+            let table = db.table(None, "t").expect("table");
+
+            // Iterate every column grant and call `.columns(table, &db)`.
+            // This routes through the Insert/Update/References match
+            // arms in `impls/sqlparser/grant.rs::columns`.
+            let mut all_cols: Vec<&str> = Vec::new();
+            for cg in db.column_grants() {
+                for col in cg.columns(table, &db) {
+                    all_cols.push(col.column_name());
+                }
+            }
+            all_cols.sort_unstable();
+            all_cols.dedup();
+            // The three actions reference three distinct columns.
+            assert!(all_cols.contains(&"a"));
+            assert!(all_cols.contains(&"b"));
+            assert!(all_cols.contains(&"c"));
+        }
     }
 }
