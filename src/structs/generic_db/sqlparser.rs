@@ -9,7 +9,7 @@ use alloc::{
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "std")]
+#[cfg(feature = "git")]
 use git2::Repository;
 use sql_docs::SqlDoc;
 #[cfg(feature = "std")]
@@ -2262,7 +2262,7 @@ impl ParserDB {
     ///
     /// Returns an error if the repository cannot be cloned or if the SQL files
     /// cannot be parsed.
-    #[cfg(feature = "std")]
+    #[cfg(feature = "git")]
     pub fn from_git_url<D: Dialect + Default>(url: &str) -> Result<Self, crate::errors::Error> {
         let dir = tempfile::tempdir()?;
         Repository::clone(url, dir.path())?;
@@ -2275,7 +2275,7 @@ impl ParserDB {
     ///
     /// Returns an error if the repository cannot be cloned or if the SQL files
     /// cannot be parsed.
-    #[cfg(feature = "std")]
+    #[cfg(feature = "git")]
     pub fn from_git_url_with_dialect<D: Dialect + Default>(
         url: &str,
     ) -> Result<Self, crate::errors::Error> {

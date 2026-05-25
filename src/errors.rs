@@ -127,8 +127,8 @@ pub enum Error {
         #[cfg(feature = "std")]
         file: Option<std::path::PathBuf>,
     },
-    /// Wrapper around git errors. Only available with the `std` feature.
-    #[cfg(feature = "std")]
+    /// Wrapper around git errors. Only available with the `git` feature.
+    #[cfg(feature = "git")]
     #[error("Git error: {0}")]
     GitError(#[from] git2::Error),
     /// Wrapper around IO errors. Only available with the `std` feature.

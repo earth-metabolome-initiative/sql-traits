@@ -26,7 +26,7 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
     - name: Run tests
-      run: cargo test --all-targets
+      run: cargo test --all-targets --features git
 
   no_std:
     name: no_std + alloc build
@@ -93,7 +93,7 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
     - name: Run clippy
-      run: cargo clippy --all-targets -- -D warnings
+      run: cargo clippy --all-targets --features git -- -D warnings
 
   doc:
     name: Documentation
@@ -105,7 +105,7 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
     - name: Check documentation
-      run: cargo doc --no-deps --document-private-items
+      run: cargo doc --no-deps --document-private-items --features git
       env:
         RUSTDOCFLAGS: -D warnings
 
@@ -121,7 +121,7 @@ jobs:
     - name: Install tarpaulin
       uses: taiki-e/install-action@cargo-tarpaulin
     - name: Generate coverage
-      run: cargo tarpaulin --engine=llvm --out xml --workspace --run-types AllTargets --run-types Doctests
+      run: cargo tarpaulin --engine=llvm --out xml --workspace --run-types AllTargets --run-types Doctests --features git
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
