@@ -23,6 +23,13 @@ pub enum LookupError {
         /// Deterministically ordered list of matching candidates.
         candidates: Vec<String>,
     },
+    /// Table resolution found no matching table for a name that is required to
+    /// denote one.
+    #[error("Table `{object_name}` not found.")]
+    TableNotFound {
+        /// Lookup object name as rendered by sqlparser.
+        object_name: String,
+    },
     /// Adding a table would create semantic lookup ambiguity.
     #[error(
         "Cannot add table `{table}` because it conflicts with existing table `{conflicting_table}`."

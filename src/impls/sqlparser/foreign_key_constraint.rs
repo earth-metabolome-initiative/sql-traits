@@ -7,7 +7,7 @@ use sqlparser::ast::{ConstraintReferenceMatchKind, CreateTable, ForeignKeyConstr
 use crate::{
     structs::{ParserDB, TableAttribute},
     traits::{ForeignKeyLike, Metadata, database::DatabaseLike, table::TableLike},
-    utils::last_str,
+    utils::{identifier_resolution::identifiers_match, object_name::object_name_last_part},
 };
 
 impl Metadata for TableAttribute<CreateTable, ForeignKeyConstraint> {
@@ -37,15 +37,31 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
         &self,
         database: &'db Self::DB,
     ) -> &'db <Self::DB as DatabaseLike>::Table {
-        let referenced_table_name = last_str(&self.attribute().foreign_table);
+        let foreign_table = &self.attribute().foreign_table;
+        let (referenced_name, referenced_quoted) = object_name_last_part(foreign_table)
+            .unwrap_or_else(|| {
+                let host_table = self.host_table(database);
+                panic!(
+                    "Foreign key in table `{}` has an empty referenced table name",
+                    host_table.table_name()
+                )
+            });
         database
             .tables()
             .find(|table: &&<Self::DB as DatabaseLike>::Table| {
-                table.table_name() == referenced_table_name
+                identifiers_match(
+                    table.table_name(),
+                    table.table_name_is_quoted(),
+                    referenced_name,
+                    referenced_quoted,
+                )
             })
             .unwrap_or_else(|| {
                 let host_table = self.host_table(database);
-                panic!("Referenced table `{referenced_table_name}` not found for foreign key in table `{}`", host_table.table_name())
+                panic!(
+                    "Referenced table `{referenced_name}` not found for foreign key in table `{}`",
+                    host_table.table_name()
+                )
             })
     }
 
@@ -188,6 +204,23 @@ mod tests {
 
         assert_eq!(fk.host_table(&db).table_name(), "t");
         assert_eq!(fk.referenced_table(&db).table_name(), "t");
+    }
+
+    /// The referenced table resolves under PostgreSQL identifier folding even
+    /// when the `REFERENCES` clause spells the target with different casing
+    /// than the `CREATE TABLE` that defines it. Regression: the previous
+    /// resolver compared raw strings and never matched a case-differing
+    /// unquoted reference, panicking instead.
+    #[test]
+    fn test_referenced_table_resolves_case_insensitively() {
+        let sql = "
+            CREATE TABLE parent (id INT PRIMARY KEY);
+            CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES Parent(id));
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+        let child = db.table(None, "child").unwrap();
+        let fk = child.foreign_keys(&db).next().expect("FK should exist");
+        assert_eq!(fk.referenced_table(&db).table_name(), "parent");
     }
 
     /// `match_kind()` defaults to `Simple` when no `MATCH` clause is given.

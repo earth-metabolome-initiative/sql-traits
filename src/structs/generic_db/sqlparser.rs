@@ -36,7 +36,15 @@ use crate::{
         metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
     },
     traits::{ColumnLike, FunctionLike, TableLike},
-    utils::{columns_in_expression, identifier_resolution::identifiers_match, last_str},
+    utils::{
+        columns_in_expression,
+        identifier_resolution::identifiers_match,
+        last_str,
+        object_name::{
+            object_name_identifiers, object_name_last_part, resolve_table_object_name_in_iter,
+            resolve_table_object_name_with_implicit_public_in_iter,
+        },
+    },
 };
 
 mod functions_in_expression;
@@ -388,122 +396,6 @@ fn object_name_last_identifier(object_name: &ObjectName) -> Option<&Ident> {
     }
 }
 
-fn object_name_last_part(object_name: &ObjectName) -> Option<(&str, bool)> {
-    match object_name.0.last() {
-        Some(ObjectNamePart::Identifier(ident)) => {
-            Some((ident.value.as_str(), ident.quote_style.is_some()))
-        }
-        Some(ObjectNamePart::Function(function_part)) => {
-            Some((function_part.name.value.as_str(), function_part.name.quote_style.is_some()))
-        }
-        None => None,
-    }
-}
-
-fn quoted_identifier(value: &str) -> String {
-    format!("\"{}\"", value.replace('\"', "\"\""))
-}
-
-fn render_table_candidate(table: &CreateTable) -> String {
-    let table_name = if table.table_name_is_quoted() {
-        quoted_identifier(table.table_name())
-    } else {
-        table.table_name().to_string()
-    };
-
-    match table.table_schema() {
-        Some(schema_name) => {
-            let schema_name = if table.table_schema_is_quoted() {
-                quoted_identifier(schema_name)
-            } else {
-                schema_name.to_string()
-            };
-            format!("{schema_name}.{table_name}")
-        }
-        None => table_name,
-    }
-}
-
-fn object_name_identifiers(
-    object_name: &ObjectName,
-) -> Result<(Option<&Ident>, &Ident), LookupError> {
-    if object_name.0.is_empty() {
-        return Err(LookupError::InvalidObjectName {
-            object_name: object_name.to_string(),
-            reason: "name has no identifier parts".to_string(),
-        });
-    }
-    if object_name.0.len() > 2 {
-        return Err(LookupError::InvalidObjectName {
-            object_name: object_name.to_string(),
-            reason: "only one-part or two-part object names are supported".to_string(),
-        });
-    }
-
-    let mut idents: Vec<&Ident> = Vec::with_capacity(object_name.0.len());
-    for part in &object_name.0 {
-        match part {
-            ObjectNamePart::Identifier(ident) => idents.push(ident),
-            ObjectNamePart::Function(_) => {
-                return Err(LookupError::InvalidObjectName {
-                    object_name: object_name.to_string(),
-                    reason: "all object name parts must be identifiers".to_string(),
-                });
-            }
-        }
-    }
-
-    if idents.len() == 1 { Ok((None, idents[0])) } else { Ok((Some(idents[0]), idents[1])) }
-}
-
-fn table_matches_lookup_idents(
-    table: &CreateTable,
-    schema_ident: Option<&Ident>,
-    table_ident: &Ident,
-) -> bool {
-    if !identifiers_match(
-        table.table_name(),
-        table.table_name_is_quoted(),
-        table_ident.value.as_str(),
-        table_ident.quote_style.is_some(),
-    ) {
-        return false;
-    }
-
-    match (schema_ident, table.table_schema()) {
-        (None, None) => true,
-        (Some(schema_ident), Some(table_schema)) => {
-            identifiers_match(
-                table_schema,
-                table.table_schema_is_quoted(),
-                schema_ident.value.as_str(),
-                schema_ident.quote_style.is_some(),
-            )
-        }
-        _ => false,
-    }
-}
-
-fn resolve_table_from_candidates<'a>(
-    object_name: &ObjectName,
-    candidates: &[&'a CreateTable],
-) -> Result<Option<&'a CreateTable>, LookupError> {
-    match candidates {
-        [] => Ok(None),
-        [table] => Ok(Some(*table)),
-        _ => {
-            let mut rendered: Vec<String> =
-                candidates.iter().copied().map(render_table_candidate).collect();
-            rendered.sort_unstable();
-            rendered.dedup();
-            Err(LookupError::AmbiguousTableLookup {
-                object_name: object_name.to_string(),
-                candidates: rendered,
-            })
-        }
-    }
-}
-
 fn resolve_schema_ident_in_iter<'a>(
     mut schemas: impl Iterator<Item = &'a Schema>,
     ident: &Ident,
@@ -516,75 +408,6 @@ fn resolve_schema_ident_in_iter<'a>(
             ident.quote_style.is_some(),
         )
     })
-}
-
-fn resolve_table_object_name_in_iter<'a>(
-    tables: impl Iterator<Item = &'a CreateTable>,
-    object_name: &ObjectName,
-) -> Result<Option<&'a CreateTable>, LookupError> {
-    let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-    let candidates: Vec<&CreateTable> = tables
-        .filter(|table| table_matches_lookup_idents(table, schema_ident, table_ident))
-        .collect();
-    resolve_table_from_candidates(object_name, &candidates)
-}
-
-fn resolve_table_object_name_with_implicit_public_in_iter<'a>(
-    tables: impl Iterator<Item = &'a CreateTable>,
-    object_name: &ObjectName,
-) -> Result<Option<&'a CreateTable>, LookupError> {
-    let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-    let table_refs: Vec<&CreateTable> = tables.collect();
-
-    if schema_ident.is_some() {
-        return resolve_table_object_name_in_iter(table_refs.into_iter(), object_name);
-    }
-
-    let unqualified_candidates: Vec<&CreateTable> = table_refs
-        .iter()
-        .copied()
-        .filter(|table| table_matches_lookup_idents(table, None, table_ident))
-        .collect();
-    let unqualified = resolve_table_from_candidates(object_name, &unqualified_candidates)?;
-
-    let public_candidates: Vec<&CreateTable> = table_refs
-        .iter()
-        .copied()
-        .filter(|table| {
-            table.table_schema().is_some_and(|schema_name| {
-                identifiers_match(schema_name, table.table_schema_is_quoted(), "public", false)
-            }) && identifiers_match(
-                table.table_name(),
-                table.table_name_is_quoted(),
-                table_ident.value.as_str(),
-                table_ident.quote_style.is_some(),
-            )
-        })
-        .collect();
-    let public_lookup_name = ObjectName(vec![
-        ObjectNamePart::Identifier(Ident::new("public")),
-        ObjectNamePart::Identifier(table_ident.clone()),
-    ]);
-    let public = resolve_table_from_candidates(&public_lookup_name, &public_candidates)?;
-
-    match (unqualified, public) {
-        (Some(unqualified), Some(public)) => {
-            if core::ptr::eq(unqualified, public) {
-                Ok(Some(unqualified))
-            } else {
-                let mut candidates =
-                    vec![render_table_candidate(unqualified), render_table_candidate(public)];
-                candidates.sort_unstable();
-                candidates.dedup();
-                Err(LookupError::AmbiguousTableLookup {
-                    object_name: object_name.to_string(),
-                    candidates,
-                })
-            }
-        }
-        (Some(table), None) | (None, Some(table)) => Ok(Some(table)),
-        (None, None) => Ok(None),
-    }
 }
 
 fn table_matches_resolved_identity(
