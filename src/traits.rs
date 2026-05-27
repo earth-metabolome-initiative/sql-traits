@@ -28,6 +28,12 @@ pub mod schema;
 pub use schema::SchemaLike;
 pub mod grant;
 pub use grant::{ColumnGrantLike, GrantLike, TableGrantLike};
+pub mod data_statement;
+pub use data_statement::DataStatementLike;
+pub mod dql;
+pub use dql::DQLLike;
+pub mod dml;
+pub use dml::{DMLLike, DmlKind};
 
 /// Trait for associating a metadata struct to a given type.
 pub trait Metadata {

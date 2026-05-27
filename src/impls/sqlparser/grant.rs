@@ -18,39 +18,11 @@ use crate::{
         ColumnGrantLike, ColumnLike, DatabaseLike, GrantLike, Metadata, RoleLike, TableGrantLike,
         TableLike,
     },
-    utils::identifier_resolution::identifiers_match,
+    utils::{
+        identifier_resolution::identifiers_match,
+        object_name::{object_name_last_part, table_matches_object_name},
+    },
 };
-
-/// Extracts the schema name from an ObjectName if it has at least 2 parts.
-///
-/// For a name like `schema.table`, returns `Some("schema")`.
-/// For a name like `table`, returns `None`.
-fn schema_from_object_name(obj: &ObjectName) -> Option<(&str, bool)> {
-    if obj.0.len() > 1 {
-        match &obj.0[obj.0.len() - 2] {
-            ObjectNamePart::Identifier(ident) => {
-                Some((ident.value.as_str(), ident.quote_style.is_some()))
-            }
-            ObjectNamePart::Function(f) => {
-                Some((f.name.value.as_str(), f.name.quote_style.is_some()))
-            }
-        }
-    } else {
-        None
-    }
-}
-
-fn object_name_last_part(obj: &ObjectName) -> Option<(&str, bool)> {
-    match obj.0.last() {
-        Some(ObjectNamePart::Identifier(ident)) => {
-            Some((ident.value.as_str(), ident.quote_style.is_some()))
-        }
-        Some(ObjectNamePart::Function(f)) => {
-            Some((f.name.value.as_str(), f.name.quote_style.is_some()))
-        }
-        None => None,
-    }
-}
 
 fn object_names_match(left: &ObjectName, right: &ObjectName) -> bool {
     if left.0.len() != right.0.len() {
@@ -98,34 +70,6 @@ fn grantee_matches_role(grantee: &Grantee, role: &CreateRole) -> bool {
     } else {
         let role_name = role.name();
         format!("{grantee}").eq_ignore_ascii_case(role_name)
-    }
-}
-
-fn table_matches_object_name<T: TableLike>(table: &T, object_name: &ObjectName) -> bool {
-    let Some((table_lookup_name, table_lookup_quoted)) = object_name_last_part(object_name) else {
-        return false;
-    };
-
-    if !identifiers_match(
-        table.table_name(),
-        table.table_name_is_quoted(),
-        table_lookup_name,
-        table_lookup_quoted,
-    ) {
-        return false;
-    }
-
-    match (schema_from_object_name(object_name), table.table_schema()) {
-        (None, None) => true,
-        (Some((schema_lookup, schema_lookup_quoted)), Some(table_schema)) => {
-            identifiers_match(
-                table_schema,
-                table.table_schema_is_quoted(),
-                schema_lookup,
-                schema_lookup_quoted,
-            )
-        }
-        _ => false,
     }
 }
 

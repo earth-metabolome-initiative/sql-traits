@@ -13,3 +13,4 @@ pub use common_snake_affix::{common_column_name_snake_prefix, common_column_name
 pub mod fingerprint_type_token;
 pub mod identifier_resolution;
 pub mod maintenance_trigger_parser;
+pub(crate) mod object_name;
