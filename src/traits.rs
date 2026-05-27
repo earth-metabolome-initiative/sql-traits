@@ -33,7 +33,7 @@ pub use data_statement::DataStatementLike;
 pub mod dql;
 pub use dql::DQLLike;
 pub mod dml;
-pub use dml::{DMLLike, DmlKind};
+pub use dml::{DMLLike, DmlKind, DmlStatement};
 
 /// Trait for associating a metadata struct to a given type.
 pub trait Metadata {

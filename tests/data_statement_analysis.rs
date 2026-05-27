@@ -162,7 +162,7 @@ fn insert_target_kind_and_referenced_tables() {
     let Statement::Insert(insert) = statement("INSERT INTO orders SELECT * FROM orders") else {
         panic!("expected insert");
     };
-    assert_eq!(DMLLike::<ParserDB>::kind(&insert), DmlKind::Insert);
+    assert_eq!(insert.kind(), DmlKind::Insert);
     assert_eq!(insert.target_table(&db).unwrap().table_name(), "orders");
     assert_eq!(referenced_names(&insert, &db), vec!["orders".to_string()]);
 }
@@ -175,7 +175,7 @@ fn update_target_kind_and_referenced_tables() {
     else {
         panic!("expected update");
     };
-    assert_eq!(DMLLike::<ParserDB>::kind(&update), DmlKind::Update);
+    assert_eq!(update.kind(), DmlKind::Update);
     assert_eq!(update.target_table(&db).unwrap().table_name(), "orders");
     assert_eq!(referenced_names(&update, &db), vec!["orders".to_string(), "users".to_string()],);
 }
@@ -188,7 +188,7 @@ fn delete_target_kind_and_referenced_tables() {
     else {
         panic!("expected delete");
     };
-    assert_eq!(DMLLike::<ParserDB>::kind(&delete), DmlKind::Delete);
+    assert_eq!(delete.kind(), DmlKind::Delete);
     assert_eq!(delete.target_table(&db).unwrap().table_name(), "orders");
     assert_eq!(referenced_names(&delete, &db), vec!["orders".to_string(), "users".to_string()],);
 }
@@ -204,8 +204,5 @@ fn mysql_multi_table_delete_has_no_single_target() {
     let Statement::Delete(delete) = statements.pop().unwrap() else {
         panic!("expected delete");
     };
-    assert!(matches!(
-        DMLLike::<ParserDB>::target_table(&delete, &db),
-        Err(LookupError::InvalidObjectName { .. })
-    ));
+    assert!(matches!(delete.target_table(&db), Err(LookupError::InvalidObjectName { .. })));
 }

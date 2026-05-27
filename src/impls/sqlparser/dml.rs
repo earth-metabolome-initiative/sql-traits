@@ -1,10 +1,11 @@
 //! Implementations of [`DMLLike`] for sqlparser's `Insert`, `Update`, and
 //! `Delete` nodes.
 //!
-//! `target_table` resolves the single base table each statement mutates and
-//! reports [`LookupError::InvalidObjectName`] when there is no such target (an
-//! `INSERT` into a subquery or table function, an `UPDATE` of a joined or
-//! derived relation, a multi-table `DELETE`, or a name absent from the schema).
+//! `target_table` resolves the single base table each statement mutates. It
+//! reports [`LookupError::TableNotFound`] when the target name is absent from
+//! the schema, and [`LookupError::InvalidObjectName`] when there is no single
+//! base-table target at all (an `INSERT` into a subquery or table function, an
+//! `UPDATE` of a joined or derived relation, or a multi-table `DELETE`).
 
 use alloc::{
     string::{String, ToString},
@@ -15,7 +16,7 @@ use sqlparser::ast::{Delete, FromTable, Insert, ObjectName, TableFactor, TableOb
 
 use crate::{
     errors::LookupError,
-    traits::{DMLLike, DatabaseLike, DmlKind},
+    traits::{DMLLike, DatabaseLike, DmlKind, DmlStatement},
     utils::object_name::resolve_object_name,
 };
 
@@ -26,12 +27,7 @@ fn resolve_required_table<'db, DB: DatabaseLike>(
 ) -> Result<&'db DB::Table, LookupError> {
     match resolve_object_name(name, database)? {
         Some(table) => Ok(table),
-        None => {
-            Err(LookupError::InvalidObjectName {
-                object_name: name.to_string(),
-                reason: "no matching table in the database".to_string(),
-            })
-        }
+        None => Err(LookupError::TableNotFound { object_name: name.to_string() }),
     }
 }
 
@@ -53,6 +49,12 @@ fn resolve_table_factor<'db, DB: DatabaseLike>(
     }
 }
 
+impl DmlStatement for Insert {
+    fn kind(&self) -> DmlKind {
+        DmlKind::Insert
+    }
+}
+
 impl<DB: DatabaseLike> DMLLike<DB> for Insert {
     fn target_table<'db>(&self, database: &'db DB) -> Result<&'db DB::Table, LookupError> {
         match &self.table {
@@ -65,9 +67,11 @@ impl<DB: DatabaseLike> DMLLike<DB> for Insert {
             }
         }
     }
+}
 
+impl DmlStatement for Update {
     fn kind(&self) -> DmlKind {
-        DmlKind::Insert
+        DmlKind::Update
     }
 }
 
@@ -77,9 +81,11 @@ impl<DB: DatabaseLike> DMLLike<DB> for Update {
         // `FROM` providing values is a separate source, not the target.
         resolve_table_factor(&self.table.relation, database, "UPDATE target is not a base table")
     }
+}
 
+impl DmlStatement for Delete {
     fn kind(&self) -> DmlKind {
-        DmlKind::Update
+        DmlKind::Delete
     }
 }
 
@@ -118,10 +124,6 @@ impl<DB: DatabaseLike> DMLLike<DB> for Delete {
                 })
             }
         }
-    }
-
-    fn kind(&self) -> DmlKind {
-        DmlKind::Delete
     }
 }
 
@@ -192,10 +194,7 @@ mod tests {
         let Statement::Insert(insert) = parse_one("INSERT INTO missing (a) VALUES (1)") else {
             panic!("expected insert");
         };
-        assert!(matches!(
-            DMLLike::<ParserDB>::target_table(&insert, &db),
-            Err(LookupError::InvalidObjectName { .. })
-        ));
+        assert!(matches!(insert.target_table(&db), Err(LookupError::TableNotFound { .. })));
     }
 
     #[test]
@@ -239,10 +238,7 @@ mod tests {
         let Statement::Delete(delete) = statements.pop().unwrap() else {
             panic!("expected delete");
         };
-        assert!(matches!(
-            DMLLike::<ParserDB>::target_table(&delete, &db),
-            Err(LookupError::InvalidObjectName { .. })
-        ));
+        assert!(matches!(delete.target_table(&db), Err(LookupError::InvalidObjectName { .. })));
     }
 
     #[test]
@@ -255,9 +251,6 @@ mod tests {
         else {
             panic!("expected delete");
         };
-        assert!(matches!(
-            DMLLike::<ParserDB>::target_table(&delete, &db),
-            Err(LookupError::InvalidObjectName { .. })
-        ));
+        assert!(matches!(delete.target_table(&db), Err(LookupError::InvalidObjectName { .. })));
     }
 }
