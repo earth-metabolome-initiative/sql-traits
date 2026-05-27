@@ -314,3 +314,238 @@ pub(crate) fn resolve_object_name<'db, DB: DatabaseLike>(
 ) -> Result<Option<&'db DB::Table>, LookupError> {
     resolve_table_object_name_in_iter(database.tables(), object_name)
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::{
+        ast::{CreateTable, Ident, ObjectName, ObjectNamePart, ObjectNamePartFunction, Statement},
+        dialect::GenericDialect,
+        parser::Parser,
+    };
+
+    use super::{
+        object_name_identifiers, object_name_last_part, render_table_candidate,
+        resolve_object_name, resolve_table_from_candidates, resolve_table_object_name_in_iter,
+        resolve_table_object_name_with_implicit_public_in_iter, schema_from_object_name,
+        table_matches_lookup_idents, table_matches_object_name,
+    };
+    use crate::{errors::LookupError, prelude::ParserDB, traits::TableLike};
+
+    fn ident(value: &str, quoted: bool) -> Ident {
+        if quoted { Ident::with_quote('"', value) } else { Ident::new(value) }
+    }
+
+    /// Builds an `ObjectName` from `(value, quoted)` identifier parts.
+    fn obj(parts: &[(&str, bool)]) -> ObjectName {
+        ObjectName(parts.iter().map(|&(v, q)| ObjectNamePart::Identifier(ident(v, q))).collect())
+    }
+
+    fn function_part(name: &str) -> ObjectNamePart {
+        ObjectNamePart::Function(ObjectNamePartFunction {
+            name: Ident::new(name),
+            args: Vec::new(),
+        })
+    }
+
+    /// Parses one `CREATE TABLE` into an owned `CreateTable`. Parsing tables
+    /// individually lets a test hold relations the `ParserDB` builder would
+    /// reject together (for example a schema-less and a `public` table of the
+    /// same name), which the resolver functions still must handle.
+    fn create_table(sql: &str) -> CreateTable {
+        let mut statements = Parser::parse_sql(&GenericDialect {}, sql).expect("table parses");
+        match statements.pop().expect("one statement") {
+            Statement::CreateTable(create_table) => create_table,
+            other => panic!("expected CREATE TABLE, got {other:?}"),
+        }
+    }
+
+    /// A spread of relations covering schema-less, schema-qualified, quoted,
+    /// and `public`/schema-less name collisions.
+    fn fixtures() -> Vec<CreateTable> {
+        vec![
+            create_table("CREATE TABLE users (id INT)"),
+            create_table("CREATE TABLE s.scoped (id INT)"),
+            create_table("CREATE TABLE things (id INT)"),
+            create_table("CREATE TABLE public.things (id INT)"),
+            create_table("CREATE TABLE public.only_pub (id INT)"),
+            create_table(r#"CREATE TABLE "Bar" (id INT)"#),
+            create_table(r#"CREATE TABLE "S"."T" (id INT)"#),
+        ]
+    }
+
+    fn find<'a>(tables: &'a [CreateTable], name: &str) -> &'a CreateTable {
+        tables.iter().find(|table| table.table_name() == name).expect("table present")
+    }
+
+    #[test]
+    fn object_name_last_part_variants() {
+        assert_eq!(object_name_last_part(&obj(&[("t", false)])), Some(("t", false)));
+        assert_eq!(object_name_last_part(&obj(&[("T", true)])), Some(("T", true)));
+        assert_eq!(
+            object_name_last_part(&ObjectName(vec![function_part("f")])),
+            Some(("f", false))
+        );
+        assert_eq!(object_name_last_part(&ObjectName(Vec::new())), None);
+    }
+
+    #[test]
+    fn schema_from_object_name_variants() {
+        assert_eq!(schema_from_object_name(&obj(&[("t", false)])), None);
+        assert_eq!(
+            schema_from_object_name(&obj(&[("s", false), ("t", false)])),
+            Some(("s", false))
+        );
+        let name =
+            ObjectName(vec![function_part("f"), ObjectNamePart::Identifier(ident("t", false))]);
+        assert_eq!(schema_from_object_name(&name), Some(("f", false)));
+    }
+
+    #[test]
+    fn table_matches_object_name_cases() {
+        let tables = fixtures();
+        let users = find(&tables, "users");
+        let scoped = find(&tables, "scoped");
+
+        assert!(!table_matches_object_name(users, &ObjectName(Vec::new())));
+        assert!(!table_matches_object_name(users, &obj(&[("orders", false)])));
+        assert!(table_matches_object_name(users, &obj(&[("users", false)])));
+        assert!(table_matches_object_name(scoped, &obj(&[("s", false), ("scoped", false)])));
+        // Schema asymmetry: qualified lookup against a schema-less table.
+        assert!(!table_matches_object_name(users, &obj(&[("s", false), ("users", false)])));
+    }
+
+    #[test]
+    fn object_name_identifiers_cases() {
+        assert!(matches!(object_name_identifiers(&obj(&[("t", false)])), Ok((None, _))));
+        assert!(matches!(
+            object_name_identifiers(&obj(&[("s", false), ("t", false)])),
+            Ok((Some(_), _))
+        ));
+        assert!(matches!(
+            object_name_identifiers(&ObjectName(Vec::new())),
+            Err(LookupError::InvalidObjectName { .. })
+        ));
+        assert!(matches!(
+            object_name_identifiers(&obj(&[("a", false), ("b", false), ("c", false)])),
+            Err(LookupError::InvalidObjectName { .. })
+        ));
+        assert!(matches!(
+            object_name_identifiers(&ObjectName(vec![function_part("f")])),
+            Err(LookupError::InvalidObjectName { .. })
+        ));
+    }
+
+    #[test]
+    fn table_matches_lookup_idents_cases() {
+        let tables = fixtures();
+        let users = find(&tables, "users");
+        let scoped = find(&tables, "scoped");
+
+        assert!(table_matches_lookup_idents(users, None, &ident("users", false)));
+        assert!(!table_matches_lookup_idents(users, None, &ident("orders", false)));
+        assert!(table_matches_lookup_idents(
+            scoped,
+            Some(&ident("s", false)),
+            &ident("scoped", false)
+        ));
+        // Asymmetry: unqualified lookup against a schema-qualified table.
+        assert!(!table_matches_lookup_idents(scoped, None, &ident("scoped", false)));
+    }
+
+    #[test]
+    fn render_table_candidate_quoting_and_schema() {
+        let tables = fixtures();
+        assert_eq!(render_table_candidate(find(&tables, "users")), "users");
+        assert_eq!(render_table_candidate(find(&tables, "Bar")), "\"Bar\"");
+        assert_eq!(render_table_candidate(find(&tables, "scoped")), "s.scoped");
+        assert_eq!(render_table_candidate(find(&tables, "T")), "\"S\".\"T\"");
+    }
+
+    #[test]
+    fn resolve_table_from_candidates_cases() {
+        let tables = fixtures();
+        let users = find(&tables, "users");
+        let scoped = find(&tables, "scoped");
+
+        let empty: [&CreateTable; 0] = [];
+        assert!(
+            resolve_table_from_candidates(&obj(&[("users", false)]), &empty).unwrap().is_none()
+        );
+        assert!(
+            resolve_table_from_candidates(&obj(&[("users", false)]), &[users]).unwrap().is_some()
+        );
+        assert!(matches!(
+            resolve_table_from_candidates(&obj(&[("users", false)]), &[users, scoped]),
+            Err(LookupError::AmbiguousTableLookup { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_in_iter_rejects_overqualified_names() {
+        let tables = fixtures();
+        let resolved = resolve_table_object_name_in_iter(tables.iter(), &obj(&[("users", false)]))
+            .expect("resolves")
+            .expect("matches");
+        assert_eq!(resolved.table_name(), "users");
+
+        assert!(matches!(
+            resolve_table_object_name_in_iter(
+                tables.iter(),
+                &obj(&[("a", false), ("b", false), ("c", false)]),
+            ),
+            Err(LookupError::InvalidObjectName { .. })
+        ));
+    }
+
+    #[test]
+    fn implicit_public_fallback_cases() {
+        let tables = fixtures();
+
+        // Qualified name delegates to the strict resolver.
+        let scoped = resolve_table_object_name_with_implicit_public_in_iter(
+            tables.iter(),
+            &obj(&[("s", false), ("scoped", false)]),
+        )
+        .expect("resolves")
+        .expect("matches");
+        assert_eq!(scoped.table_name(), "scoped");
+
+        // Resolved only through the implicit `public` schema.
+        let only_pub = resolve_table_object_name_with_implicit_public_in_iter(
+            tables.iter(),
+            &obj(&[("only_pub", false)]),
+        )
+        .expect("resolves")
+        .expect("matches");
+        assert_eq!(only_pub.table_name(), "only_pub");
+
+        // `things` exists both schema-less and in `public`: ambiguous.
+        assert!(matches!(
+            resolve_table_object_name_with_implicit_public_in_iter(
+                tables.iter(),
+                &obj(&[("things", false)]),
+            ),
+            Err(LookupError::AmbiguousTableLookup { .. })
+        ));
+
+        // No match anywhere.
+        assert!(
+            resolve_table_object_name_with_implicit_public_in_iter(
+                tables.iter(),
+                &obj(&[("absent", false)]),
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn resolve_object_name_db_entry_point() {
+        let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT);").expect("parses");
+        let resolved = resolve_object_name(&obj(&[("users", false)]), &db)
+            .expect("resolves")
+            .expect("matches");
+        assert_eq!(resolved.table_name(), "users");
+        assert!(resolve_object_name(&obj(&[("absent", false)]), &db).unwrap().is_none());
+    }
+}
