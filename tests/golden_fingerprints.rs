@@ -9,8 +9,8 @@
 //! - single-column INT PK
 //! - composite PK in both orders (SEN-007)
 //! - every canonical type token in `fingerprint_type_token::match_known_type`:
-//!   INT, FLOAT, DECIMAL, STRING, BYTES, BOOL, DATE, TIME, TIMESTAMP, UUID,
-//!   JSON
+//!   INT, FLOAT, DECIMAL, STRING, BYTES, BOOL, DATE, TIME, TIMESTAMP,
+//!   TIMESTAMPTZ, UUID, JSON, JSONB
 //! - one `OTHER:` token (via GEOGRAPHY)
 //! - a generated/identity column (SERIAL)
 //! - nullable and non-nullable variants of the same schema
@@ -139,14 +139,14 @@ const GOLDEN_VECTORS: &[GoldenVector] = &[
     },
     GoldenVector {
         id: "v10_token_timestamptz",
-        description: "TIMESTAMP WITH TIME ZONE folds to TIMESTAMP token (same digest as v09)",
+        description: "TIMESTAMP WITH TIME ZONE folds to distinct TIMESTAMPTZ token",
         sql: "CREATE TABLE t (id INT PRIMARY KEY, created_at TIMESTAMP WITH TIME ZONE);",
         schema: None,
         table_name: "t",
-        canonical_bytes_hex: "5346503100010001000000000000000174000000020000000000000002696400000003494e540000000000010000000a637265617465645f61740000000954494d455354414d5001000000000100000000",
-        fp256: "c221cb991b3d03218bfda966dabddc2d740e1d072ed36441650f96812f5f5ffd",
-        fp128: "c221cb991b3d03218bfda966dabddc2d",
-        fp64: 13_988_685_776_036_889_377_u64,
+        canonical_bytes_hex: "5346503100010001000000000000000174000000020000000000000002696400000003494e540000000000010000000a637265617465645f61740000000b54494d455354414d50545a01000000000100000000",
+        fp256: "0bde2036f32c1000c5488b7dc12e46d38d5f0e1fac77ca2cd9e331c7072b0e02",
+        fp128: "0bde2036f32c1000c5488b7dc12e46d3",
+        fp64: 855_156_399_627_046_912_u64,
     },
     GoldenVector {
         id: "v11_token_uuid",
@@ -325,6 +325,17 @@ const GOLDEN_VECTORS: &[GoldenVector] = &[
         fp256: "9b4e0f4a6141b318668dbc0811ad56f11d5328ab39c875e26bd12114b39ae868",
         fp128: "9b4e0f4a6141b318668dbc0811ad56f1",
         fp64: 11_190_898_936_195_953_432_u64,
+    },
+    GoldenVector {
+        id: "v27_token_jsonb",
+        description: "JSONB canonical token (distinct from JSON)",
+        sql: "CREATE TABLE t (id INT PRIMARY KEY, payload JSONB);",
+        schema: None,
+        table_name: "t",
+        canonical_bytes_hex: "5346503100010001000000000000000174000000020000000000000002696400000003494e54000000000001000000077061796c6f6164000000054a534f4e4201000000000100000000",
+        fp256: "42ae4713ee3fabf30331385c4971f7194984447de9d1f2a2a1f0fd8ee3d5944a",
+        fp128: "42ae4713ee3fabf30331385c4971f719",
+        fp64: 4_804_856_003_377_998_835_u64,
     },
 ];
 

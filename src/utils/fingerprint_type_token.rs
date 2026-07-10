@@ -22,6 +22,8 @@ use alloc::{borrow::ToOwned, string::String};
 /// assert_eq!(canonical_type_token("VARCHAR"), "STRING");
 /// assert_eq!(canonical_type_token("geometry"), "OTHER:geometry");
 /// assert_eq!(canonical_type_token("INTERVAL  YEAR  TO  MONTH"), "OTHER:interval year to month");
+/// assert_eq!(canonical_type_token("TIMESTAMP WITH TIME ZONE"), "TIMESTAMPTZ");
+/// assert_eq!(canonical_type_token("JSONB"), "JSONB");
 /// ```
 #[must_use]
 pub fn canonical_type_token(sql_type: &str) -> String {
@@ -137,11 +139,17 @@ fn match_known_type(s: &str) -> Option<&'static str> {
         return Some("TIME");
     }
 
+    // Timestamp-with-timezone family
+    if s.eq_ignore_ascii_case("TIMESTAMPTZ")
+        || s.eq_ignore_ascii_case("TIMESTAMP WITH TIME ZONE")
+        || s.eq_ignore_ascii_case("TIMESTAMP WITH TIMEZONE")
+    {
+        return Some("TIMESTAMPTZ");
+    }
+
     // Timestamp family
     if s.eq_ignore_ascii_case("TIMESTAMP")
         || s.eq_ignore_ascii_case("TIMESTAMP WITHOUT TIME ZONE")
-        || s.eq_ignore_ascii_case("TIMESTAMP WITH TIME ZONE")
-        || s.eq_ignore_ascii_case("TIMESTAMPTZ")
         || s.eq_ignore_ascii_case("DATETIME")
     {
         return Some("TIMESTAMP");
@@ -152,8 +160,13 @@ fn match_known_type(s: &str) -> Option<&'static str> {
         return Some("UUID");
     }
 
+    // JSONB family (Postgres binary JSON)
+    if s.eq_ignore_ascii_case("JSONB") {
+        return Some("JSONB");
+    }
+
     // JSON family
-    if s.eq_ignore_ascii_case("JSON") || s.eq_ignore_ascii_case("JSONB") {
+    if s.eq_ignore_ascii_case("JSON") {
         return Some("JSON");
     }
 
@@ -244,14 +257,22 @@ mod tests {
 
     #[test]
     fn test_timestamp_family() {
-        for ty in &[
-            "TIMESTAMP",
-            "TIMESTAMP WITHOUT TIME ZONE",
-            "TIMESTAMP WITH TIME ZONE",
-            "timestamptz",
-            "DATETIME",
-        ] {
+        for ty in &["TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE", "DATETIME"] {
             assert_eq!(canonical_type_token(ty), "TIMESTAMP", "failed for {ty}");
+        }
+    }
+
+    #[test]
+    fn test_timestamptz_family() {
+        for ty in &[
+            "TIMESTAMPTZ",
+            "timestamptz",
+            "TIMESTAMP WITH TIME ZONE",
+            "timestamp with time zone",
+            "TIMESTAMP WITH TIMEZONE",
+            "timestamp with timezone",
+        ] {
+            assert_eq!(canonical_type_token(ty), "TIMESTAMPTZ", "failed for {ty}");
         }
     }
 
@@ -264,8 +285,13 @@ mod tests {
     #[test]
     fn test_json_family() {
         assert_eq!(canonical_type_token("JSON"), "JSON");
-        assert_eq!(canonical_type_token("JSONB"), "JSON");
-        assert_eq!(canonical_type_token("jsonb"), "JSON");
+        assert_eq!(canonical_type_token("json"), "JSON");
+    }
+
+    #[test]
+    fn test_jsonb_family() {
+        assert_eq!(canonical_type_token("JSONB"), "JSONB");
+        assert_eq!(canonical_type_token("jsonb"), "JSONB");
     }
 
     #[test]

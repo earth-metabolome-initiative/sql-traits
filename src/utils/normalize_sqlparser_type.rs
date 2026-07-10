@@ -155,9 +155,9 @@ mod tests {
             "TIMESTAMP"
         );
         // `WithTimeZone` corresponds to the verbose SQL form and renders as
-        // `TIMESTAMP WITH TIME ZONE`; the compact `TIMESTAMPTZ` form comes
-        // from `TimezoneInfo::Tz`. Both fold to the canonical `TIMESTAMP`
-        // type token in `fingerprint_type_token`.
+        // `TIMESTAMP WITH TIME ZONE`, while the compact `TIMESTAMPTZ` form
+        // comes from `TimezoneInfo::Tz`. Both fold to the canonical
+        // `TIMESTAMPTZ` type token in `fingerprint_type_token`.
         assert_eq!(
             normalize_sqlparser_type(&DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
             "TIMESTAMP WITH TIME ZONE"
