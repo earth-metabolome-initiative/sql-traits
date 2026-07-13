@@ -31,6 +31,7 @@ use sqlparser::{
 
 use crate::{
     errors::LookupError,
+    impls::SqlparserDialect,
     structs::{
         GenericDB, Schema, TableAttribute, TableMetadata,
         metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
@@ -65,6 +66,7 @@ pub type ParserDBBuilder = super::GenericDBBuilder<
     Schema,
     Grant,
     Grant,
+    SqlparserDialect,
 >;
 
 impl ParserDBBuilder {
@@ -598,6 +600,7 @@ pub type ParserDB = GenericDB<
     Schema,
     Grant,
     Grant,
+    SqlparserDialect,
 >;
 
 impl ParserDB {
@@ -1077,7 +1080,25 @@ impl ParserDB {
         statements: Vec<Statement>,
         catalog_name: String,
     ) -> Result<Self, crate::errors::Error> {
-        let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name);
+        Self::from_statements_with_dialect(statements, catalog_name, SqlparserDialect::default())
+    }
+
+    /// Same as [`Self::from_statements`] but explicitly attaches the SQL
+    /// dialect the statements were parsed under. Used by [`Self::parse`] to
+    /// route dialect-conditional predicates (see
+    /// [`crate::traits::DialectLike::is_bool`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if validation fails (e.g. a foreign key references a
+    /// non-existent table or column).
+    #[allow(clippy::too_many_lines)]
+    pub fn from_statements_with_dialect(
+        statements: Vec<Statement>,
+        catalog_name: String,
+        dialect: SqlparserDialect,
+    ) -> Result<Self, crate::errors::Error> {
+        let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect);
 
         let any_type = DataType::Custom(
             ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
@@ -2052,11 +2073,15 @@ impl ParserDB {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn parse<D: Dialect + Default>(sql: &str) -> Result<Self, crate::errors::Error> {
+    pub fn parse<D: Dialect + Default + 'static>(sql: &str) -> Result<Self, crate::errors::Error> {
         let dialect = D::default();
         let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
-        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+        let mut db = Self::from_statements_with_dialect(
+            statements,
+            "unknown_catalog".to_string(),
+            SqlparserDialect::of::<D>(),
+        )?;
 
         if let Ok(documentation) = SqlDoc::builder_from_str(sql).build::<D>() {
             for (table, metadata) in db.tables_metadata_mut() {

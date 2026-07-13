@@ -16,14 +16,15 @@ pub use sqlparser::{ParserDB, ParserDBBuilder};
 
 use crate::{
     traits::{
-        CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-        PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
+        FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
+        TriggerLike, UniqueIndexLike,
     },
     utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -38,7 +39,10 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
+    /// SQL dialect of the database.
+    dialect: D,
     /// Catalog name of the database.
     catalog_name: String,
     /// Timezone of the database.
@@ -71,8 +75,8 @@ where
     schemas: Vec<(Arc<S>, S::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> Debug
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> Debug
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -87,9 +91,11 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("GenericDB")
+            .field("dialect", &self.dialect)
             .field("catalog_name", &self.catalog_name)
             .field("timezone", &self.timezone)
             .field("tables", &self.tables.len())
@@ -109,8 +115,8 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> Clone
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> Clone
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -125,9 +131,11 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
     fn clone(&self) -> Self {
         Self {
+            dialect: self.dialect.clone(),
             catalog_name: self.catalog_name.clone(),
             timezone: self.timezone.clone(),
             tables: self.tables.clone(),
@@ -147,8 +155,8 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
-    GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
+    GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -163,14 +171,16 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
     #[allow(clippy::type_complexity)]
     pub fn new(
         catalog_name: String,
-    ) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> {
-        GenericDBBuilder::new(catalog_name)
+        dialect: D,
+    ) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> {
+        GenericDBBuilder::new(catalog_name, dialect)
     }
 
     /// Returns a reference to the metadata of the specified table, if it exists

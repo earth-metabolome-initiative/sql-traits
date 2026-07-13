@@ -11,8 +11,9 @@ use geometric_traits::{
 
 use crate::{
     traits::{
-        CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-        PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
+        FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
+        TriggerLike, UniqueIndexLike,
     },
     utils::identifier_resolution::stored_identifier_matches_lookup,
 };
@@ -45,6 +46,16 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     type ColumnGrant: ColumnGrantLike<DB = Self>;
     /// Type of the schemas in the database.
     type Schema: SchemaLike<DB = Self>;
+    /// SQL dialect this database is expressed in.
+    ///
+    /// The dialect owns per-column type predicates (`is_bool`, `is_uuid`,
+    /// …) so dialect-specific quirks like MySQL's `TINYINT(1)` boolean and
+    /// SQL Server's `UNIQUEIDENTIFIER` never leak into the generic column
+    /// trait. See [`DialectLike`].
+    type Dialect: DialectLike<DB = Self>;
+
+    /// Returns the SQL dialect this database is expressed in.
+    fn dialect(&self) -> &Self::Dialect;
 
     /// Returns the name of the database.
     ///
