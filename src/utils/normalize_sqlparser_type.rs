@@ -227,6 +227,13 @@ mod tests {
         assert_eq!(normalize_sqlparser_type(&DataType::BigInt(None)), "BIGINT");
         assert_eq!(normalize_sqlparser_type(&DataType::BigInt(Some(20))), "BIGINT");
         assert_eq!(normalize_sqlparser_type(&DataType::TinyInt(None)), "TINYINT");
+        // TINYINT display widths are collapsed to a single canonical
+        // family name here; width-sensitive interpretation like MySQL's
+        // `TINYINT(1)` -> boolean lives on the dialect
+        // (`SqlparserDialect::is_bool` matches on the raw `DataType`).
+        assert_eq!(normalize_sqlparser_type(&DataType::TinyInt(Some(1))), "TINYINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::TinyInt(Some(2))), "TINYINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::TinyInt(Some(4))), "TINYINT");
         assert_eq!(normalize_sqlparser_type(&DataType::MediumInt(None)), "MEDIUMINT");
         assert_eq!(normalize_sqlparser_type(&DataType::Int2(None)), "INT2");
         assert_eq!(normalize_sqlparser_type(&DataType::Int4(None)), "INT4");

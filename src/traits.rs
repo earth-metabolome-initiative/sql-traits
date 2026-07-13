@@ -2,14 +2,18 @@
 
 pub mod column;
 pub mod database;
+pub mod dialect;
 pub mod table;
+pub mod type_match;
 use core::fmt::Debug;
 
 pub use column::ColumnLike;
 pub mod index;
 pub use database::DatabaseLike;
+pub use dialect::DialectLike;
 pub use index::IndexLike;
 pub use table::TableLike;
+pub use type_match::{TypeMatch, TypeMatchLike};
 pub mod check_constraint;
 pub use check_constraint::CheckConstraintLike;
 pub mod unique_index;

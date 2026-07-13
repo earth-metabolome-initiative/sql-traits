@@ -3,15 +3,15 @@
 use crate::{
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnGrantLike, ColumnLike, DatabaseLike, ForeignKeyLike,
-        FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
-        TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, DatabaseLike, DialectLike,
+        ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike,
+        TableLike, TriggerLike, UniqueIndexLike,
     },
     utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG> DatabaseLike
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> DatabaseLike
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike<DB = Self>,
     C: ColumnLike<DB = Self>,
@@ -26,6 +26,7 @@ where
     S: SchemaLike<DB = Self>,
     TG: TableGrantLike<DB = Self>,
     CG: ColumnGrantLike<DB = Self>,
+    D: DialectLike<DB = Self>,
 {
     type Table = T;
     type Column = C;
@@ -40,6 +41,12 @@ where
     type TableGrant = TG;
     type ColumnGrant = CG;
     type Schema = S;
+    type Dialect = D;
+
+    #[inline]
+    fn dialect(&self) -> &Self::Dialect {
+        &self.dialect
+    }
 
     #[inline]
     fn catalog_name(&self) -> &str {

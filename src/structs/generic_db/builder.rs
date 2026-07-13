@@ -10,8 +10,9 @@ use crate::{
     errors::LookupError,
     structs::GenericDB,
     traits::{
-        CheckConstraintLike, ColumnGrantLike, ColumnLike, ForeignKeyLike, FunctionLike, IndexLike,
-        PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike, TriggerLike, UniqueIndexLike,
+        CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
+        FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
+        TriggerLike, UniqueIndexLike,
     },
     utils::identifier_resolution::identifiers_match,
 };
@@ -69,7 +70,7 @@ fn creates_implicit_public_ambiguity<T: TableLike>(left: &T, right: &T) -> bool 
 }
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -84,7 +85,10 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
+    /// SQL dialect of the database.
+    dialect: D,
     /// Catalog name of the database.
     catalog_name: String,
     /// Timezone of the database.
@@ -117,8 +121,8 @@ where
     column_grants: Vec<(Arc<CG>, CG::Meta)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
-    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
+    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -133,6 +137,7 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
     /// Returns a mutable reference to the tables list.
     pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Arc<T>, T::Meta)> {
@@ -236,8 +241,9 @@ where
 
     #[must_use]
     /// Creates a new `GenericDBBuilder` instance.
-    pub fn new(catalog_name: String) -> Self {
+    pub fn new(catalog_name: String, dialect: D) -> Self {
         Self {
+            dialect,
             catalog_name,
             timezone: None,
             tables: Vec::new(),
@@ -257,8 +263,8 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
-    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
+    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -273,6 +279,7 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
     fn ensure_table_lookup_invariants(&self, table: &T) -> Result<(), LookupError> {
         for (existing, _) in self.tables() {
@@ -530,9 +537,9 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
-    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>>
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
+    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>>
+    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
 where
     T: TableLike,
     C: ColumnLike,
@@ -547,8 +554,11 @@ where
     S: SchemaLike,
     TG: TableGrantLike,
     CG: ColumnGrantLike,
+    D: DialectLike,
 {
-    fn from(mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG>) -> Self {
+    fn from(
+        mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>,
+    ) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -571,6 +581,7 @@ where
         // Grants are not sorted as their order may be significant
 
         GenericDB {
+            dialect: builder.dialect,
             catalog_name,
             timezone: builder.timezone,
             tables: builder.tables,

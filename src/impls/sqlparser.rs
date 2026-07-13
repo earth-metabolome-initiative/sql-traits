@@ -10,6 +10,7 @@ mod create_role;
 mod create_table;
 mod create_trigger;
 mod data_statement;
+mod dialect;
 mod dml;
 mod dql;
 mod foreign_key_constraint;
@@ -17,5 +18,6 @@ mod grant;
 mod schema;
 mod unique_constraint;
 
+pub use dialect::SqlparserDialect;
 pub use grant::apply_revoke_to_grant;
 pub(crate) use grant::{has_unsupported_column_scoped_revoke, partition_grantees_for_revoke};

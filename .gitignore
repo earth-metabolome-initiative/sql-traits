@@ -26,4 +26,4 @@ build_rs_cov.profraw
 
 # Honggfuzz artifacts
 hfuzz_workspace/
-hfuzz_target/
+hfuzz_target/tarpaulin-report.json
