@@ -21,6 +21,14 @@ use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 /// assert_eq!(normalize_sqlparser_type(&DataType::Bytea), "BYTEA");
 /// assert_eq!(normalize_sqlparser_type(&DataType::Decimal(ExactNumberInfo::None)), "DECIMAL",);
 ///
+/// // MySQL enumerations normalize to their family token, dropping members.
+/// use sqlparser::ast::EnumMember;
+/// assert_eq!(
+///     normalize_sqlparser_type(&DataType::Enum(vec![EnumMember::Name("a".into())], None)),
+///     "ENUM",
+/// );
+/// assert_eq!(normalize_sqlparser_type(&DataType::Set(vec!["a".to_string()])), "SET");
+///
 /// // Custom types
 /// let custom = DataType::Custom(
 ///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("GEOGRAPHY"))]),
@@ -104,6 +112,10 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {
         // JSON family
         DataType::JSON => "JSON",
         DataType::JSONB => "JSONB",
+        // MySQL enumerations: the member list is not part of the type family
+        // for value decoding, just as a length is not (`VARCHAR(255)` -> "VARCHAR").
+        DataType::Enum(..) => "ENUM",
+        DataType::Set(..) => "SET",
         // Custom: single-ident pass-through; pinned GEOGRAPHY/GEOMETRY recognition.
         DataType::Custom(ObjectName(object_names), segments) => {
             if let [ObjectNamePart::Identifier(ident)] = object_names.as_slice() {
@@ -316,6 +328,28 @@ mod tests {
     fn test_normalize_sqlparser_type_json_family() {
         assert_eq!(normalize_sqlparser_type(&DataType::JSON), "JSON");
         assert_eq!(normalize_sqlparser_type(&DataType::JSONB), "JSONB");
+    }
+
+    #[test]
+    fn test_normalize_sqlparser_type_enum_set_family() {
+        use sqlparser::ast::EnumMember;
+        // The member list is dropped, mirroring how VARCHAR drops its length.
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Enum(vec![EnumMember::Name("a".into())], None)),
+            "ENUM"
+        );
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Enum(
+                vec![EnumMember::Name("a".into()), EnumMember::Name("b".into())],
+                Some(8)
+            )),
+            "ENUM"
+        );
+        assert_eq!(normalize_sqlparser_type(&DataType::Set(vec!["a".to_string()])), "SET");
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Set(vec!["a".to_string(), "b".to_string()])),
+            "SET"
+        );
     }
 
     #[test]
