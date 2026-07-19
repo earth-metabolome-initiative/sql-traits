@@ -64,15 +64,19 @@ use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 #[inline]
 pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {
     match sqlparser_type {
-        // INT family
-        DataType::Int(_) | DataType::Integer(_) => "INT",
-        DataType::SmallInt(_) => "SMALLINT",
-        DataType::BigInt(_) => "BIGINT",
-        DataType::TinyInt(_) => "TINYINT",
-        DataType::MediumInt(_) => "MEDIUMINT",
-        DataType::Int2(_) => "INT2",
-        DataType::Int4(_) => "INT4",
-        DataType::Int8(_) => "INT8",
+        // INT family. Unsigned variants fold to their signed token, dropping
+        // `UNSIGNED` as the display width is dropped.
+        DataType::Int(_)
+        | DataType::Integer(_)
+        | DataType::IntUnsigned(_)
+        | DataType::IntegerUnsigned(_) => "INT",
+        DataType::SmallInt(_) | DataType::SmallIntUnsigned(_) => "SMALLINT",
+        DataType::BigInt(_) | DataType::BigIntUnsigned(_) => "BIGINT",
+        DataType::TinyInt(_) | DataType::TinyIntUnsigned(_) => "TINYINT",
+        DataType::MediumInt(_) | DataType::MediumIntUnsigned(_) => "MEDIUMINT",
+        DataType::Int2(_) | DataType::Int2Unsigned(_) => "INT2",
+        DataType::Int4(_) | DataType::Int4Unsigned(_) => "INT4",
+        DataType::Int8(_) | DataType::Int8Unsigned(_) => "INT8",
         // FLOAT family
         DataType::Real => "REAL",
         DataType::Float(_) => "FLOAT",
@@ -107,6 +111,8 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {
         DataType::Timestamp(_, TimezoneInfo::WithoutTimeZone) => "TIMESTAMP WITHOUT TIME ZONE",
         DataType::Timestamp(_, TimezoneInfo::WithTimeZone) => "TIMESTAMP WITH TIME ZONE",
         DataType::Timestamp(_, TimezoneInfo::Tz) => "TIMESTAMPTZ",
+        // MySQL wall-clock timestamp, precision dropped like a length.
+        DataType::Datetime(_) => "DATETIME",
         // UUID
         DataType::Uuid => "UUID",
         // JSON family
@@ -368,5 +374,25 @@ mod tests {
             normalize_sqlparser_type(&DataType::Timestamp(None, TimezoneInfo::Tz)),
             "TIMESTAMPTZ"
         );
+    }
+
+    #[test]
+    fn test_normalize_sqlparser_type_datetime() {
+        assert_eq!(normalize_sqlparser_type(&DataType::Datetime(None)), "DATETIME");
+        assert_eq!(normalize_sqlparser_type(&DataType::Datetime(Some(6))), "DATETIME");
+    }
+
+    #[test]
+    fn test_normalize_sqlparser_type_unsigned_int_family() {
+        assert_eq!(normalize_sqlparser_type(&DataType::TinyIntUnsigned(None)), "TINYINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::SmallIntUnsigned(None)), "SMALLINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::MediumIntUnsigned(None)), "MEDIUMINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::IntUnsigned(None)), "INT");
+        assert_eq!(normalize_sqlparser_type(&DataType::IntegerUnsigned(None)), "INT");
+        assert_eq!(normalize_sqlparser_type(&DataType::BigIntUnsigned(None)), "BIGINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::BigIntUnsigned(Some(20))), "BIGINT");
+        assert_eq!(normalize_sqlparser_type(&DataType::Int2Unsigned(None)), "INT2");
+        assert_eq!(normalize_sqlparser_type(&DataType::Int4Unsigned(None)), "INT4");
+        assert_eq!(normalize_sqlparser_type(&DataType::Int8Unsigned(None)), "INT8");
     }
 }
