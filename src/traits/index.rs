@@ -17,6 +17,24 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// The database type the index belongs to.
     type DB: DatabaseLike;
 
+    /// Returns the declared index name, or `None` for an anonymous index.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
+    /// )?;
+    /// let index = db.indexes().next().unwrap();
+    /// assert_eq!(index.name().unwrap().to_string(), "idx_name");
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn name(&self) -> Option<&sqlparser::ast::ObjectName>;
+
     /// Returns the expression of the index as an SQL AST node.
     ///
     /// # Example

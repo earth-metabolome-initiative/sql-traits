@@ -23,6 +23,11 @@ impl IndexLike for TableAttribute<CreateTable, CreateIndex> {
     }
 
     #[inline]
+    fn name(&self) -> Option<&sqlparser::ast::ObjectName> {
+        self.attribute().name.as_ref()
+    }
+
+    #[inline]
     fn expression<'db>(&'db self, database: &'db Self::DB) -> &'db Expr
     where
         Self: 'db,

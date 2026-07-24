@@ -154,6 +154,28 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ```
     fn triggers(&self) -> impl Iterator<Item = &Self::Trigger>;
 
+    /// Iterates over the indexes defined in the schema.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE users (id INT, name TEXT);
+    /// CREATE INDEX idx_name ON users (name);
+    /// ",
+    /// )?;
+    /// let index_names: Vec<String> =
+    ///     db.indexes().filter_map(|i| i.name().map(ToString::to_string)).collect();
+    /// assert_eq!(index_names, vec!["idx_name"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn indexes(&self) -> impl Iterator<Item = &Self::Index>;
+
     /// Returns whether the database has at least one table.
     ///
     /// # Example

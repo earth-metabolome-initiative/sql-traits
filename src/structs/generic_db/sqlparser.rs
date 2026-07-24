@@ -3367,6 +3367,55 @@ mod tests {
         }
     }
 
+    mod index_enumeration_tests {
+        use super::*;
+        use crate::traits::IndexLike;
+
+        #[test]
+        fn test_indexes_enumerates_named_indexes() {
+            let sql = r"
+                CREATE TABLE t1 (id INT PRIMARY KEY, name TEXT);
+                CREATE INDEX idx_name ON t1(name);
+                CREATE TABLE t2 (id INT PRIMARY KEY, value TEXT);
+                CREATE INDEX idx_value ON t2(value);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let names: Vec<String> =
+                db.indexes().filter_map(|i| i.name().map(ToString::to_string)).collect();
+            assert_eq!(names, vec!["idx_name", "idx_value"]);
+        }
+
+        #[test]
+        fn test_anonymous_index_has_no_name() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY, name TEXT);
+                CREATE INDEX ON t(name);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            let index = db.indexes().next().expect("index should exist");
+            assert!(index.name().is_none());
+        }
+
+        #[test]
+        fn test_indexes_excludes_unique_constraints() {
+            let sql = r"
+                CREATE TABLE t (id INT PRIMARY KEY, name TEXT, UNIQUE (name));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert_eq!(db.indexes().count(), 0);
+
+            // A unique constraint viewed as an `IndexLike` exposes no
+            // `ObjectName` name accessor; its index name is an `Ident`.
+            let table = db.table(None, "t").expect("table should exist");
+            for ui in table.unique_indices(&db) {
+                assert!(IndexLike::name(ui).is_none());
+            }
+        }
+    }
+
     mod drop_trigger_tests {
         use super::*;
 
