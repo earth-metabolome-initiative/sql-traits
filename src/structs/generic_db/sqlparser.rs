@@ -665,9 +665,11 @@ impl ParserDB {
     /// # Errors
     ///
     /// Returns the first unresolved constraint as
-    /// [`Error::ReferencedTableNotFoundForForeignKey`] or
-    /// [`Error::ReferencedColumnNotFoundForForeignKey`]. A malformed target
-    /// name surfaces as [`Error::IdentifierLookupError`].
+    /// [`ReferencedTableNotFoundForForeignKey`](crate::errors::Error::ReferencedTableNotFoundForForeignKey)
+    /// or
+    /// [`ReferencedColumnNotFoundForForeignKey`](crate::errors::Error::ReferencedColumnNotFoundForForeignKey).
+    /// A malformed target name surfaces as
+    /// [`IdentifierLookupError`](crate::errors::Error::IdentifierLookupError).
     ///
     /// # Examples
     ///
