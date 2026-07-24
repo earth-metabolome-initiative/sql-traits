@@ -27,8 +27,7 @@ impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
     /// an [`ObjectName`](sqlparser::ast::ObjectName), so it is not exposed
     /// through this accessor. Unique indexes are enumerated via
     /// [`TableLike::unique_indices`](crate::traits::TableLike::unique_indices),
-    /// while [`DatabaseLike::indexes`](crate::traits::DatabaseLike::indexes)
-    /// only yields `CREATE INDEX` indexes.
+    /// while [`DatabaseLike::indexes`] only yields `CREATE INDEX` indexes.
     #[inline]
     fn name(&self) -> Option<&sqlparser::ast::ObjectName> {
         None
