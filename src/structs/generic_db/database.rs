@@ -106,6 +106,11 @@ where
     }
 
     #[inline]
+    fn indexes(&self) -> impl Iterator<Item = &Self::Index> {
+        self.indices.iter().map(|(index, _)| index.as_ref())
+    }
+
+    #[inline]
     fn functions(&self) -> impl Iterator<Item = &Self::Function> {
         self.functions.iter().map(|(func, _)| func.as_ref())
     }
