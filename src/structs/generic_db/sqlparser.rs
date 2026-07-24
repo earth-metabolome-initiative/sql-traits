@@ -3406,6 +3406,13 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             assert_eq!(db.indexes().count(), 0);
+
+            // A unique constraint viewed as an `IndexLike` exposes no
+            // `ObjectName` name accessor; its index name is an `Ident`.
+            let table = db.table(None, "t").expect("table should exist");
+            for ui in table.unique_indices(&db) {
+                assert!(IndexLike::name(ui).is_none());
+            }
         }
     }
 
