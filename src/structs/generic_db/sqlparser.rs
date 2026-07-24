@@ -654,6 +654,75 @@ impl ParserDB {
         )
     }
 
+    /// Checks that every foreign key resolves: the referenced table exists in
+    /// this database and each referenced column exists on it.
+    ///
+    /// Order-insensitive: it runs against the fully ingested database, so
+    /// forward and self-references pass. Targets resolve under the same
+    /// implicit-`public` policy as other object-name lookups. Opt-in, so
+    /// partial schemas still parse; call it after parse to enforce closure.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first unresolved constraint as
+    /// [`Error::ReferencedTableNotFoundForForeignKey`] or
+    /// [`Error::ReferencedColumnNotFoundForForeignKey`]. A malformed target
+    /// name surfaces as [`Error::IdentifierLookupError`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::GenericDialect;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    ///     CREATE TABLE parent (id INT PRIMARY KEY);
+    ///     CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
+    ///     ",
+    /// )?;
+    /// assert!(db.validate_foreign_key_targets().is_ok());
+    ///
+    /// let dangling = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES orders(id));",
+    /// )?;
+    /// assert!(dangling.validate_foreign_key_targets().is_err());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    pub fn validate_foreign_key_targets(&self) -> Result<(), crate::errors::Error> {
+        for (fk, ()) in &self.foreign_keys {
+            let constraint = fk.attribute();
+            let host_table = fk.table();
+            let Some(referenced_table) =
+                self.resolve_table_object_name_with_implicit_public(&constraint.foreign_table)?
+            else {
+                return Err(crate::errors::Error::ReferencedTableNotFoundForForeignKey {
+                    referenced_table: constraint.foreign_table.to_string(),
+                    host_table: host_table.name.to_string(),
+                });
+            };
+
+            for referred in &constraint.referred_columns {
+                let column_exists = referenced_table.columns.iter().any(|column| {
+                    identifiers_match(
+                        column.name.value.as_str(),
+                        column.name.quote_style.is_some(),
+                        referred.value.as_str(),
+                        referred.quote_style.is_some(),
+                    )
+                });
+                if !column_exists {
+                    return Err(crate::errors::Error::ReferencedColumnNotFoundForForeignKey {
+                        referenced_column: referred.value.clone(),
+                        referenced_table: referenced_table.name.to_string(),
+                        host_table: host_table.name.to_string(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Helper function to process check constraints.
     fn process_check_constraint(
         check_expr: &Expr,
@@ -4367,6 +4436,134 @@ mod tests {
             assert!(all_cols.contains(&"a"));
             assert!(all_cols.contains(&"b"));
             assert!(all_cols.contains(&"c"));
+        }
+    }
+
+    mod foreign_key_target_validation {
+        use sqlparser::dialect::PostgreSqlDialect;
+
+        use super::*;
+
+        #[test]
+        fn column_option_reference_to_existing_target_validates() {
+            let sql = "
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            assert!(db.validate_foreign_key_targets().is_ok());
+        }
+
+        #[test]
+        fn table_constraint_reference_to_existing_target_validates() {
+            let sql = "
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (
+                    id INT PRIMARY KEY,
+                    parent_id INT,
+                    FOREIGN KEY (parent_id) REFERENCES parent(id)
+                );
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            assert!(db.validate_foreign_key_targets().is_ok());
+        }
+
+        #[test]
+        fn reference_to_missing_table_errors_naming_target_and_host() {
+            let sql = "
+                CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES orders(id));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            match db.validate_foreign_key_targets() {
+                Err(Error::ReferencedTableNotFoundForForeignKey {
+                    referenced_table,
+                    host_table,
+                }) => {
+                    assert_eq!(referenced_table, "orders");
+                    assert_eq!(host_table, "child");
+                }
+                other => panic!("expected dangling-table error, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn reference_to_missing_column_errors_naming_column() {
+            let sql = "
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(missing));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            match db.validate_foreign_key_targets() {
+                Err(Error::ReferencedColumnNotFoundForForeignKey {
+                    referenced_column,
+                    referenced_table,
+                    host_table,
+                }) => {
+                    assert_eq!(referenced_column, "missing");
+                    assert_eq!(referenced_table, "parent");
+                    assert_eq!(host_table, "child");
+                }
+                other => panic!("expected dangling-column error, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn bare_and_public_qualified_targets_resolve_identically() {
+            let bare = "
+                CREATE TABLE public.parent (id INT PRIMARY KEY);
+                CREATE TABLE public.child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
+            ";
+            let qualified = "
+                CREATE TABLE public.parent (id INT PRIMARY KEY);
+                CREATE TABLE public.child (
+                    id INT PRIMARY KEY,
+                    parent_id INT REFERENCES public.parent(id)
+                );
+            ";
+            let bare_db = ParserDB::parse::<PostgreSqlDialect>(bare).expect("parse");
+            let qualified_db = ParserDB::parse::<PostgreSqlDialect>(qualified).expect("parse");
+            assert!(bare_db.validate_foreign_key_targets().is_ok());
+            assert!(qualified_db.validate_foreign_key_targets().is_ok());
+        }
+
+        #[test]
+        fn forward_reference_validates() {
+            let sql = "
+                CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
+                CREATE TABLE parent (id INT PRIMARY KEY);
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            assert!(db.validate_foreign_key_targets().is_ok());
+        }
+
+        #[test]
+        fn self_referential_reference_validates() {
+            let sql = "
+                CREATE TABLE tree (
+                    id INT PRIMARY KEY,
+                    parent_id INT REFERENCES tree(id)
+                );
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            assert!(db.validate_foreign_key_targets().is_ok());
+        }
+
+        #[test]
+        fn multiple_dangling_constraints_report_deterministic_first_error() {
+            let sql = "
+                CREATE TABLE a (id INT PRIMARY KEY, x INT REFERENCES missing_a(id));
+                CREATE TABLE b (id INT PRIMARY KEY, y INT REFERENCES missing_b(id));
+            ";
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
+            let first = db.validate_foreign_key_targets().expect_err("dangling FKs must error");
+            let second = db.validate_foreign_key_targets().expect_err("dangling FKs must error");
+            assert_eq!(format!("{first}"), format!("{second}"));
+            match first {
+                Error::ReferencedTableNotFoundForForeignKey { referenced_table, .. } => {
+                    assert_eq!(referenced_table, "missing_a");
+                }
+                other => panic!("expected dangling-table error, got {other:?}"),
+            }
         }
     }
 }
