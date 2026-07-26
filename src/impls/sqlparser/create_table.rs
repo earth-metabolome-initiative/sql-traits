@@ -147,3 +147,31 @@ impl TableLike for CreateTable {
         database.table_metadata(self).expect("Table must exist in database").rls_forced()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::ast::{
+        Ident, ObjectName, ObjectNamePart, ObjectNamePartFunction,
+        helpers::stmt_create_table::CreateTableBuilder,
+    };
+
+    use super::*;
+
+    #[test]
+    fn table_schema_reads_a_function_name_part() {
+        // sqlparser never emits a `Function` part in a table name from a
+        // `CREATE TABLE` parse, but the accessor must stay total rather than
+        // panic if one is ever constructed. The schema part falls back to the
+        // function's name, mirroring `last_str`.
+        let name = ObjectName(vec![
+            ObjectNamePart::Function(ObjectNamePartFunction {
+                name: Ident::new("schema_fn"),
+                args: alloc::vec::Vec::new(),
+            }),
+            ObjectNamePart::Identifier(Ident::new("t")),
+        ]);
+        let create_table = CreateTableBuilder::new(name).build();
+        assert_eq!(create_table.table_schema(), Some("schema_fn"));
+        assert_eq!(create_table.table_name(), "t");
+    }
+}
