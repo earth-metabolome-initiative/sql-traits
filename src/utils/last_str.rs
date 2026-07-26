@@ -29,6 +29,10 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 /// let object_name_func = ObjectName(vec![ObjectNamePart::Function(func_part)]);
 /// assert_eq!(last_str(&object_name_func), "func");
 /// ```
+#[allow(
+    clippy::expect_used,
+    reason = "sqlparser guarantees every ObjectName has at least one part"
+)]
 #[must_use]
 pub fn last_str(object_name: &ObjectName) -> &str {
     match &object_name.0.last().expect("ObjectName has no parts") {

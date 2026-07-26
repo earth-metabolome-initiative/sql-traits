@@ -1639,6 +1639,10 @@ pub trait TableLike:
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(
+        clippy::expect_used,
+        reason = "ancestral tables are collected from the same table DAG, so each is always present in it"
+    )]
     fn ancestral_extended_tables_topological<'db>(
         &'db self,
         database: &'db Self::DB,

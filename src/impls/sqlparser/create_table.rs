@@ -1,5 +1,9 @@
 //! Submodule implementing the [`TableLike`] trait for `sqlparser`'s
 //! [`CreateTable`] struct.
+#![allow(
+    clippy::expect_used,
+    reason = "trait receivers are obtained from this database, so their metadata is always present"
+)]
 
 use ::sqlparser::ast::{CreateTable, Ident, ObjectNamePart};
 use sql_docs::docs::TableDoc;
@@ -54,8 +58,8 @@ impl TableLike for CreateTable {
                 sqlparser::ast::ObjectNamePart::Identifier(Ident { value, .. }) => {
                     Some(value.as_str())
                 }
-                sqlparser::ast::ObjectNamePart::Function(_) => {
-                    panic!("Unexpected object name part in CreateTable: {schema_part:?}")
+                sqlparser::ast::ObjectNamePart::Function(function) => {
+                    Some(function.name.value.as_str())
                 }
             }
         } else {

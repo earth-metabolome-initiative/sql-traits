@@ -1,4 +1,8 @@
 //! Implement the `IndexLike` trait for `sqlparser`'s `CreateIndex`.
+#![allow(
+    clippy::expect_used,
+    reason = "trait receivers are obtained from this database, so their metadata is always present"
+)]
 
 use sqlparser::ast::{CreateIndex, CreateTable, Expr};
 

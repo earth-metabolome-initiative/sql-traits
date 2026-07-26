@@ -1,4 +1,8 @@
 //! Implement the [`ForeignKeyConstraint`] trait for the `sqlparser` crate's
+#![allow(
+    clippy::panic,
+    reason = "reference targets are validated for table-level constraints by ParserDB::parse and for inline references by ParserDB::validate_foreign_key_targets; these accessors assume a reference-closed model"
+)]
 
 use alloc::{string::ToString, vec::Vec};
 

@@ -1,5 +1,5 @@
 //! Anti-regression tests for crashes discovered by fuzzing.
-//!
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)]
 //! This test automatically discovers crash files from the honggfuzz workspace
 //! and verifies that they no longer cause panics.
 

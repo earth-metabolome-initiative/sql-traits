@@ -1,5 +1,9 @@
 //! Implementation of the `TriggerLike` trait for sqlparser's `CreateTrigger`
 //! type.
+#![allow(
+    clippy::expect_used,
+    reason = "trigger creation validates the target table exists in ParserDB::parse"
+)]
 
 use sqlparser::ast::{CreateTrigger, ObjectNamePart};
 

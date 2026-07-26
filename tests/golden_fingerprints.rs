@@ -1,4 +1,5 @@
 //! Golden-vector conformance tests for the v1 fingerprint encoding
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)]
 //! (FINGERPRINT_SPEC §14, audit §9 / P-14).
 //!
 //! Each vector pins both the canonical SHA-256 input bytes (hex) and

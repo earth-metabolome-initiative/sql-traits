@@ -1,4 +1,5 @@
 //! Integration tests for the data-statement analysis traits
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)]
 //! (`DataStatementLike`, `DQLLike`, `DMLLike`), exercising them through the
 //! public prelude exactly as a downstream consumer (subql, connetto) would.
 
