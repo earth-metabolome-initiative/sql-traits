@@ -1,5 +1,9 @@
 //! SHA-256 based schema fingerprint for deterministic, persistable table
 //! identity.
+#![allow(
+    clippy::expect_used,
+    reason = "column counts, ordinals, and identifier lengths fit in u32/u64 for any real schema; the digest slice is a fixed 8 bytes"
+)]
 
 use alloc::{string::String, vec::Vec};
 use core::fmt;

@@ -60,6 +60,10 @@ use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 /// // `HugeInt` has no canonical mapping yet — calling normalize panics.
 /// normalize_sqlparser_type(&DataType::HugeInt);
 /// ```
+#[allow(
+    clippy::unimplemented,
+    reason = "documented, tested behavior: data types without a canonical token are an intentional gap that panics rather than silently mis-normalizing"
+)]
 #[must_use]
 #[inline]
 pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {

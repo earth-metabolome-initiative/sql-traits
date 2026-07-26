@@ -56,6 +56,15 @@ pub enum Error {
         /// Name of the table the check constraint belongs to.
         table_name: String,
     },
+    #[error("Invalid primary key in table `{table_name}`: {reason}")]
+    /// A primary key constraint referenced something other than a plain column,
+    /// such as an expression like `PRIMARY KEY (a - b)`.
+    InvalidPrimaryKey {
+        /// Name of the table the primary key belongs to.
+        table_name: String,
+        /// Human-readable reason describing why the primary key is invalid.
+        reason: String,
+    },
     #[error(
         "Referenced table `{referenced_table}` not found for foreign key in table `{host_table}`."
     )]

@@ -1162,6 +1162,10 @@ pub trait ForeignKeyLike:
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(
+        clippy::expect_used,
+        reason = "documented precondition: the host column must belong to this foreign key"
+    )]
     fn referenced_column_for_host_column<'db>(
         &'db self,
         database: &'db Self::DB,

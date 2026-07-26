@@ -1,5 +1,9 @@
 //! Submodule implementing the [`TableLike`] trait for `sqlparser`'s
 //! [`CreateTable`] struct.
+#![allow(
+    clippy::expect_used,
+    reason = "trait receivers are obtained from this database, so their metadata is always present"
+)]
 
 use ::sqlparser::ast::{CreateTable, Ident, ObjectNamePart};
 use sql_docs::docs::TableDoc;
@@ -54,8 +58,8 @@ impl TableLike for CreateTable {
                 sqlparser::ast::ObjectNamePart::Identifier(Ident { value, .. }) => {
                     Some(value.as_str())
                 }
-                sqlparser::ast::ObjectNamePart::Function(_) => {
-                    panic!("Unexpected object name part in CreateTable: {schema_part:?}")
+                sqlparser::ast::ObjectNamePart::Function(function) => {
+                    Some(function.name.value.as_str())
                 }
             }
         } else {
@@ -141,5 +145,33 @@ impl TableLike for CreateTable {
     #[inline]
     fn has_forced_row_level_security(&self, database: &Self::DB) -> bool {
         database.table_metadata(self).expect("Table must exist in database").rls_forced()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::ast::{
+        Ident, ObjectName, ObjectNamePart, ObjectNamePartFunction,
+        helpers::stmt_create_table::CreateTableBuilder,
+    };
+
+    use super::*;
+
+    #[test]
+    fn table_schema_reads_a_function_name_part() {
+        // sqlparser never emits a `Function` part in a table name from a
+        // `CREATE TABLE` parse, but the accessor must stay total rather than
+        // panic if one is ever constructed. The schema part falls back to the
+        // function's name, mirroring `last_str`.
+        let name = ObjectName(vec![
+            ObjectNamePart::Function(ObjectNamePartFunction {
+                name: Ident::new("schema_fn"),
+                args: alloc::vec::Vec::new(),
+            }),
+            ObjectNamePart::Identifier(Ident::new("t")),
+        ]);
+        let create_table = CreateTableBuilder::new(name).build();
+        assert_eq!(create_table.table_schema(), Some("schema_fn"));
+        assert_eq!(create_table.table_name(), "t");
     }
 }

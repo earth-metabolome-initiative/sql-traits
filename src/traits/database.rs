@@ -291,6 +291,11 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(
+        clippy::expect_used,
+        clippy::panic,
+        reason = "table_dag assumes a reference-closed, acyclic schema: dangling references and cycles must be ruled out via validate_foreign_key_targets before ordering"
+    )]
     fn table_dag(&self) -> Vec<&Self::Table> {
         let tables = self.tables().collect::<Vec<&Self::Table>>();
 

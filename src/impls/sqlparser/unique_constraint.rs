@@ -1,4 +1,8 @@
 //! Implement the [`UniqueConstraint`] trait for the `sqlparser` crate's
+#![allow(
+    clippy::expect_used,
+    reason = "trait receivers are obtained from this database, so their metadata is always present"
+)]
 
 use sqlparser::ast::{CreateTable, Expr, UniqueConstraint};
 

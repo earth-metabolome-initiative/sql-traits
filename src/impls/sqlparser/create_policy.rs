@@ -1,3 +1,7 @@
+#![allow(
+    clippy::expect_used,
+    reason = "policy metadata is always present for policies obtained from this database; the referenced table is assumed to exist, matching the model's reference-closure contract"
+)]
 //! Implementation of the `PolicyLike` trait for `CreatePolicy` struct.
 
 use sqlparser::ast::{CreatePolicy, CreatePolicyCommand, Expr, Owner};

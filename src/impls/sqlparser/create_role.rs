@@ -1,4 +1,8 @@
 //! Implementation of the `RoleLike` trait for sqlparser's `CreateRole` type.
+#![allow(
+    clippy::expect_used,
+    reason = "sqlparser only produces a CreateRole after parsing at least one role name"
+)]
 
 use sqlparser::ast::CreateRole;
 

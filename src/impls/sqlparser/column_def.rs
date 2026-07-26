@@ -1,5 +1,9 @@
 //! Submodule implementing the [`ColumnLike`] trait for `sqlparser`'s
 //! [`ColumnDef`] struct.
+#![allow(
+    clippy::expect_used,
+    reason = "trait receivers are obtained from this database, so their metadata is always present"
+)]
 
 use alloc::string::{String, ToString};
 

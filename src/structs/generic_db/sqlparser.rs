@@ -1065,10 +1065,13 @@ impl ParserDB {
                     let mut primary_key_columns = Vec::new();
                     for col_name in &pk.columns {
                         let Expr::Identifier(column_name) = &col_name.column.expr else {
-                            unreachable!(
-                                "Unexpected expression in primary key column: {:?}",
-                                col_name
-                            )
+                            return Err(crate::errors::Error::InvalidPrimaryKey {
+                                table_name: create_table.name.to_string(),
+                                reason: format!(
+                                    "primary key entries must be plain columns, found expression `{}`",
+                                    col_name.column.expr
+                                ),
+                            });
                         };
                         primary_key_columns.extend(
                             table_metadata
@@ -2300,14 +2303,16 @@ impl ParserDB {
 fn search_sql_documents(path: &Path) -> Vec<PathBuf> {
     let mut sql_files = Vec::new();
     if path.is_dir() {
-        for entry in std::fs::read_dir(path).expect("Failed to read directory") {
-            let entry = entry.expect("Failed to read directory entry");
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return sql_files;
+        };
+        for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 sql_files.extend(search_sql_documents(&path));
             } else if let Some(extension) = path.extension()
                 && extension == "sql"
-                && path.file_name().unwrap() != "down.sql"
+                && path.file_name().is_some_and(|name| name != "down.sql")
             {
                 sql_files.push(path);
             }
@@ -4566,6 +4571,49 @@ mod tests {
                 }
                 other => panic!("expected dangling-table error, got {other:?}"),
             }
+        }
+    }
+
+    mod primary_key_validation {
+        use super::*;
+        use crate::traits::ColumnLike;
+
+        #[test]
+        fn expression_primary_key_errors_instead_of_panicking() {
+            match ParserDB::parse::<GenericDialect>(
+                "CREATE TABLE t (a INT, b INT, PRIMARY KEY (a - b));",
+            ) {
+                Err(Error::InvalidPrimaryKey { table_name, reason }) => {
+                    assert_eq!(table_name, "t");
+                    assert!(
+                        reason.contains("a - b"),
+                        "reason should name the offending expression"
+                    );
+                }
+                other => panic!("expected InvalidPrimaryKey, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn function_call_primary_key_errors() {
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(
+                    "CREATE TABLE t (a INT, PRIMARY KEY (LOWER(a)));"
+                ),
+                Err(Error::InvalidPrimaryKey { .. })
+            ));
+        }
+
+        #[test]
+        fn plain_column_primary_key_still_parses() {
+            let db = ParserDB::parse::<GenericDialect>(
+                "CREATE TABLE t (a INT, b INT, PRIMARY KEY (a, b));",
+            )
+            .expect("parse");
+            let table = db.table(None, "t").expect("table t");
+            let pk: Vec<&str> =
+                table.primary_key_columns(&db).map(ColumnLike::column_name).collect();
+            assert_eq!(pk, vec!["a", "b"]);
         }
     }
 }
