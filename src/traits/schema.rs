@@ -1,8 +1,12 @@
 //! Submodule providing a trait for describing SQL Schema-like entities.
 
+use alloc::borrow::Cow;
 use core::fmt::Debug;
 
-use crate::traits::{DatabaseLike, Metadata};
+use crate::{
+    traits::{DatabaseLike, Metadata},
+    utils::identifier_resolution::normalize_identifier,
+};
 
 /// A trait for types that can be treated as SQL schemas.
 ///
@@ -33,9 +37,34 @@ pub trait SchemaLike: Debug + Clone + Ord + Eq + Metadata + Send + Sync {
     /// Returns whether the schema identifier was quoted in SQL.
     ///
     /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
     #[inline]
     fn name_is_quoted(&self) -> bool {
         false
+    }
+
+    /// Returns the name PostgreSQL stores for this schema: an unquoted
+    /// identifier folds to lowercase, a quoted one keeps its case.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE SCHEMA My_Schema;")?;
+    /// let schema = db.schema("my_schema").unwrap();
+    /// assert_eq!(schema.name(), "My_Schema");
+    /// assert_eq!(schema.stored_name(), "my_schema");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn stored_name(&self) -> Cow<'_, str> {
+        normalize_identifier(self.name(), self.name_is_quoted())
     }
 
     /// Returns the authorization owner of the schema, if specified.
