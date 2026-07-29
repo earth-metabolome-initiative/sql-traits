@@ -4,7 +4,7 @@
 )]
 //! Implementation of the `PolicyLike` trait for `CreatePolicy` struct.
 
-use sqlparser::ast::{CreatePolicy, CreatePolicyCommand, Expr, Owner};
+use sqlparser::ast::{CreatePolicy, CreatePolicyCommand, CreatePolicyType, Expr, Owner};
 
 use crate::{
     structs::{ParserDB, metadata::PolicyMetadata},
@@ -38,6 +38,10 @@ impl PolicyLike for CreatePolicy {
 
     fn command(&self) -> CreatePolicyCommand {
         self.command.unwrap_or(CreatePolicyCommand::All)
+    }
+
+    fn policy_type(&self) -> CreatePolicyType {
+        self.policy_type.unwrap_or(CreatePolicyType::Permissive)
     }
 
     fn roles<'db>(&'db self, _database: &'db Self::DB) -> impl Iterator<Item = &'db Owner>

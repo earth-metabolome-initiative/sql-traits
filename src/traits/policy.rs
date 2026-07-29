@@ -2,7 +2,7 @@
 
 use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
-use sqlparser::ast::{CreatePolicyCommand, Expr, Owner};
+use sqlparser::ast::{CreatePolicyCommand, CreatePolicyType, Expr, Owner};
 
 use crate::traits::{DatabaseLike, DocumentationMetadata, Metadata};
 
@@ -94,6 +94,45 @@ pub trait PolicyLike:
     /// # }
     /// ```
     fn command(&self) -> CreatePolicyCommand;
+
+    /// Returns whether the policy grants access (permissive) or further
+    /// restricts it (restrictive).
+    ///
+    /// PostgreSQL combines policies as
+    /// `(PERMISSIVE_1 OR PERMISSIVE_2 OR ...) AND RESTRICTIVE_1 AND ...`, so
+    /// the two kinds are not interchangeable. A table with row-level
+    /// security enabled and only restrictive policies denies every row, as
+    /// no permissive policy exists to grant access in the first place.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::ast::CreatePolicyType;
+    ///
+    /// let sql = "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE POLICY restrictive_policy ON my_table AS RESTRICTIVE USING (id > 0);
+    /// CREATE POLICY permissive_policy ON my_table AS PERMISSIVE USING (id > 0);
+    /// CREATE POLICY implicit_policy ON my_table USING (id > 0);
+    /// ";
+    /// let db = ParserDB::parse::<GenericDialect>(sql)?;
+    /// let table = db.table(None, "my_table").unwrap();
+    ///
+    /// let policy = table.policies(&db).find(|p| p.name() == "restrictive_policy").unwrap();
+    /// assert_eq!(policy.policy_type(), CreatePolicyType::Restrictive);
+    ///
+    /// let policy = table.policies(&db).find(|p| p.name() == "permissive_policy").unwrap();
+    /// assert_eq!(policy.policy_type(), CreatePolicyType::Permissive);
+    ///
+    /// // The modifier is optional, and PostgreSQL defaults to permissive.
+    /// let policy = table.policies(&db).find(|p| p.name() == "implicit_policy").unwrap();
+    /// assert_eq!(policy.policy_type(), CreatePolicyType::Permissive);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn policy_type(&self) -> CreatePolicyType;
 
     /// Returns the roles the policy applies to.
     /// If empty, it applies to all roles (PUBLIC).
@@ -251,6 +290,10 @@ where
         (*self).command()
     }
 
+    fn policy_type(&self) -> CreatePolicyType {
+        (*self).policy_type()
+    }
+
     fn roles<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Owner>
     where
         Self: 'db,
@@ -289,7 +332,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use sqlparser::{ast::CreatePolicyCommand, dialect::GenericDialect};
+    use sqlparser::{
+        ast::{CreatePolicyCommand, CreatePolicyType},
+        dialect::GenericDialect,
+    };
 
     use super::*;
     use crate::{
@@ -322,6 +368,7 @@ mod tests {
         assert_eq!(policy_table.table_name(), "my_table");
 
         assert_eq!(policy_ref.command(), CreatePolicyCommand::Select);
+        assert_eq!(policy_ref.policy_type(), CreatePolicyType::Permissive);
 
         let roles: Vec<_> = policy_ref.roles(&db).collect();
         assert_eq!(roles.len(), 1);
@@ -346,6 +393,30 @@ mod tests {
         let check_funcs: Vec<_> = policy_ref.check_functions(&db).collect();
         assert_eq!(check_funcs.len(), 1);
         assert_eq!(check_funcs[0].name(), "check_func");
+    }
+
+    #[test]
+    fn test_policy_type_modifier() {
+        let sql = r"
+            CREATE TABLE my_table (id INT);
+            CREATE POLICY restrictive_policy ON my_table AS RESTRICTIVE USING (id > 0);
+            CREATE POLICY permissive_policy ON my_table AS PERMISSIVE USING (id > 0);
+            CREATE POLICY implicit_policy ON my_table USING (id > 0);
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let table = db.table(None, "my_table").expect("Table not found");
+
+        let policy_type = |name: &str| {
+            table
+                .policies(&db)
+                .find(|policy| policy.name() == name)
+                .expect("Policy not found")
+                .policy_type()
+        };
+
+        assert_eq!(policy_type("restrictive_policy"), CreatePolicyType::Restrictive);
+        assert_eq!(policy_type("permissive_policy"), CreatePolicyType::Permissive);
+        assert_eq!(policy_type("implicit_policy"), CreatePolicyType::Permissive);
     }
 
     #[test]
