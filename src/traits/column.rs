@@ -1,11 +1,11 @@
 //! Submodule providing a trait for describing SQL Column-like entities.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{borrow::Cow, string::String, vec::Vec};
 use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
     traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
-    utils::normalize_postgres_type,
+    utils::{identifier_resolution::normalize_identifier, normalize_postgres_type},
 };
 
 /// A trait for types that can be treated as SQL columns.
@@ -43,9 +43,38 @@ pub trait ColumnLike:
     /// Returns whether the column identifier was quoted in SQL.
     ///
     /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
     #[inline]
     fn column_name_is_quoted(&self) -> bool {
         false
+    }
+
+    /// Returns the name PostgreSQL stores for this column: an unquoted
+    /// identifier folds to lowercase, a quoted one keeps its case.
+    ///
+    /// Prefer this over [`Self::column_name`] whenever the name is emitted into
+    /// SQL or compared against a catalog, since the raw name alone is only
+    /// correct for identifiers that were already lowercase.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (ID INT, \"Name\" TEXT);")?;
+    /// let table = db.table(None, "t").unwrap();
+    /// let stored: Vec<_> = table.columns(&db).map(|col| col.stored_column_name()).collect();
+    /// assert_eq!(stored, vec!["id", "Name"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn stored_column_name(&self) -> Cow<'_, str> {
+        normalize_identifier(self.column_name(), self.column_name_is_quoted())
     }
 
     /// Returns the documentation of the column, if any.

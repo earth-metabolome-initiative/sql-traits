@@ -1,6 +1,6 @@
 //! Submodule providing a trait for describing SQL Table-like entities.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
         ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
         PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
     },
-    utils::identifier_resolution::stored_identifier_matches_lookup,
+    utils::identifier_resolution::{normalize_identifier, stored_identifier_matches_lookup},
 };
 
 /// A trait for types that can be treated as SQL tables.
@@ -50,9 +50,39 @@ pub trait TableLike:
     /// Returns whether the table identifier was quoted in SQL.
     ///
     /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
     #[inline]
     fn table_name_is_quoted(&self) -> bool {
         false
+    }
+
+    /// Returns the name PostgreSQL stores for this table: an unquoted
+    /// identifier folds to lowercase, a quoted one keeps its case.
+    ///
+    /// Prefer this over [`Self::table_name`] whenever the name is emitted into
+    /// SQL or compared against a catalog, since the raw name alone is only
+    /// correct for identifiers that were already lowercase.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "CREATE TABLE Docs (id INT); CREATE TABLE \"Docs2\" (id INT);",
+    /// )?;
+    /// assert_eq!(db.table(None, "docs").unwrap().stored_table_name(), "docs");
+    /// assert_eq!(db.table(None, "\"Docs2\"").unwrap().stored_table_name(), "Docs2");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn stored_table_name(&self) -> Cow<'_, str> {
+        normalize_identifier(self.table_name(), self.table_name_is_quoted())
     }
 
     /// Returns whether the table has a snake_case name.
@@ -172,9 +202,47 @@ pub trait TableLike:
     /// Returns whether the schema identifier of this table was quoted in SQL.
     ///
     /// This only matters when [`Self::table_schema`] returns `Some`.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
     #[inline]
     fn table_schema_is_quoted(&self) -> bool {
         false
+    }
+
+    /// Returns the schema name PostgreSQL stores for this table, or `None` when
+    /// the table declares no schema.
+    ///
+    /// An unquoted identifier folds to lowercase, a quoted one keeps its case.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "CREATE TABLE My_Schema.t (id INT);
+    /// CREATE TABLE \"Other\".u (id INT);
+    /// CREATE TABLE v (id INT);",
+    /// )?;
+    /// assert_eq!(
+    ///     db.table(Some("my_schema"), "t").unwrap().stored_table_schema().as_deref(),
+    ///     Some("my_schema")
+    /// );
+    /// assert_eq!(
+    ///     db.table(Some("\"Other\""), "u").unwrap().stored_table_schema().as_deref(),
+    ///     Some("Other")
+    /// );
+    /// assert_eq!(db.table(None, "v").unwrap().stored_table_schema(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn stored_table_schema(&self) -> Option<Cow<'_, str>> {
+        self.table_schema()
+            .map(|schema| normalize_identifier(schema, self.table_schema_is_quoted()))
     }
 
     /// Returns the table ID according to its position in the database's table

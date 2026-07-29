@@ -1,11 +1,11 @@
 //! Submodule providing a trait for describing SQL Function-like entities.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::{fmt::Debug, hash::Hash};
 
 use crate::{
     traits::{DatabaseLike, Metadata},
-    utils::normalize_postgres_type,
+    utils::{identifier_resolution::normalize_identifier, normalize_postgres_type},
 };
 
 /// A trait for describing SQL Function-like entities.
@@ -35,11 +35,37 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
 
     /// Returns whether the function name was quoted in SQL.
     ///
-    /// Implementations that do not preserve quotedness can rely on the
-    /// default `false`.
+    /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
     #[inline]
     fn name_is_quoted(&self) -> bool {
         false
+    }
+
+    /// Returns the name PostgreSQL stores for this function: an unquoted
+    /// identifier folds to lowercase, a quoted one keeps its case.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "CREATE FUNCTION Add_One(x INT) RETURNS INT AS 'SELECT x + 1;';",
+    /// )?;
+    /// let function = db.functions().next().expect("Function should exist");
+    /// assert_eq!(function.name(), "Add_One");
+    /// assert_eq!(function.stored_name(), "add_one");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn stored_name(&self) -> Cow<'_, str> {
+        normalize_identifier(self.name(), self.name_is_quoted())
     }
 
     /// Returns the argument type names (if any) of the function as strings.
