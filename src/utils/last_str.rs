@@ -6,6 +6,10 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 /// Returns a reference to the value at the last value in the provided
 /// `ObjectName`.
 ///
+/// The result is a display name, not a lookup key: it drops any schema
+/// qualifier and the quoting of the identifier. Resolving a name against a
+/// database MUST go through `resolve_object_name` instead, which honours both.
+///
 /// # Arguments
 ///
 /// * `object_name` - The `ObjectName` to extract the last part from.

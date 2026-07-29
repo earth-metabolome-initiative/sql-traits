@@ -12,24 +12,13 @@ use alloc::{
     vec::Vec,
 };
 
-use sqlparser::ast::{Delete, FromTable, Insert, ObjectName, TableFactor, TableObject, Update};
+use sqlparser::ast::{Delete, FromTable, Insert, TableFactor, TableObject, Update};
 
 use crate::{
     errors::LookupError,
     traits::{DMLLike, DatabaseLike, DmlKind, DmlStatement},
-    utils::object_name::resolve_object_name,
+    utils::object_name::resolve_required_table,
 };
-
-/// Resolves an object name that is required to denote an existing base table.
-fn resolve_required_table<'db, DB: DatabaseLike>(
-    name: &ObjectName,
-    database: &'db DB,
-) -> Result<&'db DB::Table, LookupError> {
-    match resolve_object_name(name, database)? {
-        Some(table) => Ok(table),
-        None => Err(LookupError::TableNotFound { object_name: name.to_string() }),
-    }
-}
 
 /// Resolves a table factor that is required to be a plain base table (no table
 /// function arguments), reporting `reason` otherwise.

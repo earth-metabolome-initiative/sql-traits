@@ -1,16 +1,15 @@
 //! Implementation of the `TriggerLike` trait for sqlparser's `CreateTrigger`
 //! type.
-#![allow(
-    clippy::expect_used,
-    reason = "trigger creation validates the target table exists in ParserDB::parse"
-)]
 
 use sqlparser::ast::{CreateTrigger, ObjectNamePart};
 
 use crate::{
+    errors::LookupError,
     structs::ParserDB,
     traits::{DatabaseLike, FunctionLike, Metadata, TriggerLike},
-    utils::{identifier_resolution::identifiers_match, last_str},
+    utils::{
+        identifier_resolution::identifiers_match, last_str, object_name::resolve_required_table,
+    },
 };
 
 impl Metadata for CreateTrigger {
@@ -26,11 +25,14 @@ impl TriggerLike for CreateTrigger {
     }
 
     #[inline]
-    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table
+    fn table<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError>
     where
         Self: 'db,
     {
-        database.table(None, last_str(&self.table_name)).expect("table must exist")
+        resolve_required_table(&self.table_name, database)
     }
 
     #[inline]

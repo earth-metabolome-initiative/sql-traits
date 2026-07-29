@@ -1,15 +1,16 @@
 #![allow(
     clippy::expect_used,
-    reason = "policy metadata is always present for policies obtained from this database; the referenced table is assumed to exist, matching the model's reference-closure contract"
+    reason = "policy metadata is always present for policies obtained from this database"
 )]
 //! Implementation of the `PolicyLike` trait for `CreatePolicy` struct.
 
 use sqlparser::ast::{CreatePolicy, CreatePolicyCommand, CreatePolicyType, Expr, Owner};
 
 use crate::{
+    errors::LookupError,
     structs::{ParserDB, metadata::PolicyMetadata},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, PolicyLike},
-    utils::last_str,
+    utils::object_name::resolve_required_table,
 };
 
 impl Metadata for CreatePolicy {
@@ -27,13 +28,14 @@ impl PolicyLike for CreatePolicy {
         &self.name.value
     }
 
-    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table
+    fn table<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError>
     where
         Self: 'db,
     {
-        let table_name = last_str(&self.table_name);
-
-        database.table(None, table_name).expect("Table referenced by policy not found")
+        resolve_required_table(&self.table_name, database)
     }
 
     fn command(&self) -> CreatePolicyCommand {

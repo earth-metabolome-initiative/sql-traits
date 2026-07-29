@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 
 use crate::{
+    errors::LookupError,
     traits::{DatabaseLike, FunctionLike, Metadata},
     utils::maintenance_trigger_parser::parse_maintenance_body,
 };
@@ -66,10 +67,21 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
 
     /// Returns the table the trigger is associated with.
     ///
+    /// The target is resolved by identifier, honouring both the schema
+    /// qualifier and the quoting of the name as written in the trigger
+    /// definition.
+    ///
     /// # Arguments
     ///
     /// * `database` - A reference to the database instance to query the table
     ///   from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::TableNotFound`] when no table matches the target,
+    /// and [`LookupError::InvalidObjectName`] or
+    /// [`LookupError::AmbiguousTableLookup`] when the target name cannot denote
+    /// a single table.
     ///
     /// # Example
     ///
@@ -79,17 +91,19 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
-    /// CREATE TABLE my_table (id INT);
+    /// CREATE SCHEMA app;
+    /// CREATE TABLE app.\"MyTable\" (id INT);
     /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
     /// CREATE TRIGGER my_trigger
-    /// AFTER INSERT ON my_table
+    /// AFTER INSERT ON app.\"MyTable\"
     /// FOR EACH ROW
     /// EXECUTE FUNCTION my_function();
     /// ",
     /// )?;
     /// let trigger = db.triggers().next().unwrap();
-    /// let table = trigger.table(&db);
-    /// assert_eq!(table.table_name(), "my_table");
+    /// let table = trigger.table(&db)?;
+    /// assert_eq!(table.table_name(), "MyTable");
+    /// assert_eq!(table.table_schema(), Some("app"));
     /// # Ok(())
     /// # }
     /// ```
@@ -115,12 +129,15 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// let statements = Parser::parse_sql(&dialect, sql)?;
     /// let db = ParserDB::from_statements(statements, "test".to_string())?;
     /// let trigger = db.triggers().next().unwrap();
-    /// let table = trigger.table(&db);
+    /// let table = trigger.table(&db)?;
     /// assert_eq!(table.table_name(), "my_table");
     /// # Ok(())
     /// # }
     /// ```
-    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table
+    fn table<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError>
     where
         Self: 'db;
 
@@ -432,11 +449,11 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
         let Some(body) = function.body() else {
             return false;
         };
-        let table = self.table(database);
+        let Ok(table) = self.table(database) else {
+            return false;
+        };
 
-        let result = parse_maintenance_body(body, table, database);
-
-        result.is_ok()
+        parse_maintenance_body(body, table, database).is_ok()
     }
 
     /// Returns the assignments in a maintenance trigger.
@@ -486,8 +503,8 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     ) -> impl Iterator<Item = (&'db <Self::DB as DatabaseLike>::Column, sqlparser::ast::Expr)> {
         if let Some(function) = self.function(database)
             && let Some(body) = function.body()
+            && let Ok(table) = self.table(database)
         {
-            let table = self.table(database);
             parse_maintenance_body(body, table, database).unwrap_or_default()
         } else {
             Vec::new()
@@ -503,7 +520,10 @@ impl<T: TriggerLike> TriggerLike for &T {
         (*self).name()
     }
 
-    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table
+    fn table<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError>
     where
         Self: 'db,
     {
@@ -586,7 +606,7 @@ mod tests {
 
         assert_eq!(trigger_ref.name(), "my_trigger");
 
-        let table = trigger_ref.table(&db);
+        let table = trigger_ref.table(&db).expect("Table not found");
         assert_eq!(table.table_name(), "users");
 
         let events = trigger_ref.events();
@@ -669,5 +689,55 @@ mod tests {
 
         assert!(!trigger_ref.is_maintenance_trigger(&db));
         assert_eq!(trigger_ref.maintenance_assignments(&db).count(), 0);
+    }
+
+    #[test]
+    fn test_trigger_on_schema_qualified_table_resolves() {
+        let sql = r"
+            CREATE SCHEMA app;
+            CREATE TABLE app.docs (id INT);
+            CREATE FUNCTION audit() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+            CREATE TRIGGER tg AFTER INSERT ON app.docs FOR EACH ROW EXECUTE FUNCTION audit();
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let trigger = db.triggers().next().expect("Trigger not found");
+        let table = trigger.table(&db).expect("Trigger target should resolve");
+
+        assert_eq!(table.table_name(), "docs");
+        assert_eq!(table.table_schema(), Some("app"));
+    }
+
+    #[test]
+    fn test_trigger_on_quoted_table_resolves() {
+        let sql = r#"
+            CREATE TABLE "MyTable" (id INT);
+            CREATE FUNCTION audit() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+            CREATE TRIGGER tg AFTER INSERT ON "MyTable" FOR EACH ROW EXECUTE FUNCTION audit();
+        "#;
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let trigger = db.triggers().next().expect("Trigger not found");
+        let table = trigger.table(&db).expect("Trigger target should resolve");
+
+        assert_eq!(table.table_name(), "MyTable");
+        assert_eq!(table.table_schema(), None);
+    }
+
+    #[test]
+    fn test_trigger_table_reports_dangling_target_after_rename() {
+        // Renaming a table leaves the trigger's stored target name behind, which
+        // is the one way a parsed database can hold an unresolvable trigger.
+        let sql = r"
+            CREATE TABLE users (id INT);
+            CREATE FUNCTION audit() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+            CREATE TRIGGER tg AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION audit();
+            ALTER TABLE users RENAME TO people;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let trigger = db.triggers().next().expect("Trigger not found");
+
+        assert_eq!(
+            trigger.table(&db).err(),
+            Some(LookupError::TableNotFound { object_name: "users".to_string() })
+        );
     }
 }

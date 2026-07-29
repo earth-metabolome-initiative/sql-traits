@@ -315,6 +315,26 @@ pub(crate) fn resolve_object_name<'db, DB: DatabaseLike>(
     resolve_table_object_name_in_iter(database.tables(), object_name)
 }
 
+/// Resolves an object name that is required to denote an existing base table of
+/// `database`.
+///
+/// Unlike [`resolve_object_name`], a name that matches no table is an error
+/// rather than `Ok(None)`: use this when the referencing object could not exist
+/// without its target, as with a policy or a trigger.
+///
+/// # Errors
+///
+/// Returns [`LookupError::TableNotFound`] when no table matches, and an error
+/// when the object name is malformed for table lookup or the lookup is
+/// ambiguous.
+pub(crate) fn resolve_required_table<'db, DB: DatabaseLike>(
+    object_name: &ObjectName,
+    database: &'db DB,
+) -> Result<&'db DB::Table, LookupError> {
+    resolve_object_name(object_name, database)?
+        .ok_or_else(|| LookupError::TableNotFound { object_name: object_name.to_string() })
+}
+
 #[cfg(test)]
 mod tests {
     use sqlparser::{
