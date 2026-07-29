@@ -113,7 +113,9 @@ pub trait TableLike:
     where
         Self: 'db,
     {
-        database.triggers().filter(|t| t.table(database).table_name() == self.table_name())
+        database.triggers().filter(move |trigger| {
+            trigger.table(database).is_ok_and(|t| t.borrow() == self.borrow())
+        })
     }
 
     /// Returns the documentation of the table, if any.
@@ -2568,7 +2570,9 @@ pub trait TableLike:
     where
         Self: 'db,
     {
-        database.policies().filter(move |policy| policy.table(database).borrow() == self.borrow())
+        database
+            .policies()
+            .filter(move |policy| policy.table(database).is_ok_and(|t| t.borrow() == self.borrow()))
     }
 
     /// Returns an iterator over the grants that apply to this table.
