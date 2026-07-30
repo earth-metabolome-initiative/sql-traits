@@ -4,6 +4,7 @@ use alloc::{borrow::Cow, vec::Vec};
 use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
+    errors::{Error, LookupError, ObjectKind},
     structs::{
         SchemaFingerprint,
         fingerprint::{FingerprintError, compute_persistence_v1},
@@ -118,6 +119,11 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to query the
     ///   triggers from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -131,7 +137,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let triggers: Vec<&str> = table.triggers(&db).map(|t| t.name()).collect();
+    /// let triggers: Vec<&str> = table.triggers(&db)?.map(|t| t.name()).collect();
     /// assert_eq!(triggers, vec!["my_trigger"]);
     /// # Ok(())
     /// # }
@@ -139,13 +145,15 @@ pub trait TableLike:
     fn triggers<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Trigger>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Trigger>, LookupError>
     where
         Self: 'db,
     {
-        database.triggers().filter(move |trigger| {
+        self.require_in_database(database)?;
+
+        Ok(database.triggers().filter(move |trigger| {
             trigger.table(database).is_ok_and(|t| t.borrow() == self.borrow())
-        })
+        }))
     }
 
     /// Returns the documentation of the table, if any.
@@ -154,6 +162,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to query the table
     ///   documentation from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -170,12 +183,12 @@ pub trait TableLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let table_next = db.table(None, "my_next_table").unwrap();
-    /// assert_eq!(table.table_doc(&db), None); // No documentation available
-    /// assert_eq!(table_next.table_doc(&db), Some("the next table to create"));
+    /// assert_eq!(table.table_doc(&db)?, None); // No documentation available
+    /// assert_eq!(table_next.table_doc(&db)?, Some("the next table to create"));
     /// # Ok(())
     /// # }
     /// ```
-    fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db;
 
@@ -276,12 +289,55 @@ pub trait TableLike:
         database.table_id(self.borrow())
     }
 
+    /// Confirms that `database` holds this table.
+    ///
+    /// Most accessors resolve the table's own metadata and so report an absent
+    /// receiver as a side effect. The ones that answer from the tables
+    /// `database` holds, comparing this table by identity, would otherwise
+    /// answer as though it were simply unrelated to everything. They call this
+    /// first so that an absent receiver is reported rather than answered.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
+    /// let table = db.table(None, "t").unwrap();
+    /// assert!(table.require_in_database(&db).is_ok());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn require_in_database(&self, database: &Self::DB) -> Result<(), LookupError> {
+        // The iterator is the probe, not the answer: resolving it is what
+        // establishes that `database` holds this table.
+        drop(TableLike::columns(self, database)?);
+        Ok(())
+    }
+
     /// Iterates over the columns of the table using the provided schema.
     ///
     /// # Arguments
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -290,7 +346,7 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let column_names: Vec<&str> = table.columns(&db).map(|col| col.column_name()).collect();
+    /// let column_names: Vec<&str> = table.columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(column_names, vec!["id", "name"]);
     /// # Ok(())
     /// # }
@@ -298,7 +354,7 @@ pub trait TableLike:
     fn columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db;
 
@@ -320,8 +376,8 @@ pub trait TableLike:
     ///
     /// # Errors
     ///
-    /// Returns [`FingerprintError`] when the input table fails validation;
-    /// no digest is produced.
+    /// Returns [`FingerprintError`], and produces no digest, when the input
+    /// table fails validation or when `database` does not hold it.
     ///
     /// # Example
     ///
@@ -364,6 +420,11 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -378,15 +439,15 @@ pub trait TableLike:
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(table.has_generated_columns(&db));
+    /// assert!(table.has_generated_columns(&db)?);
     /// let other_table = db.table(None, "my_other_table").unwrap();
-    /// assert!(!other_table.has_generated_columns(&db));
+    /// assert!(!other_table.has_generated_columns(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_generated_columns(&self, database: &Self::DB) -> bool {
-        self.columns(database).any(ColumnLike::is_generated)
+    fn has_generated_columns(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.columns(database)?.any(ColumnLike::is_generated))
     }
 
     /// Returns the number of columns in the table.
@@ -395,6 +456,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -405,13 +471,13 @@ pub trait TableLike:
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert_eq!(table.number_of_columns(&db), 3);
+    /// assert_eq!(table.number_of_columns(&db)?, 3);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn number_of_columns(&self, database: &Self::DB) -> usize {
-        self.columns(database).count()
+    fn number_of_columns(&self, database: &Self::DB) -> Result<usize, LookupError> {
+        Ok(self.columns(database)?.count())
     }
 
     /// Returns the corresponding column by name, if it exists.
@@ -422,15 +488,20 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
     /// # Example
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// assert_eq!(id_column.column_name(), "id");
-    /// let non_existent_column = table.column("non_existent", &db);
+    /// let non_existent_column = table.column("non_existent", &db)?;
     /// assert!(non_existent_column.is_none());
     /// # Ok(())
     /// # }
@@ -456,12 +527,12 @@ pub trait TableLike:
     /// )?;
     /// let table = db.table(None, "t").expect("Table should exist");
     ///
-    /// assert!(table.column("foo", &db).is_some());
-    /// assert!(table.column("\"foo\"", &db).is_some());
-    /// assert!(table.column("\"Foo\"", &db).is_none());
+    /// assert!(table.column("foo", &db)?.is_some());
+    /// assert!(table.column("\"foo\"", &db)?.is_some());
+    /// assert!(table.column("\"Foo\"", &db)?.is_none());
     ///
-    /// assert!(table.column("\"ColA\"", &db).is_some());
-    /// assert!(table.column("cola", &db).is_none());
+    /// assert!(table.column("\"ColA\"", &db)?.is_some());
+    /// assert!(table.column("cola", &db)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -470,13 +541,13 @@ pub trait TableLike:
         &'db self,
         name: &str,
         database: &'db Self::DB,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
-        TableLike::columns(self, database).find(|col| {
+        Ok(TableLike::columns(self, database)?.find(|col| {
             stored_identifier_matches_lookup(col.column_name(), col.column_name_is_quoted(), name)
-        })
+        }))
     }
 
     /// Returns the corresponding column by ID position in the table's column
@@ -488,6 +559,11 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
     /// # Example
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -497,9 +573,9 @@ pub trait TableLike:
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
-    /// let name_column = table.column_by_id(1, &db).expect("Column at position 1 should exist");
+    /// let name_column = table.column_by_id(1, &db)?.expect("Column at position 1 should exist");
     /// assert_eq!(name_column.column_name(), "name");
-    /// assert!(table.column_by_id(3, &db).is_none());
+    /// assert!(table.column_by_id(3, &db)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -508,11 +584,11 @@ pub trait TableLike:
         &'db self,
         column_id: usize,
         database: &'db Self::DB,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
-        TableLike::columns(self, database).nth(column_id)
+        Ok(TableLike::columns(self, database)?.nth(column_id))
     }
 
     /// Returns whether the provided column belongs to this table.
@@ -522,6 +598,11 @@ pub trait TableLike:
     /// * `column` - The column to check.
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -537,18 +618,22 @@ pub trait TableLike:
     /// )?;
     /// let table1 = db.table(None, "table1").unwrap();
     /// let table2 = db.table(None, "table2").unwrap();
-    /// let table1_id = table1.column("id", &db).expect("Column 'id' should exist in table1");
-    /// let table2_id = table2.column("id", &db).expect("Column 'id' should exist in table2");
-    /// assert!(table1.has_column(table1_id, &db));
-    /// assert!(!table1.has_column(table2_id, &db));
-    /// assert!(table2.has_column(table2_id, &db));
-    /// assert!(!table2.has_column(table1_id, &db));
+    /// let table1_id = table1.column("id", &db)?.expect("Column 'id' should exist in table1");
+    /// let table2_id = table2.column("id", &db)?.expect("Column 'id' should exist in table2");
+    /// assert!(table1.has_column(table1_id, &db)?);
+    /// assert!(!table1.has_column(table2_id, &db)?);
+    /// assert!(table2.has_column(table2_id, &db)?);
+    /// assert!(!table2.has_column(table1_id, &db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_column(&self, column: &<Self::DB as DatabaseLike>::Column, database: &Self::DB) -> bool {
-        TableLike::columns(self, database).any(|col| col == column)
+    fn has_column(
+        &self,
+        column: &<Self::DB as DatabaseLike>::Column,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        Ok(TableLike::columns(self, database)?.any(|col| col == column))
     }
 
     /// Iterates over the primary key columns of the table using the provided
@@ -558,6 +643,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -573,15 +663,15 @@ pub trait TableLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let pk_columns: Vec<&str> =
-    ///     table.primary_key_columns(&db).map(|col| col.column_name()).collect();
+    ///     table.primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(pk_columns, vec!["id"]);
     /// let composite_pk_table = db.table(None, "my_composite_pk_table").unwrap();
     /// let composite_pk_columns: Vec<&str> =
-    ///     composite_pk_table.primary_key_columns(&db).map(|col| col.column_name()).collect();
+    ///     composite_pk_table.primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(composite_pk_columns, vec!["id1", "id2"]);
     /// let no_pk_table = db.table(None, "my_no_pk_table").unwrap();
     /// let no_pk_columns: Vec<&str> =
-    ///     no_pk_table.primary_key_columns(&db).map(|col| col.column_name()).collect();
+    ///     no_pk_table.primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(no_pk_columns, Vec::<&str>::new());
     /// # Ok(())
     /// # }
@@ -589,7 +679,7 @@ pub trait TableLike:
     fn primary_key_columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db;
 
@@ -604,6 +694,11 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -616,24 +711,27 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let pk_column = table.primary_key_column(&db).unwrap();
+    /// let pk_column = table.primary_key_column(&db)?.unwrap();
     /// assert_eq!(pk_column.column_name(), "id");
     ///
     /// let composite_table = db.table(None, "composite_pk").unwrap();
-    /// assert!(composite_table.primary_key_column(&db).is_none());
+    /// assert!(composite_table.primary_key_column(&db)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
     fn primary_key_column<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Column> {
-        let mut pk_columns = self.primary_key_columns(database);
-        let pk_column = pk_columns.next()?;
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError> {
+        let mut pk_columns = self.primary_key_columns(database)?;
+        let Some(pk_column) = pk_columns.next() else {
+            return Ok(None);
+        };
         if pk_columns.next().is_some() {
-            return None; // Composite primary key
+            // Composite primary key
+            return Ok(None);
         }
-        Some(pk_column)
+        Ok(Some(pk_column))
     }
 
     /// Returns whether the primary key of the table is generated (i.e.,
@@ -643,6 +741,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -656,15 +759,15 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(table.has_surrogate_primary_key(&db));
+    /// assert!(table.has_surrogate_primary_key(&db)?);
     /// let no_gen_pk_table = db.table(None, "my_no_gen_pk_table").unwrap();
-    /// assert!(!no_gen_pk_table.has_surrogate_primary_key(&db));
+    /// assert!(!no_gen_pk_table.has_surrogate_primary_key(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn has_surrogate_primary_key(&self, database: &Self::DB) -> bool {
-        self.primary_key_columns(database).all(ColumnLike::is_generated)
-            && self.has_primary_key(database)
+    fn has_surrogate_primary_key(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.primary_key_columns(database)?.all(ColumnLike::is_generated)
+            && self.has_primary_key(database)?)
     }
 
     /// Returns a vector with the normalized data types of the primary key
@@ -673,6 +776,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -687,16 +795,22 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let pk_types = table.primary_key_type(&db);
+    /// let pk_types = table.primary_key_type(&db)?;
     /// assert_eq!(pk_types, vec!["INT"]);
     /// let composite_pk_table = db.table(None, "my_composite_pk_table").unwrap();
-    /// let composite_pk_types = composite_pk_table.primary_key_type(&db);
+    /// let composite_pk_types = composite_pk_table.primary_key_type(&db)?;
     /// assert_eq!(composite_pk_types, vec!["INT", "BIGINT"]);
     /// # Ok(())
     /// # }
     /// ```
-    fn primary_key_type<'db>(&'db self, database: &'db Self::DB) -> Vec<&'db str> {
-        self.primary_key_columns(database).map(|col| col.normalized_data_type(database)).collect()
+    fn primary_key_type<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<Vec<&'db str>, LookupError> {
+        Ok(self
+            .primary_key_columns(database)?
+            .map(|col| col.normalized_data_type(database))
+            .collect())
     }
 
     /// Returns whether the provided column is the primary key column of the
@@ -707,6 +821,11 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     /// * `column` - A reference to the column to check.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -719,10 +838,10 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// assert!(table.is_primary_key_column(&db, id_column));
-    /// assert!(!table.is_primary_key_column(&db, name_column));
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// assert!(table.is_primary_key_column(&db, id_column)?);
+    /// assert!(!table.is_primary_key_column(&db, name_column)?);
     /// # Ok(())
     /// # }
     /// ```
@@ -730,9 +849,9 @@ pub trait TableLike:
         &self,
         database: &Self::DB,
         column: &<Self::DB as DatabaseLike>::Column,
-    ) -> bool {
-        self.primary_key_columns(database).all(|col| col == column)
-            && self.has_primary_key(database)
+    ) -> Result<bool, LookupError> {
+        Ok(self.primary_key_columns(database)?.all(|col| col == column)
+            && self.has_primary_key(database)?)
     }
 
     /// Returns whether the table has a primary key.
@@ -740,6 +859,11 @@ pub trait TableLike:
     /// # Arguments
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     /// ```rust
@@ -752,15 +876,15 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(table.has_primary_key(&db));
+    /// assert!(table.has_primary_key(&db)?);
     /// let no_pk_table = db.table(None, "my_no_pk_table").unwrap();
-    /// assert!(!no_pk_table.has_primary_key(&db));
+    /// assert!(!no_pk_table.has_primary_key(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_primary_key(&self, database: &Self::DB) -> bool {
-        self.primary_key_columns(database).next().is_some()
+    fn has_primary_key(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.primary_key_columns(database)?.next().is_some())
     }
 
     /// Returns an iterator over the non-primary key columns of the table.
@@ -769,6 +893,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -782,7 +911,7 @@ pub trait TableLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let non_pk_columns: Vec<&str> =
-    ///     table.non_primary_key_columns(&db).map(|col| col.column_name()).collect();
+    ///     table.non_primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(non_pk_columns, vec!["name", "age"]);
     /// # Ok(())
     /// # }
@@ -790,14 +919,14 @@ pub trait TableLike:
     fn non_primary_key_columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
         let primary_key_column_names: Vec<&<Self::DB as DatabaseLike>::Column> =
-            self.primary_key_columns(database).collect();
+            self.primary_key_columns(database)?.collect();
 
-        self.columns(database).filter(move |col| !primary_key_column_names.contains(col))
+        Ok(self.columns(database)?.filter(move |col| !primary_key_column_names.contains(col)))
     }
 
     /// Returns whether the table has non-primary key columns.
@@ -806,6 +935,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -819,15 +953,15 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(table.has_non_primary_key_columns(&db));
+    /// assert!(table.has_non_primary_key_columns(&db)?);
     /// let pk_only_table = db.table(None, "my_pk_only_table").unwrap();
-    /// assert!(!pk_only_table.has_non_primary_key_columns(&db));
+    /// assert!(!pk_only_table.has_non_primary_key_columns(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_non_primary_key_columns(&self, database: &Self::DB) -> bool {
-        self.non_primary_key_columns(database).next().is_some()
+    fn has_non_primary_key_columns(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.non_primary_key_columns(database)?.next().is_some())
     }
 
     /// Returns whether the table has a composite primary key.
@@ -835,6 +969,11 @@ pub trait TableLike:
     /// # Arguments
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     /// ```rust
@@ -847,14 +986,14 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(!table.has_composite_primary_key(&db));
+    /// assert!(!table.has_composite_primary_key(&db)?);
     /// let composite_pk_table = db.table(None, "my_composite_pk_table").unwrap();
-    /// assert!(composite_pk_table.has_composite_primary_key(&db));
+    /// assert!(composite_pk_table.has_composite_primary_key(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn has_composite_primary_key(&self, database: &Self::DB) -> bool {
-        self.primary_key_columns(database).nth(1).is_some()
+    fn has_composite_primary_key(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.primary_key_columns(database)?.nth(1).is_some())
     }
 
     /// Iterates over the check constraints of the table using the provided
@@ -864,6 +1003,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -877,7 +1021,7 @@ pub trait TableLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> =
-    ///     table.check_constraints(&db).map(|cc| cc.expression(&db).to_string()).collect();
+    ///     table.check_constraints(&db)?.map(|cc| cc.expression(&db).to_string()).collect();
     /// assert_eq!(check_constraints, vec!["id > 0", "length(name) > 0"]);
     /// # Ok(())
     /// # }
@@ -885,7 +1029,7 @@ pub trait TableLike:
     fn check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>, LookupError>
     where
         Self: 'db;
 
@@ -896,6 +1040,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -909,7 +1058,7 @@ pub trait TableLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let non_tautological_ccs: Vec<_> = table
-    ///     .non_tautological_check_constraints(&db)
+    ///     .non_tautological_check_constraints(&db)?
     ///     .map(|cc| cc.expression(&db).to_string())
     ///     .collect();
     /// assert_eq!(non_tautological_ccs, vec!["length(name) > 0"]);
@@ -919,11 +1068,18 @@ pub trait TableLike:
     fn non_tautological_check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>, LookupError>
     where
         Self: 'db,
     {
-        self.check_constraints(database).filter(|cc| !cc.is_tautology(database))
+        let mut check_constraints = Vec::new();
+        for check_constraint in self.check_constraints(database)? {
+            if !check_constraint.is_tautology(database)? {
+                check_constraints.push(check_constraint);
+            }
+        }
+
+        Ok(check_constraints.into_iter())
     }
 
     /// Returns whether the table has any check constraints.
@@ -932,6 +1088,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -945,15 +1106,15 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table_with_cc = db.table(None, "my_table_with_cc").unwrap();
-    /// assert!(table_with_cc.has_check_constraints(&db));
+    /// assert!(table_with_cc.has_check_constraints(&db)?);
     /// let table_without_cc = db.table(None, "my_table_without_cc").unwrap();
-    /// assert!(!table_without_cc.has_check_constraints(&db));
+    /// assert!(!table_without_cc.has_check_constraints(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_check_constraints(&self, database: &Self::DB) -> bool {
-        self.check_constraints(database).next().is_some()
+    fn has_check_constraints(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.check_constraints(database)?.next().is_some())
     }
 
     /// Returns whether the table has any non-tautological check constraints.
@@ -962,6 +1123,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -977,16 +1143,19 @@ pub trait TableLike:
     /// )?;
     /// let table_with_non_tautological_cc =
     ///     db.table(None, "my_table_with_non_tautological_cc").unwrap();
-    /// assert!(table_with_non_tautological_cc.has_non_tautological_check_constraints(&db));
+    /// assert!(table_with_non_tautological_cc.has_non_tautological_check_constraints(&db)?);
     /// let table_with_only_tautological_cc =
     ///     db.table(None, "my_table_with_only_tautological_cc").unwrap();
-    /// assert!(!table_with_only_tautological_cc.has_non_tautological_check_constraints(&db));
+    /// assert!(!table_with_only_tautological_cc.has_non_tautological_check_constraints(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_non_tautological_check_constraints(&self, database: &Self::DB) -> bool {
-        self.non_tautological_check_constraints(database).next().is_some()
+    fn has_non_tautological_check_constraints(
+        &self,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        Ok(self.non_tautological_check_constraints(database)?.next().is_some())
     }
 
     /// Returns whether the table or any of its ancestral extended tables have
@@ -996,6 +1165,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1010,21 +1186,29 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// assert!(parent_table.has_non_tautological_check_constraints_in_hierarchy(&db));
+    /// assert!(parent_table.has_non_tautological_check_constraints_in_hierarchy(&db)?);
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// assert!(child_table.has_non_tautological_check_constraints_in_hierarchy(&db));
+    /// assert!(child_table.has_non_tautological_check_constraints_in_hierarchy(&db)?);
     /// let another_table = db.table(None, "another_table").unwrap();
-    /// assert!(!another_table.has_non_tautological_check_constraints_in_hierarchy(&db));
+    /// assert!(!another_table.has_non_tautological_check_constraints_in_hierarchy(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_non_tautological_check_constraints_in_hierarchy(&self, database: &Self::DB) -> bool {
-        self.has_non_tautological_check_constraints(database)
-            || self
-                .ancestral_extended_tables(database)
-                .into_iter()
-                .any(|table| table.has_non_tautological_check_constraints(database))
+    fn has_non_tautological_check_constraints_in_hierarchy(
+        &self,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        if self.has_non_tautological_check_constraints(database)? {
+            return Ok(true);
+        }
+        for table in self.ancestral_extended_tables(database)? {
+            if table.has_non_tautological_check_constraints(database)? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Iterates over the indices associated with the table.
@@ -1033,6 +1217,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -1047,7 +1236,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let indices: Vec<_> = table.indices(&db).collect();
+    /// let indices: Vec<_> = table.indices(&db)?.collect();
     /// assert_eq!(indices.len(), 1);
     /// # Ok(())
     /// # }
@@ -1055,7 +1244,7 @@ pub trait TableLike:
     fn indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>, LookupError>
     where
         Self: 'db;
 
@@ -1065,6 +1254,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -1078,9 +1272,9 @@ pub trait TableLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let unique_indices: Vec<_> = table
-    ///     .unique_indices(&db)
-    ///     .map(|ui| ui.columns(&db).map(|col| col.column_name()).collect::<Vec<_>>())
-    ///     .collect();
+    ///     .unique_indices(&db)?
+    ///     .map(|ui| ui.columns(&db).map(|iter| iter.map(|col| col.column_name()).collect::<Vec<_>>()))
+    ///     .collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(unique_indices, vec![vec!["id"], vec!["name"]]);
     /// # Ok(())
     /// # }
@@ -1088,7 +1282,7 @@ pub trait TableLike:
     fn unique_indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>, LookupError>
     where
         Self: 'db;
 
@@ -1097,6 +1291,11 @@ pub trait TableLike:
     /// # Arguments
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     /// ```
@@ -1109,7 +1308,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let foreign_keys = host_table.foreign_keys(&db).collect::<Vec<_>>();
+    /// let foreign_keys = host_table.foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(foreign_keys.len(), 1);
     /// # Ok(())
     /// # }
@@ -1117,7 +1316,7 @@ pub trait TableLike:
     fn foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db;
 
@@ -1127,6 +1326,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -1141,17 +1345,17 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let referenced_table = db.table(None, "referenced_table").unwrap();
-    /// assert!(!referenced_table.has_foreign_keys(&db));
+    /// assert!(!referenced_table.has_foreign_keys(&db)?);
     /// let host_table_with_fk = db.table(None, "host_table_with_fk").unwrap();
-    /// assert!(host_table_with_fk.has_foreign_keys(&db));
+    /// assert!(host_table_with_fk.has_foreign_keys(&db)?);
     /// let host_table_without_fk = db.table(None, "host_table_without_fk").unwrap();
-    /// assert!(!host_table_without_fk.has_foreign_keys(&db));
+    /// assert!(!host_table_without_fk.has_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_foreign_keys(&self, database: &Self::DB) -> bool {
-        self.foreign_keys(database).next().is_some()
+    fn has_foreign_keys(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.foreign_keys(database)?.next().is_some())
     }
 
     /// Returns whether the table has non-self-referential foreign keys.
@@ -1160,6 +1364,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1174,15 +1385,24 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// assert!(child_table.has_non_self_referential_foreign_keys(&db));
+    /// assert!(child_table.has_non_self_referential_foreign_keys(&db)?);
     /// let self_ref_table = db.table(None, "self_ref_table").unwrap();
-    /// assert!(!self_ref_table.has_non_self_referential_foreign_keys(&db));
+    /// assert!(!self_ref_table.has_non_self_referential_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_non_self_referential_foreign_keys(&self, database: &Self::DB) -> bool {
-        self.foreign_keys(database).any(move |fk| !fk.is_self_referential(database))
+    fn has_non_self_referential_foreign_keys(
+        &self,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        for foreign_key in self.foreign_keys(database)? {
+            if !foreign_key.is_self_referential(database)? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Iterates over the foreign keys in the current table which refer to
@@ -1194,6 +1414,14 @@ pub trait TableLike:
     ///   belongs.
     /// * `table` - A reference to the table whose ancestors are to be
     ///   considered.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold. The same applies to
+    /// `table`.
     ///
     /// # Example
     ///
@@ -1217,7 +1445,7 @@ pub trait TableLike:
     ///
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// let fks_to_ancestors = host_table.foreign_keys_to_ancestors_of(&db, child_table);
+    /// let fks_to_ancestors = host_table.foreign_keys_to_ancestors_of(&db, child_table)?;
     /// assert_eq!(fks_to_ancestors.count(), 2);
     /// # Ok(())
     /// # }
@@ -1226,16 +1454,22 @@ pub trait TableLike:
         &'db self,
         database: &'db Self::DB,
         table: &'db Self,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        let ancestors = table.ancestral_extended_tables(database);
-        self.foreign_keys(database).filter(move |fk| {
-            let referenced_table = fk.referenced_table(database);
-            ancestors.iter().any(|ancestor| (*ancestor).borrow() == referenced_table)
-                && fk.is_referenced_primary_key(database)
-        })
+        let ancestors = table.ancestral_extended_tables(database)?;
+        let mut foreign_keys = Vec::new();
+        for foreign_key in self.foreign_keys(database)? {
+            let referenced_table = foreign_key.referenced_table(database)?;
+            if ancestors.iter().any(|ancestor| (*ancestor).borrow() == referenced_table)
+                && foreign_key.is_referenced_primary_key(database)?
+            {
+                foreign_keys.push(foreign_key);
+            }
+        }
+
+        Ok(foreign_keys.into_iter())
     }
 
     /// Returns a vector with the (deduplicated) tables which are referenced by
@@ -1245,6 +1479,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1261,7 +1502,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let referenced_tables = host_table.referenced_tables(&db);
+    /// let referenced_tables = host_table.referenced_tables(&db)?;
     /// assert_eq!(referenced_tables.len(), 2);
     /// # Ok(())
     /// # }
@@ -1269,20 +1510,20 @@ pub trait TableLike:
     fn referenced_tables<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Vec<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
         let mut referenced_tables = Vec::new();
 
-        for foreign_key in self.foreign_keys(database) {
-            referenced_tables.push(foreign_key.referenced_table(database));
+        for foreign_key in self.foreign_keys(database)? {
+            referenced_tables.push(foreign_key.referenced_table(database)?);
         }
 
         referenced_tables.sort_unstable();
         referenced_tables.dedup();
 
-        referenced_tables
+        Ok(referenced_tables)
     }
 
     /// Returns a vector with the (deduplicated) tables which are referenced by
@@ -1292,6 +1533,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1309,7 +1557,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let non_self_refs = host_table.non_self_referenced_tables(&db);
+    /// let non_self_refs = host_table.non_self_referenced_tables(&db)?;
     /// assert_eq!(non_self_refs.len(), 1);
     /// assert_eq!(non_self_refs[0].table_name(), "referenced_table");
     /// # Ok(())
@@ -1318,13 +1566,13 @@ pub trait TableLike:
     fn non_self_referenced_tables<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Vec<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
-        let mut referenced_tables = self.referenced_tables(database);
+        let mut referenced_tables = self.referenced_tables(database)?;
         referenced_tables.retain(|&table| table != self.borrow());
-        referenced_tables
+        Ok(referenced_tables)
     }
 
     /// Returns the foreign keys which are used to define extensions.
@@ -1333,6 +1581,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1346,7 +1601,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let extension_fks = host_table.extension_foreign_keys(&db).collect::<Vec<_>>();
+    /// let extension_fks = host_table.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(extension_fks.len(), 1);
     /// # Ok(())
     /// # }
@@ -1354,11 +1609,18 @@ pub trait TableLike:
     fn extension_foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        self.foreign_keys(database).filter(|fk| fk.is_extension_foreign_key(database))
+        let mut foreign_keys = Vec::new();
+        for foreign_key in self.foreign_keys(database)? {
+            if foreign_key.is_extension_foreign_key(database)? {
+                foreign_keys.push(foreign_key);
+            }
+        }
+
+        Ok(foreign_keys.into_iter())
     }
 
     /// Returns the tables which are extended by the current table via foreign
@@ -1368,6 +1630,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1387,7 +1656,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let extended_tables = host_table.extended_tables(&db);
+    /// let extended_tables = host_table.extended_tables(&db)?;
     /// assert_eq!(extended_tables.count(), 1);
     /// # Ok(())
     /// # }
@@ -1395,11 +1664,16 @@ pub trait TableLike:
     fn extended_tables<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
-        self.extension_foreign_keys(database).map(|fk| fk.referenced_table(database))
+        let mut extended_tables = Vec::new();
+        for foreign_key in self.extension_foreign_keys(database)? {
+            extended_tables.push(foreign_key.referenced_table(database)?);
+        }
+
+        Ok(extended_tables.into_iter())
     }
 
     /// Returns the root table of the extension hierarchy for the current
@@ -1410,6 +1684,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1424,13 +1705,13 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// let root_table = child_table.extension_root_table(&db).unwrap();
+    /// let root_table = child_table.extension_root_table(&db)?.unwrap();
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
     /// assert_eq!(root_table, grandparent_table);
     /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let parent_root_table = parent_table.extension_root_table(&db).unwrap();
+    /// let parent_root_table = parent_table.extension_root_table(&db)?.unwrap();
     /// assert_eq!(parent_root_table, grandparent_table);
-    /// let grandparent_root_table = grandparent_table.extension_root_table(&db);
+    /// let grandparent_root_table = grandparent_table.extension_root_table(&db)?;
     /// assert!(grandparent_root_table.is_none());
     /// # Ok(())
     /// # }
@@ -1438,15 +1719,15 @@ pub trait TableLike:
     fn extension_root_table<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
-        if let Some(extension) = self.extended_tables(database).next() {
-            extension.extension_root_table(database).or(Some(extension))
-        } else {
-            None
-        }
+        let Some(extension) = self.extended_tables(database)?.next() else {
+            return Ok(None);
+        };
+
+        Ok(extension.extension_root_table(database)?.or(Some(extension)))
     }
 
     /// Returns the tables which extend the current table.
@@ -1456,6 +1737,13 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1468,7 +1756,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let extending_tables = parent_table.extending_tables(&db);
+    /// let extending_tables = parent_table.extending_tables(&db)?;
     /// assert_eq!(extending_tables.count(), 1);
     /// # Ok(())
     /// # }
@@ -1476,15 +1764,20 @@ pub trait TableLike:
     fn extending_tables<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
-        database.tables().map(Borrow::borrow).filter(
-            move |table: &&<Self::DB as DatabaseLike>::Table| {
-                table.is_descendant_of(database, self.borrow())
-            },
-        )
+        self.require_in_database(database)?;
+
+        let mut extending_tables = Vec::new();
+        for table in database.tables() {
+            if table.is_descendant_of(database, self.borrow())? {
+                extending_tables.push(table);
+            }
+        }
+
+        Ok(extending_tables.into_iter())
     }
 
     /// Returns whether the current table is extended by any other table.
@@ -1494,6 +1787,13 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1506,15 +1806,15 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// assert!(parent_table.is_extended(&db));
+    /// assert!(parent_table.is_extended(&db)?);
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// assert!(!child_table.is_extended(&db));
+    /// assert!(!child_table.is_extended(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn is_extended(&self, database: &Self::DB) -> bool {
-        self.extending_tables(database).next().is_some()
+    fn is_extended(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.extending_tables(database)?.next().is_some())
     }
 
     /// Returns the first extension foreign key found in the current table which
@@ -1526,6 +1826,13 @@ pub trait TableLike:
     ///   belongs.
     /// * `table` - A reference to the table to check for extensions.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1547,17 +1854,18 @@ pub trait TableLike:
     /// let father_table = db.table(None, "father_table").unwrap();
     /// let mother_table = db.table(None, "mother_table").unwrap();
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
-    /// let extension_fks = child_table.extension_foreign_keys(&db).collect::<Vec<_>>();
+    /// let extension_fks = child_table.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// let [father_extension_fk, mother_extension_fk] = extension_fks.as_slice() else {
     ///     panic!("Expected two extension foreign keys");
     /// };
-    /// let extension_fk_to_father = child_table.extension_foreign_key_to(&db, father_table);
+    /// let extension_fk_to_father = child_table.extension_foreign_key_to(&db, father_table)?;
     /// assert_eq!(extension_fk_to_father, Some(*father_extension_fk));
-    /// let extension_fk_to_mother = child_table.extension_foreign_key_to(&db, mother_table);
+    /// let extension_fk_to_mother = child_table.extension_foreign_key_to(&db, mother_table)?;
     /// assert_eq!(extension_fk_to_mother, Some(*mother_extension_fk));
-    /// let extension_fk_to_grandparent = child_table.extension_foreign_key_to(&db, grandparent_table);
+    /// let extension_fk_to_grandparent =
+    ///     child_table.extension_foreign_key_to(&db, grandparent_table)?;
     /// assert_eq!(extension_fk_to_grandparent, Some(*father_extension_fk));
-    /// assert!(child_table.extension_foreign_key_to(&db, child_table).is_none());
+    /// assert!(child_table.extension_foreign_key_to(&db, child_table)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -1565,16 +1873,21 @@ pub trait TableLike:
         &'db self,
         database: &'db Self::DB,
         table: &'db <Self::DB as DatabaseLike>::Table,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        self.extension_foreign_keys(database).find(|fk| {
+        for foreign_key in self.extension_foreign_keys(database)? {
             let referenced_table: &<Self::DB as DatabaseLike>::Table =
-                fk.referenced_table(database);
-            referenced_table == table
-                || referenced_table.extension_foreign_key_to(database, table).is_some()
-        })
+                foreign_key.referenced_table(database)?;
+            if referenced_table == table
+                || referenced_table.extension_foreign_key_to(database, table)?.is_some()
+            {
+                return Ok(Some(foreign_key));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Returns the first extended table found in the current table which
@@ -1586,6 +1899,13 @@ pub trait TableLike:
     ///   belongs.
     /// * `table` - A reference to the table to check for extensions.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1607,13 +1927,13 @@ pub trait TableLike:
     /// let father_table = db.table(None, "father_table").unwrap();
     /// let mother_table = db.table(None, "mother_table").unwrap();
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
-    /// let extended_table_to_father = child_table.extended_table_to(&db, father_table);
+    /// let extended_table_to_father = child_table.extended_table_to(&db, father_table)?;
     /// assert_eq!(extended_table_to_father, Some(father_table));
-    /// let extended_table_to_mother = child_table.extended_table_to(&db, mother_table);
+    /// let extended_table_to_mother = child_table.extended_table_to(&db, mother_table)?;
     /// assert_eq!(extended_table_to_mother, Some(mother_table));
-    /// let extended_table_to_grandparent = child_table.extended_table_to(&db, grandparent_table);
+    /// let extended_table_to_grandparent = child_table.extended_table_to(&db, grandparent_table)?;
     /// assert_eq!(extended_table_to_grandparent, Some(father_table));
-    /// assert!(child_table.extended_table_to(&db, child_table).is_none());
+    /// assert!(child_table.extended_table_to(&db, child_table)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -1621,11 +1941,14 @@ pub trait TableLike:
         &'db self,
         database: &'db Self::DB,
         table: &'db <Self::DB as DatabaseLike>::Table,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
-        self.extension_foreign_key_to(database, table).map(|fk| fk.referenced_table(database))
+        match self.extension_foreign_key_to(database, table)? {
+            Some(foreign_key) => Ok(Some(foreign_key.referenced_table(database)?)),
+            None => Ok(None),
+        }
     }
 
     /// Returns the unique tables which are extended by either the current
@@ -1635,6 +1958,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1651,7 +1981,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// let ancestral_tables = child_table.ancestral_extended_tables(&db);
+    /// let ancestral_tables = child_table.ancestral_extended_tables(&db)?;
     /// assert_eq!(ancestral_tables.len(), 2);
     /// # Ok(())
     /// # }
@@ -1659,23 +1989,23 @@ pub trait TableLike:
     fn ancestral_extended_tables<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Vec<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
         let extension_tables =
-            self.extended_tables(database).collect::<Vec<&<Self::DB as DatabaseLike>::Table>>();
+            self.extended_tables(database)?.collect::<Vec<&<Self::DB as DatabaseLike>::Table>>();
         let mut ancestral_tables = extension_tables.clone();
 
         for table in extension_tables {
-            let mut parent_ancestral_tables = table.ancestral_extended_tables(database);
+            let mut parent_ancestral_tables = table.ancestral_extended_tables(database)?;
             ancestral_tables.append(&mut parent_ancestral_tables);
         }
 
         ancestral_tables.sort_unstable();
         ancestral_tables.dedup();
 
-        ancestral_tables
+        Ok(ancestral_tables)
     }
 
     /// Returns the unique tables which are extended by either the current
@@ -1686,6 +2016,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1704,42 +2041,37 @@ pub trait TableLike:
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// let ancestral_tables = child_table.ancestral_extended_tables_topological(&db);
+    /// let ancestral_tables = child_table.ancestral_extended_tables_topological(&db)?;
     /// assert_eq!(ancestral_tables, vec![grandparent_table, parent_table]);
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(
-        clippy::expect_used,
-        reason = "ancestral tables are collected from the same table DAG, so each is always present in it"
-    )]
     fn ancestral_extended_tables_topological<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Vec<&'db <Self::DB as DatabaseLike>::Table>, Error>
     where
         Self: 'db,
     {
-        let mut ancestral_extended_tables = self.ancestral_extended_tables(database);
+        let ancestral_extended_tables = self.ancestral_extended_tables(database)?;
 
         if ancestral_extended_tables.len() <= 1 {
-            return ancestral_extended_tables;
+            return Ok(ancestral_extended_tables);
         }
 
-        let sorted_dag = database
-            .table_dag()
-            .into_iter()
-            .map(core::borrow::Borrow::borrow)
-            .collect::<Vec<&<Self::DB as DatabaseLike>::Table>>();
+        let sorted_dag = database.table_dag()?;
 
-        ancestral_extended_tables.sort_by_key(|table| {
-            sorted_dag
+        let mut ordered = Vec::with_capacity(ancestral_extended_tables.len());
+        for table in ancestral_extended_tables {
+            let position = sorted_dag
                 .iter()
-                .position(|t| t == table)
-                .expect("Table in ancestral extended tables should exist in the DAG")
-        });
+                .position(|candidate| *candidate == table)
+                .ok_or_else(|| ObjectKind::Table.not_in_database(table.table_name()))?;
+            ordered.push((position, table));
+        }
+        ordered.sort_unstable_by_key(|&(position, _)| position);
 
-        ancestral_extended_tables
+        Ok(ordered.into_iter().map(|(_, table)| table).collect())
     }
 
     /// Returns the tables referenced in foreign keys of the current table via
@@ -1750,6 +2082,13 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     /// * `column` - A reference to the column in the current table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1764,11 +2103,11 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
-    /// let referenced_tables = host_table.referenced_tables_via_column(&db, id_column);
+    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let referenced_tables = host_table.referenced_tables_via_column(&db, id_column)?;
     /// assert_eq!(referenced_tables.len(), 1);
-    /// let name_column = host_table.column("name", &db).expect("Column 'name' should exist");
-    /// let no_referenced_tables = host_table.referenced_tables_via_column(&db, name_column);
+    /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let no_referenced_tables = host_table.referenced_tables_via_column(&db, name_column)?;
     /// assert_eq!(no_referenced_tables.len(), 0);
     /// # Ok(())
     /// # }
@@ -1777,24 +2116,24 @@ pub trait TableLike:
         &'db self,
         database: &'db Self::DB,
         column: &<Self::DB as DatabaseLike>::Column,
-    ) -> Vec<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Vec<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
         let mut referenced_tables = Vec::new();
 
-        for fk in self.foreign_keys(database) {
-            if fk.host_columns(database).all(|col| col == column)
-                && fk.is_referenced_primary_key(database)
+        for foreign_key in self.foreign_keys(database)? {
+            if foreign_key.host_columns(database)?.all(|col| col == column)
+                && foreign_key.is_referenced_primary_key(database)?
             {
-                referenced_tables.push(fk.referenced_table(database));
+                referenced_tables.push(foreign_key.referenced_table(database)?);
             }
         }
 
         referenced_tables.sort_unstable();
         referenced_tables.dedup();
 
-        referenced_tables
+        Ok(referenced_tables)
     }
 
     /// Returns whether the table extends any other table.
@@ -1803,6 +2142,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1818,13 +2164,13 @@ pub trait TableLike:
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// assert!(child_table.is_extension(&db));
-    /// assert!(!parent_table.is_extension(&db));
+    /// assert!(child_table.is_extension(&db)?);
+    /// assert!(!parent_table.is_extension(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn is_extension(&self, database: &Self::DB) -> bool {
-        self.extension_foreign_keys(database).next().is_some()
+    fn is_extension(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.extension_foreign_keys(database)?.next().is_some())
     }
 
     /// Returns whether the table is a descendant of another table, i.e., if it
@@ -1837,6 +2183,13 @@ pub trait TableLike:
     ///   belongs.
     /// * `other` - The other table to check against.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1851,8 +2204,8 @@ pub trait TableLike:
     /// )?;
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// assert!(child_table.is_descendant_of(&db, parent_table));
-    /// assert!(!parent_table.is_descendant_of(&db, child_table));
+    /// assert!(child_table.is_descendant_of(&db, parent_table)?);
+    /// assert!(!parent_table.is_descendant_of(&db, child_table)?);
     /// # Ok(())
     /// # }
     /// ```
@@ -1860,8 +2213,8 @@ pub trait TableLike:
         &self,
         database: &Self::DB,
         other: &<Self::DB as DatabaseLike>::Table,
-    ) -> bool {
-        self.ancestral_extended_tables(database).contains(&other)
+    ) -> Result<bool, LookupError> {
+        Ok(self.ancestral_extended_tables(database)?.contains(&other))
     }
 
     /// Returns whether the table shares any ancestor with the given table.
@@ -1871,6 +2224,14 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     /// * `other` - The other table to check against.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold. The same applies to
+    /// `other`.
     ///
     /// # Example
     ///
@@ -1892,15 +2253,15 @@ pub trait TableLike:
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
     /// let unrelated_table = db.table(None, "unrelated_table").unwrap();
     /// assert!(
-    ///     child_table.shares_ancestors_with(&db, parent_table),
+    ///     child_table.shares_ancestors_with(&db, parent_table)?,
     ///     "Child should share ancestors with parent"
     /// );
     /// assert!(
-    ///     child_table.shares_ancestors_with(&db, grandparent_table),
+    ///     child_table.shares_ancestors_with(&db, grandparent_table)?,
     ///     "Child should share ancestors with grandparent"
     /// );
     /// assert!(
-    ///     !child_table.shares_ancestors_with(&db, unrelated_table),
+    ///     !child_table.shares_ancestors_with(&db, unrelated_table)?,
     ///     "Child should not share ancestors with unrelated"
     /// );
     /// # Ok(())
@@ -1910,14 +2271,14 @@ pub trait TableLike:
         &self,
         database: &Self::DB,
         other: &<Self::DB as DatabaseLike>::Table,
-    ) -> bool {
-        let self_ancestors = self.ancestral_extended_tables(database);
-        let other_ancestors = other.ancestral_extended_tables(database);
+    ) -> Result<bool, LookupError> {
+        let self_ancestors = self.ancestral_extended_tables(database)?;
+        let other_ancestors = other.ancestral_extended_tables(database)?;
 
-        self_ancestors.iter().any(|table| other_ancestors.contains(table))
+        Ok(self_ancestors.iter().any(|table| other_ancestors.contains(table))
             || self.borrow() == other
             || self_ancestors.contains(&other)
-            || other_ancestors.contains(&self.borrow())
+            || other_ancestors.contains(&self.borrow()))
     }
 
     /// Returns the table singleton foreign keys.
@@ -1926,6 +2287,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1940,7 +2308,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let singleton_fks = host_table.singleton_foreign_keys(&db).collect::<Vec<_>>();
+    /// let singleton_fks = host_table.singleton_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(singleton_fks.len(), 1);
     /// # Ok(())
     /// # }
@@ -1948,11 +2316,18 @@ pub trait TableLike:
     fn singleton_foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        self.foreign_keys(database).filter(|fk| fk.is_singleton(database))
+        let mut foreign_keys = Vec::new();
+        for foreign_key in self.foreign_keys(database)? {
+            if foreign_key.is_singleton(database)? {
+                foreign_keys.push(foreign_key);
+            }
+        }
+
+        Ok(foreign_keys.into_iter())
     }
 
     /// Returns the table singleton foreign keys which are not self-referential.
@@ -1961,6 +2336,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -1980,21 +2362,28 @@ pub trait TableLike:
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let non_self_referential_singleton_fks =
-    ///     host_table.non_self_referential_singleton_foreign_keys(&db).collect::<Vec<_>>();
+    ///     host_table.non_self_referential_singleton_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(non_self_referential_singleton_fks.len(), 1);
-    /// assert!(non_self_referential_singleton_fks[0].is_singleton(&db));
-    /// assert!(!non_self_referential_singleton_fks[0].is_self_referential(&db));
+    /// assert!(non_self_referential_singleton_fks[0].is_singleton(&db)?);
+    /// assert!(!non_self_referential_singleton_fks[0].is_self_referential(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     fn non_self_referential_singleton_foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        self.singleton_foreign_keys(database).filter(move |fk| !fk.is_self_referential(database))
+        let mut foreign_keys = Vec::new();
+        for foreign_key in self.singleton_foreign_keys(database)? {
+            if !foreign_key.is_self_referential(database)? {
+                foreign_keys.push(foreign_key);
+            }
+        }
+
+        Ok(foreign_keys.into_iter())
     }
 
     /// Returns whether the table has singleton foreign keys.
@@ -2003,6 +2392,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -2017,12 +2413,12 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// assert!(host_table.has_singleton_foreign_keys(&db));
+    /// assert!(host_table.has_singleton_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn has_singleton_foreign_keys(&self, database: &Self::DB) -> bool {
-        self.singleton_foreign_keys(database).next().is_some()
+    fn has_singleton_foreign_keys(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.singleton_foreign_keys(database)?.next().is_some())
     }
 
     /// Returns whether the table has non-self-referential singleton foreign
@@ -2032,6 +2428,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -2050,14 +2453,17 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let referenced_table = db.table(None, "referenced_table").unwrap();
-    /// assert!(!referenced_table.has_non_self_referential_singleton_foreign_keys(&db));
+    /// assert!(!referenced_table.has_non_self_referential_singleton_foreign_keys(&db)?);
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// assert!(host_table.has_non_self_referential_singleton_foreign_keys(&db));
+    /// assert!(host_table.has_non_self_referential_singleton_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn has_non_self_referential_singleton_foreign_keys(&self, database: &Self::DB) -> bool {
-        self.non_self_referential_singleton_foreign_keys(database).next().is_some()
+    fn has_non_self_referential_singleton_foreign_keys(
+        &self,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        Ok(self.non_self_referential_singleton_foreign_keys(database)?.next().is_some())
     }
 
     /// Returns whether the table depends directly or indirectly on another
@@ -2068,6 +2474,13 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   and the other table belong.
     /// * `other` - The other table to check against.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -2086,27 +2499,37 @@ pub trait TableLike:
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
-    /// assert!(child_table.depends_on(&db, parent_table));
-    /// assert!(child_table.depends_on(&db, grandparent_table));
-    /// assert!(!parent_table.depends_on(&db, child_table));
-    /// assert!(!grandparent_table.depends_on(&db, child_table));
-    /// assert!(parent_table.depends_on(&db, grandparent_table));
-    /// assert!(!grandparent_table.depends_on(&db, parent_table));
-    /// assert!(child_table.depends_on(&db, child_table));
-    /// assert!(parent_table.depends_on(&db, parent_table));
-    /// assert!(grandparent_table.depends_on(&db, grandparent_table));
+    /// assert!(child_table.depends_on(&db, parent_table)?);
+    /// assert!(child_table.depends_on(&db, grandparent_table)?);
+    /// assert!(!parent_table.depends_on(&db, child_table)?);
+    /// assert!(!grandparent_table.depends_on(&db, child_table)?);
+    /// assert!(parent_table.depends_on(&db, grandparent_table)?);
+    /// assert!(!grandparent_table.depends_on(&db, parent_table)?);
+    /// assert!(child_table.depends_on(&db, child_table)?);
+    /// assert!(parent_table.depends_on(&db, parent_table)?);
+    /// assert!(grandparent_table.depends_on(&db, grandparent_table)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn depends_on(&self, database: &Self::DB, other: &<Self::DB as DatabaseLike>::Table) -> bool {
+    fn depends_on(
+        &self,
+        database: &Self::DB,
+        other: &<Self::DB as DatabaseLike>::Table,
+    ) -> Result<bool, LookupError> {
         if self.borrow() == other {
-            return true;
+            return Ok(true);
         }
-        self.foreign_keys(database).any(|fk| {
-            let referenced_table = fk.referenced_table(database);
-            referenced_table == other
-                || referenced_table != self.borrow() && referenced_table.depends_on(database, other)
-        })
+        for foreign_key in self.foreign_keys(database)? {
+            let referenced_table = foreign_key.referenced_table(database)?;
+            if referenced_table == other
+                || referenced_table != self.borrow()
+                    && referenced_table.depends_on(database, other)?
+            {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Returns whether the table contains a foreign key referring to
@@ -2117,6 +2540,13 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   and the other table belong.
     /// * `other` - The other table to check against.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -2135,23 +2565,30 @@ pub trait TableLike:
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
-    /// assert!(child_table.refers_to(&db, parent_table));
-    /// assert!(!child_table.refers_to(&db, grandparent_table));
-    /// assert!(!parent_table.refers_to(&db, child_table));
-    /// assert!(!grandparent_table.refers_to(&db, child_table));
-    /// assert!(parent_table.refers_to(&db, grandparent_table));
-    /// assert!(!grandparent_table.refers_to(&db, parent_table));
-    /// assert!(!child_table.refers_to(&db, child_table));
-    /// assert!(!parent_table.refers_to(&db, parent_table));
-    /// assert!(grandparent_table.refers_to(&db, grandparent_table));
+    /// assert!(child_table.refers_to(&db, parent_table)?);
+    /// assert!(!child_table.refers_to(&db, grandparent_table)?);
+    /// assert!(!parent_table.refers_to(&db, child_table)?);
+    /// assert!(!grandparent_table.refers_to(&db, child_table)?);
+    /// assert!(parent_table.refers_to(&db, grandparent_table)?);
+    /// assert!(!grandparent_table.refers_to(&db, parent_table)?);
+    /// assert!(!child_table.refers_to(&db, child_table)?);
+    /// assert!(!parent_table.refers_to(&db, parent_table)?);
+    /// assert!(grandparent_table.refers_to(&db, grandparent_table)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn refers_to(&self, database: &Self::DB, other: &<Self::DB as DatabaseLike>::Table) -> bool {
-        self.foreign_keys(database).any(|fk| {
-            let referenced_table = fk.referenced_table(database);
-            referenced_table == other
-        })
+    fn refers_to(
+        &self,
+        database: &Self::DB,
+        other: &<Self::DB as DatabaseLike>::Table,
+    ) -> Result<bool, LookupError> {
+        for foreign_key in self.foreign_keys(database)? {
+            if foreign_key.referenced_table(database)? == other {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Returns an iterator over all tables that depend directly or indirectly
@@ -2162,6 +2599,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -2179,7 +2623,7 @@ pub trait TableLike:
     /// )?;
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
     /// let dependent_tables: Vec<&str> =
-    ///     grandparent_table.dependent_tables(&db).map(|t| t.table_name()).collect();
+    ///     grandparent_table.dependent_tables(&db)?.map(|t| t.table_name()).collect();
     /// assert_eq!(dependent_tables, vec!["child_table", "parent_table"]);
     /// # Ok(())
     /// # }
@@ -2187,13 +2631,20 @@ pub trait TableLike:
     fn dependent_tables<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
-        database.tables().filter(move |table| {
-            *table != self.borrow() && table.depends_on(database, self.borrow())
-        })
+        self.require_in_database(database)?;
+
+        let mut dependent_tables = Vec::new();
+        for table in database.tables() {
+            if table != self.borrow() && table.depends_on(database, self.borrow())? {
+                dependent_tables.push(table);
+            }
+        }
+
+        Ok(dependent_tables.into_iter())
     }
 
     /// Returns whether the table has any dependent tables.
@@ -2202,6 +2653,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -2217,13 +2675,13 @@ pub trait TableLike:
     /// )?;
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let child_table = db.table(None, "child_table").unwrap();
-    /// assert!(parent_table.has_dependent_tables(&db));
-    /// assert!(!child_table.has_dependent_tables(&db));
+    /// assert!(parent_table.has_dependent_tables(&db)?);
+    /// assert!(!child_table.has_dependent_tables(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn has_dependent_tables(&self, database: &Self::DB) -> bool {
-        self.dependent_tables(database).next().is_some()
+    fn has_dependent_tables(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.dependent_tables(database)?.next().is_some())
     }
 
     /// Returns the most recent common ancestor table between the current table
@@ -2234,6 +2692,14 @@ pub trait TableLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     /// * `others` - A slice of other tables to check against.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold. The same applies to each
+    /// entry of `others`.
     ///
     /// # Example
     ///
@@ -2257,22 +2723,22 @@ pub trait TableLike:
     /// let parent_table = db.table(None, "parent_table").unwrap();
     /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
     /// let unrelated_table = db.table(None, "unrelated_table").unwrap();
-    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[child_table2]), Some(parent_table));
-    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[parent_table]), Some(parent_table));
+    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[child_table2])?, Some(parent_table));
+    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[parent_table])?, Some(parent_table));
     /// assert_eq!(
-    ///     child_table1.most_recent_common_ancestor(&db, &[grandparent_table]),
+    ///     child_table1.most_recent_common_ancestor(&db, &[grandparent_table])?,
     ///     Some(grandparent_table)
     /// );
-    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[unrelated_table]), None);
+    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[unrelated_table])?, None);
     /// assert_eq!(
-    ///     child_table1.most_recent_common_ancestor(&db, &[child_table2, parent_table]),
+    ///     child_table1.most_recent_common_ancestor(&db, &[child_table2, parent_table])?,
     ///     Some(parent_table)
     /// );
     /// assert_eq!(
-    ///     child_table1.most_recent_common_ancestor(&db, &[child_table2, grandparent_table]),
+    ///     child_table1.most_recent_common_ancestor(&db, &[child_table2, grandparent_table])?,
     ///     Some(grandparent_table)
     /// );
-    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[]), Some(child_table1));
+    /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[])?, Some(child_table1));
     /// # Ok(())
     /// # }
     /// ```
@@ -2280,26 +2746,30 @@ pub trait TableLike:
         &'db self,
         database: &'db Self::DB,
         others: &[&'db <Self::DB as DatabaseLike>::Table],
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
-        if others
-            .iter()
-            .all(|&other| other == self.borrow() || other.is_descendant_of(database, self.borrow()))
-        {
-            return Some(self.borrow());
+        let mut covers_every_other = true;
+        for &other in others {
+            if other != self.borrow() && !other.is_descendant_of(database, self.borrow())? {
+                covers_every_other = false;
+                break;
+            }
+        }
+        if covers_every_other {
+            return Ok(Some(self.borrow()));
         }
 
-        for extended_table in self.extended_tables(database) {
+        for extended_table in self.extended_tables(database)? {
             if let Some(common_ancestor) =
-                extended_table.most_recent_common_ancestor(database, others)
+                extended_table.most_recent_common_ancestor(database, others)?
             {
-                return Some(common_ancestor);
+                return Ok(Some(common_ancestor));
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Returns a sorted vector of the table's spouses.
@@ -2313,6 +2783,13 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key reached from it names
+    /// a table or a column `database` does not hold.
     ///
     /// # Example
     ///
@@ -2341,31 +2818,44 @@ pub trait TableLike:
     /// let child_table = db.table(None, "child_table").unwrap();
     /// let my_table = db.table(None, "my_table").unwrap();
     /// let spouse_table = db.table(None, "spouse_table").unwrap();
-    /// assert_eq!(my_table.spouses(&db).next(), Some(spouse_table));
-    /// assert_eq!(spouse_table.spouses(&db).next(), Some(my_table));
-    /// assert!(root.spouses(&db).next().is_none());
-    /// assert!(child_table.spouses(&db).next().is_none());
+    /// assert_eq!(my_table.spouses(&db)?.next(), Some(spouse_table));
+    /// assert_eq!(spouse_table.spouses(&db)?.next(), Some(my_table));
+    /// assert!(root.spouses(&db)?.next().is_none());
+    /// assert!(child_table.spouses(&db)?.next().is_none());
     /// # Ok(())
     /// # }
     /// ```
     fn spouses<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
     where
         Self: 'db,
     {
         let descendants: Vec<&<Self::DB as DatabaseLike>::Table> =
-            self.extending_tables(database).collect();
+            self.extending_tables(database)?.collect();
 
-        database.tables().filter(move |candidate| {
-            *candidate != self.borrow()
-                && !descendants.contains(candidate)
-                && !self.is_descendant_of(database, candidate)
-                && descendants
-                    .iter()
-                    .any(|descendant| descendant.is_descendant_of(database, candidate))
-        })
+        let mut spouses = Vec::new();
+        for candidate in database.tables() {
+            if candidate == self.borrow()
+                || descendants.contains(&candidate)
+                || self.is_descendant_of(database, candidate)?
+            {
+                continue;
+            }
+            let mut shares_descendant = false;
+            for descendant in &descendants {
+                if descendant.is_descendant_of(database, candidate)? {
+                    shares_descendant = true;
+                    break;
+                }
+            }
+            if shares_descendant {
+                spouses.push(candidate);
+            }
+        }
+
+        Ok(spouses.into_iter())
     }
 
     /// Returns whether the table's columns share a snake_case prefix.
@@ -2374,6 +2864,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2389,14 +2884,17 @@ pub trait TableLike:
     /// let table = db.table(None, "my_table").unwrap();
     /// let no_snake_prefix_table = db.table(None, "no_snake_prefix_table").unwrap();
     ///
-    /// assert!(table.has_common_column_name_snake_prefix(&db));
-    /// assert!(!no_snake_prefix_table.has_common_column_name_snake_prefix(&db));
+    /// assert!(table.has_common_column_name_snake_prefix(&db)?);
+    /// assert!(!no_snake_prefix_table.has_common_column_name_snake_prefix(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_common_column_name_snake_prefix(&self, database: &Self::DB) -> bool {
-        self.common_column_name_snake_prefix(database).is_some()
+    fn has_common_column_name_snake_prefix(
+        &self,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        Ok(self.common_column_name_snake_prefix(database)?.is_some())
     }
 
     /// Returns the shared snake_case prefix across the table's columns.
@@ -2409,6 +2907,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2426,20 +2929,23 @@ pub trait TableLike:
     /// let other_table = db.table(None, "other_table").unwrap();
     /// let another_table = db.table(None, "another_table").unwrap();
     ///
-    /// assert_eq!(my_table.common_column_name_snake_prefix(&db), Some("user_"));
-    /// assert_eq!(other_table.common_column_name_snake_prefix(&db), None);
-    /// assert_eq!(another_table.common_column_name_snake_prefix(&db), None);
+    /// assert_eq!(my_table.common_column_name_snake_prefix(&db)?, Some("user_"));
+    /// assert_eq!(other_table.common_column_name_snake_prefix(&db)?, None);
+    /// assert_eq!(another_table.common_column_name_snake_prefix(&db)?, None);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn common_column_name_snake_prefix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn common_column_name_snake_prefix<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db,
     {
-        crate::utils::common_column_name_snake_prefix(
-            self.columns(database).map(ColumnLike::column_name),
-        )
+        Ok(crate::utils::common_column_name_snake_prefix(
+            self.columns(database)?.map(ColumnLike::column_name),
+        ))
     }
 
     /// Returns whether the table's columns share a snake_case suffix.
@@ -2448,6 +2954,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2463,14 +2974,17 @@ pub trait TableLike:
     /// let table = db.table(None, "my_table").unwrap();
     /// let other_table = db.table(None, "other_table").unwrap();
     ///
-    /// assert!(table.has_common_column_name_snake_suffix(&db));
-    /// assert!(!other_table.has_common_column_name_snake_suffix(&db));
+    /// assert!(table.has_common_column_name_snake_suffix(&db)?);
+    /// assert!(!other_table.has_common_column_name_snake_suffix(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_common_column_name_snake_suffix(&self, database: &Self::DB) -> bool {
-        self.common_column_name_snake_suffix(database).is_some()
+    fn has_common_column_name_snake_suffix(
+        &self,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        Ok(self.common_column_name_snake_suffix(database)?.is_some())
     }
 
     /// Returns the shared snake_case suffix across the table's columns.
@@ -2483,6 +2997,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2500,20 +3019,23 @@ pub trait TableLike:
     /// let other_table = db.table(None, "other_table").unwrap();
     /// let another_table = db.table(None, "another_table").unwrap();
     ///
-    /// assert_eq!(my_table.common_column_name_snake_suffix(&db), Some("_id"));
-    /// assert_eq!(other_table.common_column_name_snake_suffix(&db), None);
-    /// assert_eq!(another_table.common_column_name_snake_suffix(&db), None);
+    /// assert_eq!(my_table.common_column_name_snake_suffix(&db)?, Some("_id"));
+    /// assert_eq!(other_table.common_column_name_snake_suffix(&db)?, None);
+    /// assert_eq!(another_table.common_column_name_snake_suffix(&db)?, None);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn common_column_name_snake_suffix<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn common_column_name_snake_suffix<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db,
     {
-        crate::utils::common_column_name_snake_suffix(
-            self.columns(database).map(ColumnLike::column_name),
-        )
+        Ok(crate::utils::common_column_name_snake_suffix(
+            self.columns(database)?.map(ColumnLike::column_name),
+        ))
     }
     /// Returns whether the table has Row Level Security (RLS) enabled.
     ///
@@ -2521,6 +3043,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2535,13 +3062,13 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// assert!(table.has_row_level_security(&db));
+    /// assert!(table.has_row_level_security(&db)?);
     /// let other_table = db.table(None, "my_other_table").unwrap();
-    /// assert!(!other_table.has_row_level_security(&db));
+    /// assert!(!other_table.has_row_level_security(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn has_row_level_security(&self, _database: &Self::DB) -> bool;
+    fn has_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError>;
 
     /// Returns whether the table has forced Row Level Security (RLS).
     ///
@@ -2554,6 +3081,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2571,20 +3103,20 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let forced = db.table(None, "forced_table").unwrap();
-    /// assert!(forced.has_row_level_security(&db));
-    /// assert!(forced.has_forced_row_level_security(&db));
+    /// assert!(forced.has_row_level_security(&db)?);
+    /// assert!(forced.has_forced_row_level_security(&db)?);
     ///
     /// let normal_rls = db.table(None, "normal_rls_table").unwrap();
-    /// assert!(normal_rls.has_row_level_security(&db));
-    /// assert!(!normal_rls.has_forced_row_level_security(&db));
+    /// assert!(normal_rls.has_row_level_security(&db)?);
+    /// assert!(!normal_rls.has_forced_row_level_security(&db)?);
     ///
     /// let no_rls = db.table(None, "no_rls_table").unwrap();
-    /// assert!(!no_rls.has_row_level_security(&db));
-    /// assert!(!no_rls.has_forced_row_level_security(&db));
+    /// assert!(!no_rls.has_row_level_security(&db)?);
+    /// assert!(!no_rls.has_forced_row_level_security(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn has_forced_row_level_security(&self, _database: &Self::DB) -> bool;
+    fn has_forced_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError>;
 
     /// Iterates over the policies associated with the table.
     ///
@@ -2592,6 +3124,11 @@ pub trait TableLike:
     ///
     /// * `database` - A reference to the database instance to query the
     ///   policies from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2612,7 +3149,7 @@ pub trait TableLike:
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
-    /// let mut policies: Vec<_> = table.policies(&db).collect();
+    /// let mut policies: Vec<_> = table.policies(&db)?.collect();
     /// policies.sort_by(|a, b| a.name().cmp(b.name()));
     ///
     /// assert_eq!(policies.len(), 3);
@@ -2625,7 +3162,7 @@ pub trait TableLike:
     /// assert_eq!(policies[2].command(), CreatePolicyCommand::Select);
     ///
     /// let other_table = db.table(None, "other_table").unwrap();
-    /// let other_policies: Vec<_> = other_table.policies(&db).collect();
+    /// let other_policies: Vec<_> = other_table.policies(&db)?.collect();
     /// assert_eq!(other_policies.len(), 1);
     /// assert_eq!(other_policies[0].name(), "other_policy");
     /// # Ok(())
@@ -2634,19 +3171,26 @@ pub trait TableLike:
     fn policies<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Policy>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Policy>, LookupError>
     where
         Self: 'db,
     {
-        database
-            .policies()
-            .filter(move |policy| policy.table(database).is_ok_and(|t| t.borrow() == self.borrow()))
+        self.require_in_database(database)?;
+
+        Ok(database.policies().filter(move |policy| {
+            policy.table(database).is_ok_and(|t| t.borrow() == self.borrow())
+        }))
     }
 
     /// Returns an iterator over the grants that apply to this table.
     ///
     /// This includes both direct table grants (`GRANT ... ON table_name`)
     /// and schema-wide grants (`GRANT ... ON ALL TABLES IN SCHEMA`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2668,7 +3212,7 @@ pub trait TableLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let grants: Vec<_> = table.grants(&db).collect();
+    /// let grants: Vec<_> = table.grants(&db)?.collect();
     /// assert_eq!(grants.len(), 2);
     /// # Ok(())
     /// # }
@@ -2676,11 +3220,15 @@ pub trait TableLike:
     fn grants<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::TableGrant>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::TableGrant>, LookupError>
     where
         Self: 'db,
     {
-        database.table_grants().filter(move |grant| grant.applies_to_table(self.borrow(), database))
+        self.require_in_database(database)?;
+
+        Ok(database
+            .table_grants()
+            .filter(move |grant| grant.applies_to_table(self.borrow(), database)))
     }
 
     /// Returns whether the given role can read (SELECT) from this table.
@@ -2689,6 +3237,11 @@ pub trait TableLike:
     /// - Applies to this table (directly or via ALL TABLES IN SCHEMA)
     /// - Applies to this role as a grantee
     /// - Includes SELECT privilege or ALL PRIVILEGES
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2710,21 +3263,30 @@ pub trait TableLike:
     /// let reader = db.role("reader").unwrap();
     /// let writer = db.role("writer").unwrap();
     ///
-    /// assert!(table.can_select(reader, &db));
-    /// assert!(!table.can_select(writer, &db));
+    /// assert!(table.can_select(reader, &db)?);
+    /// assert!(!table.can_select(writer, &db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn can_select(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+    fn can_select(
+        &self,
+        role: &<Self::DB as DatabaseLike>::Role,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
         use sqlparser::ast::Action;
-        self.grants(database).any(|grant| {
+        Ok(self.grants(database)?.any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
                     || grant.privileges(database).any(|p| matches!(p, Action::Select { .. })))
-        })
+        }))
     }
 
     /// Returns whether the given role can insert into this table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2743,20 +3305,29 @@ pub trait TableLike:
     /// let table = db.table(None, "my_table").unwrap();
     /// let writer = db.role("writer").unwrap();
     ///
-    /// assert!(table.can_insert(writer, &db));
+    /// assert!(table.can_insert(writer, &db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn can_insert(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+    fn can_insert(
+        &self,
+        role: &<Self::DB as DatabaseLike>::Role,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
         use sqlparser::ast::Action;
-        self.grants(database).any(|grant| {
+        Ok(self.grants(database)?.any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
                     || grant.privileges(database).any(|p| matches!(p, Action::Insert { .. })))
-        })
+        }))
     }
 
     /// Returns whether the given role can update this table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2775,20 +3346,29 @@ pub trait TableLike:
     /// let table = db.table(None, "my_table").unwrap();
     /// let updater = db.role("updater").unwrap();
     ///
-    /// assert!(table.can_update(updater, &db));
+    /// assert!(table.can_update(updater, &db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn can_update(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+    fn can_update(
+        &self,
+        role: &<Self::DB as DatabaseLike>::Role,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
         use sqlparser::ast::Action;
-        self.grants(database).any(|grant| {
+        Ok(self.grants(database)?.any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
                     || grant.privileges(database).any(|p| matches!(p, Action::Update { .. })))
-        })
+        }))
     }
 
     /// Returns whether the given role can delete from this table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2807,17 +3387,21 @@ pub trait TableLike:
     /// let table = db.table(None, "my_table").unwrap();
     /// let deleter = db.role("deleter").unwrap();
     ///
-    /// assert!(table.can_delete(deleter, &db));
+    /// assert!(table.can_delete(deleter, &db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn can_delete(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+    fn can_delete(
+        &self,
+        role: &<Self::DB as DatabaseLike>::Role,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
         use sqlparser::ast::Action;
-        self.grants(database).any(|grant| {
+        Ok(self.grants(database)?.any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
                     || grant.privileges(database).any(|p| matches!(p, Action::Delete)))
-        })
+        }))
     }
 
     /// Returns whether the given role can write to this table (INSERT, UPDATE,
@@ -2825,6 +3409,11 @@ pub trait TableLike:
     ///
     /// This is a convenience method that checks if the role has any write
     /// permission.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2846,18 +3435,27 @@ pub trait TableLike:
     /// let reader = db.role("reader").unwrap();
     /// let writer = db.role("writer").unwrap();
     ///
-    /// assert!(!table.can_write(reader, &db));
-    /// assert!(table.can_write(writer, &db));
+    /// assert!(!table.can_write(reader, &db)?);
+    /// assert!(table.can_write(writer, &db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn can_write(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
-        self.can_insert(role, database)
-            || self.can_update(role, database)
-            || self.can_delete(role, database)
+    fn can_write(
+        &self,
+        role: &<Self::DB as DatabaseLike>::Role,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        Ok(self.can_insert(role, database)?
+            || self.can_update(role, database)?
+            || self.can_delete(role, database)?)
     }
 
     /// Returns whether the given role can truncate this table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
     ///
     /// # Example
     ///
@@ -2876,17 +3474,21 @@ pub trait TableLike:
     /// let table = db.table(None, "my_table").unwrap();
     /// let truncator = db.role("truncator").unwrap();
     ///
-    /// assert!(table.can_truncate(truncator, &db));
+    /// assert!(table.can_truncate(truncator, &db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn can_truncate(&self, role: &<Self::DB as DatabaseLike>::Role, database: &Self::DB) -> bool {
+    fn can_truncate(
+        &self,
+        role: &<Self::DB as DatabaseLike>::Role,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
         use sqlparser::ast::Action;
-        self.grants(database).any(|grant| {
+        Ok(self.grants(database)?.any(|grant| {
             grant.applies_to_role(role)
                 && (grant.is_all_privileges()
                     || grant.privileges(database).any(|p| matches!(p, Action::Truncate)))
-        })
+        }))
     }
 }
 
@@ -2904,7 +3506,7 @@ where
         T::table_name_is_quoted(self)
     }
 
-    fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db,
     {
@@ -2926,7 +3528,7 @@ where
     fn columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
@@ -2937,25 +3539,25 @@ where
         &'db self,
         column_id: usize,
         database: &'db Self::DB,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
         T::column_by_id(self, column_id, database)
     }
 
-    fn has_row_level_security(&self, database: &Self::DB) -> bool {
+    fn has_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError> {
         T::has_row_level_security(self, database)
     }
 
-    fn has_forced_row_level_security(&self, database: &Self::DB) -> bool {
+    fn has_forced_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError> {
         T::has_forced_row_level_security(self, database)
     }
 
     fn primary_key_columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
@@ -2965,7 +3567,7 @@ where
     fn check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>, LookupError>
     where
         Self: 'db,
     {
@@ -2975,7 +3577,7 @@ where
     fn unique_indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>, LookupError>
     where
         Self: 'db,
     {
@@ -2985,7 +3587,7 @@ where
     fn indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>, LookupError>
     where
         Self: 'db,
     {
@@ -2995,7 +3597,7 @@ where
     fn foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
@@ -3055,16 +3657,16 @@ mod tests {
             let table = db.table(None, "t").expect("Table 't' should exist");
 
             // Unquoted column created as Foo resolves as lowercase identifier.
-            assert!(table.column("foo", &db).is_some());
-            assert!(table.column("FOO", &db).is_some());
-            assert!(table.column("\"foo\"", &db).is_some());
-            assert!(table.column("\"Foo\"", &db).is_none());
+            assert!(table.column("foo", &db).expect("column lookup").is_some());
+            assert!(table.column("FOO", &db).expect("column lookup").is_some());
+            assert!(table.column("\"foo\"", &db).expect("column lookup").is_some());
+            assert!(table.column("\"Foo\"", &db).expect("column lookup").is_none());
 
             // Quoted column keeps exact case.
-            assert!(table.column("\"ColA\"", &db).is_some());
-            assert!(table.column("\"cola\"", &db).is_none());
-            assert!(table.column("cola", &db).is_none());
-            assert!(table.column("COLA", &db).is_none());
+            assert!(table.column("\"ColA\"", &db).expect("column lookup").is_some());
+            assert!(table.column("\"cola\"", &db).expect("column lookup").is_none());
+            assert!(table.column("cola", &db).expect("column lookup").is_none());
+            assert!(table.column("COLA", &db).expect("column lookup").is_none());
         }
     }
 
@@ -3091,28 +3693,38 @@ mod tests {
             assert_eq!(<&_ as TableLike>::table_id(table_ref, &db), table.table_id(&db));
 
             assert_eq!(
-                <&_ as TableLike>::columns(table_ref, &db).count(),
-                table.columns(&db).count()
+                <&_ as TableLike>::columns(table_ref, &db).expect("columns on &T").count(),
+                table.columns(&db).expect("columns").count()
             );
             assert_eq!(
-                <&_ as TableLike>::column_by_id(table_ref, 0, &db).map(ColumnLike::column_name),
-                table.column_by_id(0, &db).map(ColumnLike::column_name)
+                <&_ as TableLike>::column_by_id(table_ref, 0, &db)
+                    .expect("column_by_id on &T")
+                    .map(ColumnLike::column_name),
+                table.column_by_id(0, &db).expect("column_by_id").map(ColumnLike::column_name)
             );
             assert_eq!(
-                <&_ as TableLike>::primary_key_columns(table_ref, &db).count(),
-                table.primary_key_columns(&db).count()
+                <&_ as TableLike>::primary_key_columns(table_ref, &db)
+                    .expect("pk_columns on &T")
+                    .count(),
+                table.primary_key_columns(&db).expect("pk_columns").count()
             );
             assert_eq!(
-                <&_ as TableLike>::check_constraints(table_ref, &db).count(),
-                table.check_constraints(&db).count()
+                <&_ as TableLike>::check_constraints(table_ref, &db)
+                    .expect("check_constraints on &T")
+                    .count(),
+                table.check_constraints(&db).expect("check_constraints").count()
             );
             assert_eq!(
-                <&_ as TableLike>::unique_indices(table_ref, &db).count(),
-                table.unique_indices(&db).count()
+                <&_ as TableLike>::unique_indices(table_ref, &db)
+                    .expect("unique_indices on &T")
+                    .count(),
+                table.unique_indices(&db).expect("unique_indices").count()
             );
             assert_eq!(
-                <&_ as TableLike>::foreign_keys(table_ref, &db).count(),
-                table.foreign_keys(&db).count()
+                <&_ as TableLike>::foreign_keys(table_ref, &db)
+                    .expect("foreign_keys on &T")
+                    .count(),
+                table.foreign_keys(&db).expect("foreign_keys").count()
             );
             assert_eq!(
                 <&_ as TableLike>::schema_fingerprint(table_ref, &db),
@@ -3135,15 +3747,17 @@ mod tests {
             // calling dependent_tables on &parent
             // parent has 'child' depending on it
             let deps: Vec<_> = <&_ as TableLike>::dependent_tables(parent_ref, &db)
+                .expect("dependent_tables on &T")
                 .map(TableLike::table_name)
                 .collect();
-
             assert!(deps.contains(&"child"));
             assert!(!deps.contains(&"parent"));
 
             // calling on &child - nothing depends on child
             let child_ref = &child;
-            let child_deps: Vec<_> = <&_ as TableLike>::dependent_tables(child_ref, &db).collect();
+            let child_deps: Vec<_> = <&_ as TableLike>::dependent_tables(child_ref, &db)
+                .expect("dependent_tables on &T")
+                .collect();
             assert!(child_deps.is_empty());
         }
 
@@ -3177,12 +3791,20 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
             let table = db.table(None, "users").expect("Table not found");
 
-            for (expected_id, column) in table.columns(&db).enumerate() {
-                assert_eq!(column.column_id(&db), Some(expected_id));
-                assert_eq!(table.column_by_id(expected_id, &db), Some(column));
+            for (expected_id, column) in table.columns(&db).expect("columns").enumerate() {
+                assert_eq!(column.column_id(&db).expect("column_id"), Some(expected_id));
+                assert_eq!(
+                    table.column_by_id(expected_id, &db).expect("column_by_id"),
+                    Some(column)
+                );
             }
 
-            assert_eq!(table.column_by_id(table.number_of_columns(&db), &db), None);
+            assert_eq!(
+                table
+                    .column_by_id(table.number_of_columns(&db).expect("number_of_columns"), &db)
+                    .expect("column_by_id"),
+                None
+            );
         }
     }
 
@@ -4138,7 +4760,7 @@ mod tests {
 
             // Table should exist with new schema
             let table = db.table(None, "my_table").expect("Table should exist");
-            assert_eq!(table.columns(&db).count(), 2);
+            assert_eq!(table.columns(&db).expect("columns").count(), 2);
         }
 
         #[test]
@@ -4218,7 +4840,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             let table = db.table(None, "new_name").expect("Table should exist");
-            assert_eq!(table.columns(&db).count(), 2);
+            assert_eq!(table.columns(&db).expect("columns").count(), 2);
         }
 
         #[test]

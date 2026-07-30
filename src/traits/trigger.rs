@@ -6,7 +6,7 @@ use core::fmt::Debug;
 use crate::{
     errors::LookupError,
     traits::{DatabaseLike, FunctionLike, Metadata},
-    utils::maintenance_trigger_parser::parse_maintenance_body,
+    utils::maintenance_trigger_parser::{MaintenanceBodyError, parse_maintenance_body},
 };
 
 /// A trait for types that can be treated as SQL triggers.
@@ -417,7 +417,7 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// )?;
     ///
     /// let trigger = db.triggers().next().unwrap();
-    /// assert!(trigger.is_maintenance_trigger(&db));
+    /// assert!(trigger.is_maintenance_trigger(&db)?);
     ///
     /// // Example of a non-maintenance trigger (extra logic)
     /// let db2 = ParserDB::parse::<GenericDialect>(
@@ -437,23 +437,36 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// ",
     /// )?;
     /// let complex = db2.triggers().next().unwrap();
-    /// assert!(!complex.is_maintenance_trigger(&db2));
+    /// assert!(!complex.is_maintenance_trigger(&db2)?);
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::TableNotFound`] when no table matches the target,
+    /// and [`LookupError::InvalidObjectName`] or
+    /// [`LookupError::AmbiguousTableLookup`] when the target name cannot denote
+    /// a single table. The assigned columns are resolved against that table, so
+    /// the question cannot be decided without it.
     #[inline]
-    fn is_maintenance_trigger<'db>(&'db self, database: &'db Self::DB) -> bool {
+    fn is_maintenance_trigger<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<bool, LookupError> {
         let Some(function) = self.function(database) else {
-            return false;
+            return Ok(false);
         };
         let Some(body) = function.body() else {
-            return false;
+            return Ok(false);
         };
-        let Ok(table) = self.table(database) else {
-            return false;
-        };
+        let table = self.table(database)?;
 
-        parse_maintenance_body(body, table, database).is_ok()
+        match parse_maintenance_body(body, table, database) {
+            Ok(_) => Ok(true),
+            Err(MaintenanceBodyError::NotMaintenanceBody) => Ok(false),
+            Err(MaintenanceBodyError::Lookup(error)) => Err(error),
+        }
     }
 
     /// Returns the assignments in a maintenance trigger.
@@ -483,10 +496,10 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// )?;
     ///
     /// let trigger = db.triggers().next().unwrap();
-    /// let assignments: Vec<_> = trigger.maintenance_assignments(&db).collect();
+    /// let assignments: Vec<_> = trigger.maintenance_assignments(&db)?.collect();
     /// let brands_table = db.table(None, "brands").unwrap();
-    /// let edited_at_column = brands_table.column("edited_at", &db).unwrap();
-    /// let name_column = brands_table.column("name", &db).unwrap();
+    /// let edited_at_column = brands_table.column("edited_at", &db)?.unwrap();
+    /// let name_column = brands_table.column("name", &db)?.unwrap();
     ///
     /// assert_eq!(assignments.len(), 2);
     /// assert_eq!(assignments[0].0, edited_at_column);
@@ -496,20 +509,34 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::TableNotFound`] when no table matches the target,
+    /// and [`LookupError::InvalidObjectName`] or
+    /// [`LookupError::AmbiguousTableLookup`] when the target name cannot denote
+    /// a single table. The assigned columns are resolved against that table.
     #[inline]
     fn maintenance_assignments<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = (&'db <Self::DB as DatabaseLike>::Column, sqlparser::ast::Expr)> {
-        if let Some(function) = self.function(database)
-            && let Some(body) = function.body()
-            && let Ok(table) = self.table(database)
-        {
-            parse_maintenance_body(body, table, database).unwrap_or_default()
-        } else {
-            Vec::new()
+    ) -> Result<
+        impl Iterator<Item = (&'db <Self::DB as DatabaseLike>::Column, sqlparser::ast::Expr)>,
+        LookupError,
+    > {
+        let Some(function) = self.function(database) else {
+            return Ok(Vec::new().into_iter());
+        };
+        let Some(body) = function.body() else {
+            return Ok(Vec::new().into_iter());
+        };
+        let table = self.table(database)?;
+
+        match parse_maintenance_body(body, table, database) {
+            Ok(assignments) => Ok(assignments.into_iter()),
+            Err(MaintenanceBodyError::NotMaintenanceBody) => Ok(Vec::new().into_iter()),
+            Err(MaintenanceBodyError::Lookup(error)) => Err(error),
         }
-        .into_iter()
     }
 }
 
@@ -560,14 +587,20 @@ impl<T: TriggerLike> TriggerLike for &T {
         (*self).function_name_ident()
     }
 
-    fn is_maintenance_trigger<'db>(&'db self, database: &'db Self::DB) -> bool {
+    fn is_maintenance_trigger<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<bool, LookupError> {
         (*self).is_maintenance_trigger(database)
     }
 
     fn maintenance_assignments<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = (&'db <Self::DB as DatabaseLike>::Column, sqlparser::ast::Expr)> {
+    ) -> Result<
+        impl Iterator<Item = (&'db <Self::DB as DatabaseLike>::Column, sqlparser::ast::Expr)>,
+        LookupError,
+    > {
         (*self).maintenance_assignments(database)
     }
 }
@@ -623,9 +656,12 @@ mod tests {
         let function = trigger_ref.function(&db).expect("Function should exist");
         assert_eq!(function.name(), "update_timestamp");
 
-        assert!(trigger_ref.is_maintenance_trigger(&db));
+        assert!(trigger_ref.is_maintenance_trigger(&db).expect("maintenance check"));
 
-        let assignments = trigger_ref.maintenance_assignments(&db).collect::<Vec<_>>();
+        let assignments = trigger_ref
+            .maintenance_assignments(&db)
+            .expect("maintenance assignments")
+            .collect::<Vec<_>>();
         assert_eq!(assignments.len(), 1);
 
         let (col, expr) = &assignments[0];
@@ -657,8 +693,11 @@ mod tests {
 
         // function() should return None because "non_existent_function" is not in db
         assert!(trigger.function(&db).is_none());
-        assert!(!trigger.is_maintenance_trigger(&db));
-        assert_eq!(trigger.maintenance_assignments(&db).count(), 0);
+        assert!(!trigger.is_maintenance_trigger(&db).expect("maintenance check"));
+        assert_eq!(
+            trigger.maintenance_assignments(&db).expect("maintenance assignments").count(),
+            0
+        );
     }
 
     #[test]
@@ -687,8 +726,11 @@ mod tests {
         // impls/sqlparser/create_function.rs)
         assert!(trigger_ref.function(&db).unwrap().body().is_none());
 
-        assert!(!trigger_ref.is_maintenance_trigger(&db));
-        assert_eq!(trigger_ref.maintenance_assignments(&db).count(), 0);
+        assert!(!trigger_ref.is_maintenance_trigger(&db).expect("maintenance check"));
+        assert_eq!(
+            trigger_ref.maintenance_assignments(&db).expect("maintenance assignments").count(),
+            0
+        );
     }
 
     #[test]

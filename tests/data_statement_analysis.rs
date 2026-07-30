@@ -84,9 +84,13 @@ fn single_table_query_is_eligible_with_primary_key() {
         .expect("projection resolves")
         .expect("single base table");
     assert_eq!(source.table_name(), "orders");
-    assert!(source.has_primary_key(&db));
+    assert!(source.has_primary_key(&db).expect("has_primary_key succeeds"));
 
-    let pk: Vec<&str> = source.primary_key_columns(&db).map(ColumnLike::column_name).collect();
+    let pk: Vec<&str> = source
+        .primary_key_columns(&db)
+        .expect("primary_key_columns succeeds")
+        .map(ColumnLike::column_name)
+        .collect();
     assert_eq!(pk, vec!["id"]);
 }
 
@@ -153,7 +157,11 @@ fn composite_primary_key_table_projection() {
     assert_eq!(source, Some("order_items".to_string()));
 
     let table = db.table(None, "order_items").unwrap();
-    let pk: Vec<&str> = table.primary_key_columns(&db).map(ColumnLike::column_name).collect();
+    let pk: Vec<&str> = table
+        .primary_key_columns(&db)
+        .expect("primary_key_columns succeeds")
+        .map(ColumnLike::column_name)
+        .collect();
     assert_eq!(pk, vec!["order_id", "sku"]);
 }
 

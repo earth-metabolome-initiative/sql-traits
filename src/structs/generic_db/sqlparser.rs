@@ -2436,7 +2436,7 @@ mod tests {
             let foo =
                 db.table(None, "foo").expect("Expected `foo` table to exist after ALTER TABLE");
             assert!(
-                foo.has_row_level_security(&db),
+                foo.has_row_level_security(&db).expect("rls check"),
                 "Unquoted ALTER TABLE lookup should resolve via identifier folding"
             );
 
@@ -2449,7 +2449,7 @@ mod tests {
             let foo =
                 db.table(None, "foo").expect("Expected `foo` table to exist after ALTER TABLE");
             assert!(
-                !foo.has_row_level_security(&db),
+                !foo.has_row_level_security(&db).expect("rls check"),
                 "Quoted ALTER TABLE name should not match unquoted table with different case"
             );
         }
@@ -2497,8 +2497,8 @@ mod tests {
                 .expect("Lookup should succeed")
                 .expect("Expected table s2.t to exist");
 
-            assert_eq!(s1_t.indices(&db).count(), 0);
-            assert_eq!(s2_t.indices(&db).count(), 1);
+            assert_eq!(s1_t.indices(&db).expect("indices").count(), 0);
+            assert_eq!(s2_t.indices(&db).expect("indices").count(), 1);
         }
 
         #[test]
@@ -2522,8 +2522,8 @@ mod tests {
                 .expect("Lookup should succeed")
                 .expect("Expected table \"S\".\"T\" to exist");
 
-            assert_eq!(unquoted.indices(&db).count(), 0);
-            assert_eq!(quoted.indices(&db).count(), 1);
+            assert_eq!(unquoted.indices(&db).expect("indices").count(), 0);
+            assert_eq!(quoted.indices(&db).expect("indices").count(), 1);
         }
 
         #[test]
@@ -2893,7 +2893,7 @@ mod tests {
             assert!(db.table(Some("s1"), "t").is_none());
             let s2_t = db.table(Some("s2"), "t").expect("s2.t should still exist");
             assert_eq!(
-                s2_t.indices(&db).count(),
+                s2_t.indices(&db).expect("indices").count(),
                 1,
                 "Dropping s1.t must not remove indices attached to s2.t",
             );
@@ -3233,7 +3233,7 @@ mod tests {
 
             // t2 should still have its column
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.columns(&db).count(), 1);
+            assert_eq!(t2.columns(&db).expect("columns").count(), 1);
         }
 
         #[test]
@@ -3249,10 +3249,11 @@ mod tests {
 
             // t1's index should be gone, t2's should remain
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.indices(&db).count(), 1);
+            assert_eq!(t2.indices(&db).expect("indices").count(), 1);
 
             // Total indices across all tables should be 1 (only t2's index)
-            let total_indices: usize = db.tables().map(|t| t.indices(&db).count()).sum();
+            let total_indices: usize =
+                db.tables().map(|t| t.indices(&db).expect("indices").count()).sum();
             assert_eq!(total_indices, 1);
         }
 
@@ -3268,10 +3269,11 @@ mod tests {
             // Parent should exist with no foreign keys (parent doesn't have any FKs
             // pointing out)
             let parent = db.table(None, "parent").expect("parent should exist");
-            assert_eq!(parent.foreign_keys(&db).count(), 0);
+            assert_eq!(parent.foreign_keys(&db).expect("foreign keys").count(), 0);
 
             // No foreign keys in the database (child's FK was removed with child)
-            let total_fks: usize = db.tables().map(|t| t.foreign_keys(&db).count()).sum();
+            let total_fks: usize =
+                db.tables().map(|t| t.foreign_keys(&db).expect("foreign keys").count()).sum();
             assert_eq!(total_fks, 0);
         }
 
@@ -3286,7 +3288,7 @@ mod tests {
 
             // Only t2's check constraint should remain
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.check_constraints(&db).count(), 1);
+            assert_eq!(t2.check_constraints(&db).expect("check constraints").count(), 1);
         }
 
         #[test]
@@ -3304,7 +3306,7 @@ mod tests {
 
             // Only t2's trigger should remain
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.triggers(&db).count(), 1);
+            assert_eq!(t2.triggers(&db).expect("triggers").count(), 1);
         }
 
         #[test]
@@ -3320,7 +3322,7 @@ mod tests {
 
             // Only t2's policy should remain
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.policies(&db).count(), 1);
+            assert_eq!(t2.policies(&db).expect("policies").count(), 1);
         }
     }
 
@@ -3338,7 +3340,7 @@ mod tests {
 
             // Index should be removed
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.indices(&db).count(), 0);
+            assert_eq!(table.indices(&db).expect("indices").count(), 0);
         }
 
         #[test]
@@ -3352,7 +3354,7 @@ mod tests {
 
             // Index should be removed
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.indices(&db).count(), 0);
+            assert_eq!(table.indices(&db).expect("indices").count(), 0);
         }
 
         #[test]
@@ -3390,7 +3392,7 @@ mod tests {
 
             // Only idx_age should remain
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.indices(&db).count(), 1);
+            assert_eq!(table.indices(&db).expect("indices").count(), 1);
         }
 
         #[test]
@@ -3405,7 +3407,7 @@ mod tests {
 
             // Index should exist again
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.indices(&db).count(), 1);
+            assert_eq!(table.indices(&db).expect("indices").count(), 1);
         }
 
         #[test]
@@ -3421,11 +3423,11 @@ mod tests {
 
             // t1 should have no indices
             let t1 = db.table(None, "t1").expect("t1 should exist");
-            assert_eq!(t1.indices(&db).count(), 0);
+            assert_eq!(t1.indices(&db).expect("indices").count(), 0);
 
             // t2 should still have its index
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.indices(&db).count(), 1);
+            assert_eq!(t2.indices(&db).expect("indices").count(), 1);
         }
 
         #[test]
@@ -3439,7 +3441,7 @@ mod tests {
 
             // Table should still exist with its columns
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.columns(&db).count(), 3);
+            assert_eq!(table.columns(&db).expect("columns").count(), 3);
         }
     }
 
@@ -3486,7 +3488,7 @@ mod tests {
             // A unique constraint viewed as an `IndexLike` exposes no
             // `ObjectName` name accessor; its index name is an `Ident`.
             let table = db.table(None, "t").expect("table should exist");
-            for ui in table.unique_indices(&db) {
+            for ui in table.unique_indices(&db).expect("unique indices") {
                 assert!(IndexLike::name(ui).is_none());
             }
         }
@@ -3507,7 +3509,7 @@ mod tests {
 
             // Trigger should be removed
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.triggers(&db).count(), 0);
+            assert_eq!(table.triggers(&db).expect("triggers").count(), 0);
         }
 
         #[test]
@@ -3522,7 +3524,7 @@ mod tests {
 
             // Trigger should be removed
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.triggers(&db).count(), 0);
+            assert_eq!(table.triggers(&db).expect("triggers").count(), 0);
         }
 
         #[test]
@@ -3565,7 +3567,7 @@ mod tests {
 
             // Only trigger2 should remain
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.triggers(&db).count(), 1);
+            assert_eq!(table.triggers(&db).expect("triggers").count(), 1);
         }
 
         #[test]
@@ -3581,7 +3583,7 @@ mod tests {
 
             // Trigger should exist again
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.triggers(&db).count(), 1);
+            assert_eq!(table.triggers(&db).expect("triggers").count(), 1);
         }
 
         #[test]
@@ -3599,11 +3601,11 @@ mod tests {
 
             // t1 should have no triggers
             let t1 = db.table(None, "t1").expect("t1 should exist");
-            assert_eq!(t1.triggers(&db).count(), 0);
+            assert_eq!(t1.triggers(&db).expect("triggers").count(), 0);
 
             // t2 should still have its trigger
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.triggers(&db).count(), 1);
+            assert_eq!(t2.triggers(&db).expect("triggers").count(), 1);
         }
 
         #[test]
@@ -3635,7 +3637,7 @@ mod tests {
 
             // Policy should be removed
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.policies(&db).count(), 0);
+            assert_eq!(table.policies(&db).expect("policies").count(), 0);
         }
 
         #[test]
@@ -3649,7 +3651,7 @@ mod tests {
 
             // Policy should be removed
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.policies(&db).count(), 0);
+            assert_eq!(table.policies(&db).expect("policies").count(), 0);
         }
 
         #[test]
@@ -3690,7 +3692,7 @@ mod tests {
 
             // Only policy2 should remain
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.policies(&db).count(), 1);
+            assert_eq!(table.policies(&db).expect("policies").count(), 1);
         }
 
         #[test]
@@ -3705,7 +3707,7 @@ mod tests {
 
             // Policy should exist again
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.policies(&db).count(), 1);
+            assert_eq!(table.policies(&db).expect("policies").count(), 1);
         }
 
         #[test]
@@ -3721,11 +3723,11 @@ mod tests {
 
             // t1 should have no policies
             let t1 = db.table(None, "t1").expect("t1 should exist");
-            assert_eq!(t1.policies(&db).count(), 0);
+            assert_eq!(t1.policies(&db).expect("policies").count(), 0);
 
             // t2 should still have its policy
             let t2 = db.table(None, "t2").expect("t2 should exist");
-            assert_eq!(t2.policies(&db).count(), 1);
+            assert_eq!(t2.policies(&db).expect("policies").count(), 1);
         }
 
         #[test]
@@ -3739,7 +3741,7 @@ mod tests {
 
             // Table should still exist with its columns
             let table = db.table(None, "t").expect("Table should exist");
-            assert_eq!(table.columns(&db).count(), 2);
+            assert_eq!(table.columns(&db).expect("columns").count(), 2);
         }
     }
 
@@ -3880,8 +3882,11 @@ mod tests {
 
             let table = db.table(None, "t").expect("Table should exist");
             let role = db.role("my_role").expect("Role should exist");
-            assert!(!table.can_select(role, &db), "SELECT should be revoked while INSERT remains");
-            assert!(table.can_insert(role, &db));
+            assert!(
+                !table.can_select(role, &db).expect("can_select"),
+                "SELECT should be revoked while INSERT remains"
+            );
+            assert!(table.can_insert(role, &db).expect("can_insert"));
         }
 
         #[test]
@@ -3939,8 +3944,14 @@ mod tests {
             let role_a = db.role("a").expect("Role a should exist");
             let role_b = db.role("b").expect("Role b should exist");
 
-            assert!(!table.can_select(role_a, &db), "SELECT should be revoked for a");
-            assert!(table.can_select(role_b, &db), "SELECT should remain for b");
+            assert!(
+                !table.can_select(role_a, &db).expect("can_select"),
+                "SELECT should be revoked for a"
+            );
+            assert!(
+                table.can_select(role_b, &db).expect("can_select"),
+                "SELECT should remain for b"
+            );
         }
 
         #[test]
@@ -3958,8 +3969,14 @@ mod tests {
             let role_a = db.role("a").expect("Role a should exist");
             let role_b = db.role("b").expect("Role b should exist");
 
-            assert!(table.can_select(role_a, &db), "SELECT should remain for a");
-            assert!(!table.can_select(role_b, &db), "SELECT should be revoked for b");
+            assert!(
+                table.can_select(role_a, &db).expect("can_select"),
+                "SELECT should remain for a"
+            );
+            assert!(
+                !table.can_select(role_b, &db).expect("can_select"),
+                "SELECT should be revoked for b"
+            );
         }
 
         #[test]
@@ -3978,10 +3995,22 @@ mod tests {
             let role_b = db.role("b").expect("Role b should exist");
 
             assert_eq!(db.table_grants().count(), 2);
-            assert!(!table.can_select(role_a, &db), "SELECT should be revoked for a");
-            assert!(table.can_insert(role_a, &db), "INSERT should remain for a");
-            assert!(table.can_select(role_b, &db), "SELECT should remain for b");
-            assert!(table.can_insert(role_b, &db), "INSERT should remain for b");
+            assert!(
+                !table.can_select(role_a, &db).expect("can_select"),
+                "SELECT should be revoked for a"
+            );
+            assert!(
+                table.can_insert(role_a, &db).expect("can_insert"),
+                "INSERT should remain for a"
+            );
+            assert!(
+                table.can_select(role_b, &db).expect("can_select"),
+                "SELECT should remain for b"
+            );
+            assert!(
+                table.can_insert(role_b, &db).expect("can_insert"),
+                "INSERT should remain for b"
+            );
         }
 
         #[test]
@@ -3999,10 +4028,22 @@ mod tests {
             let role_a = db.role("a").expect("Role a should exist");
             let role_b = db.role("b").expect("Role b should exist");
 
-            assert!(!table.can_select(role_a, &db), "SELECT should be revoked for a");
-            assert!(!table.can_insert(role_a, &db), "INSERT should be revoked for a");
-            assert!(table.can_select(role_b, &db), "SELECT should remain for b");
-            assert!(table.can_insert(role_b, &db), "INSERT should remain for b");
+            assert!(
+                !table.can_select(role_a, &db).expect("can_select"),
+                "SELECT should be revoked for a"
+            );
+            assert!(
+                !table.can_insert(role_a, &db).expect("can_insert"),
+                "INSERT should be revoked for a"
+            );
+            assert!(
+                table.can_select(role_b, &db).expect("can_select"),
+                "SELECT should remain for b"
+            );
+            assert!(
+                table.can_insert(role_b, &db).expect("can_insert"),
+                "INSERT should remain for b"
+            );
         }
 
         #[test]
@@ -4030,7 +4071,7 @@ mod tests {
 
             let table = db.table(None, "t").expect("Table should exist");
             let app_user = db.role("app_user").expect("Role should exist");
-            assert!(table.can_select(app_user, &db));
+            assert!(table.can_select(app_user, &db).expect("can_select"));
         }
 
         #[test]
@@ -4049,8 +4090,8 @@ mod tests {
             let s1_t = db.table(Some("s1"), "t").expect("s1.t should exist");
             let s2_t = db.table(Some("s2"), "t").expect("s2.t should exist");
 
-            assert!(s1_t.can_select(role, &db));
-            assert!(!s2_t.can_select(role, &db));
+            assert!(s1_t.can_select(role, &db).expect("can_select"));
+            assert!(!s2_t.can_select(role, &db).expect("can_select"));
         }
 
         #[test]
@@ -4065,7 +4106,7 @@ mod tests {
 
             let table = db.table(None, "t").expect("Table should exist");
             let role = db.role("my_role").expect("Role should exist");
-            assert!(!table.can_select(role, &db));
+            assert!(!table.can_select(role, &db).expect("can_select"));
             assert_eq!(db.table_grants().count(), 0);
         }
 
@@ -4296,8 +4337,11 @@ mod tests {
             let table = db.table(None, "t").unwrap();
             let r1 = db.role("r1").unwrap();
             let r2 = db.role("r2").unwrap();
-            assert!(!table.can_select(r1, &db), "r1 should have had SELECT revoked");
-            assert!(table.can_select(r2, &db), "r2 should still have SELECT");
+            assert!(
+                !table.can_select(r1, &db).expect("can_select"),
+                "r1 should have had SELECT revoked"
+            );
+            assert!(table.can_select(r2, &db).expect("can_select"), "r2 should still have SELECT");
         }
 
         /// `grant_objects_inner_match` schema-list arm: REVOKE on
@@ -4433,7 +4477,7 @@ mod tests {
             // arms in `impls/sqlparser/grant.rs::columns`.
             let mut all_cols: Vec<&str> = Vec::new();
             for cg in db.column_grants() {
-                for col in cg.columns(table, &db) {
+                for col in cg.columns(table, &db).expect("column grant columns") {
                     all_cols.push(col.column_name());
                 }
             }
@@ -4611,8 +4655,11 @@ mod tests {
             )
             .expect("parse");
             let table = db.table(None, "t").expect("table t");
-            let pk: Vec<&str> =
-                table.primary_key_columns(&db).map(ColumnLike::column_name).collect();
+            let pk: Vec<&str> = table
+                .primary_key_columns(&db)
+                .expect("pk columns")
+                .map(ColumnLike::column_name)
+                .collect();
             assert_eq!(pk, vec!["a", "b"]);
         }
     }

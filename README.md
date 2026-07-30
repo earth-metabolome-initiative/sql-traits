@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(users_table.table_name(), "users");
 
     // Inspect columns
-    let columns: Vec<_> = users_table.columns(&db).collect();
+    let columns: Vec<_> = users_table.columns(&db)?.collect();
     assert_eq!(columns.len(), 2);
     assert_eq!(columns[0].column_name(), "id");
     assert_eq!(columns[1].column_name(), "username");

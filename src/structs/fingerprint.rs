@@ -11,6 +11,7 @@ use core::fmt;
 use sha2::{Digest, Sha256};
 
 use crate::{
+    errors::LookupError,
     traits::{ColumnLike, TableLike},
     utils::fingerprint_type_token::canonical_type_token,
 };
@@ -102,6 +103,10 @@ pub enum FingerprintError {
         /// The table's column count.
         column_count: u32,
     },
+    /// The table, or one of its columns, is not present in the database the
+    /// fingerprint is being computed against.
+    #[error(transparent)]
+    Lookup(#[from] LookupError),
 }
 
 /// Validates the canonical layout used by the v1 persistence profile.
@@ -314,7 +319,8 @@ fn write_str(buf: &mut Vec<u8>, s: &str) {
 ///
 /// # Errors
 ///
-/// Returns [`FingerprintError`] when the input table fails validation.
+/// Returns [`FingerprintError`] when the input table fails validation, or when
+/// `database` does not hold the table.
 pub fn canonical_bytes_v1<T: TableLike>(
     table: &T,
     database: &T::DB,
@@ -323,21 +329,22 @@ pub fn canonical_bytes_v1<T: TableLike>(
     // encoding writes iteration index as the ordinal; the validator
     // checks that `column_id` agrees with the iteration index, catching
     // any `TableLike` implementer that reports inconsistent ordinals.
-    let columns: Vec<_> = table.columns(database).collect();
+    let columns: Vec<_> = table.columns(database)?.collect();
     let col_count = u32::try_from(columns.len()).expect("column count fits in u32");
 
-    let column_ordinals: Vec<u32> = columns
-        .iter()
-        .map(|col| {
-            col.column_id(database).and_then(|id| u32::try_from(id).ok()).unwrap_or(u32::MAX)
-        })
-        .collect();
+    let mut column_ordinals: Vec<u32> = Vec::with_capacity(columns.len());
+    for column in &columns {
+        column_ordinals.push(
+            column.column_id(database)?.and_then(|id| u32::try_from(id).ok()).unwrap_or(u32::MAX),
+        );
+    }
 
-    let pk_ordinals: Vec<u32> = table
-        .primary_key_columns(database)
-        .filter_map(|col| col.column_id(database))
-        .map(|id| u32::try_from(id).expect("pk ordinal fits in u32"))
-        .collect();
+    let mut pk_ordinals: Vec<u32> = Vec::new();
+    for column in table.primary_key_columns(database)? {
+        if let Some(id) = column.column_id(database)? {
+            pk_ordinals.push(u32::try_from(id).expect("pk ordinal fits in u32"));
+        }
+    }
 
     validate_v1_layout_inner(col_count, &column_ordinals, &pk_ordinals)?;
 
@@ -369,7 +376,7 @@ pub fn canonical_bytes_v1<T: TableLike>(
         let type_token = canonical_type_token(column.data_type(database));
         write_str(&mut buf, &type_token);
 
-        buf.push(u8::from(column.is_nullable(database)));
+        buf.push(u8::from(column.is_nullable(database)?));
         buf.push(u8::from(column.is_generated()));
     }
 

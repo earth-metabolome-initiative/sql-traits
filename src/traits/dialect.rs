@@ -60,7 +60,7 @@ pub trait DialectLike: Debug + Clone + Default + Send + Sync + Hash + Eq + Ord +
     /// fn check<D: sqlparser::dialect::Dialect + Default + 'static>(sql: &str) -> TypeMatch {
     ///     let db = ParserDB::parse::<D>(sql).expect("parse");
     ///     let table = db.table(None, "t").unwrap();
-    ///     let col = table.column("flag", &db).unwrap();
+    ///     let col = table.column("flag", &db).expect("column lookup").unwrap();
     ///     db.dialect().is_bool(&db, col)
     /// }
     ///
@@ -100,7 +100,7 @@ pub trait DialectLike: Debug + Clone + Default + Send + Sync + Hash + Eq + Ord +
     /// fn check<D: sqlparser::dialect::Dialect + Default + 'static>(sql: &str) -> TypeMatch {
     ///     let db = ParserDB::parse::<D>(sql).expect("parse");
     ///     let table = db.table(None, "t").unwrap();
-    ///     let col = table.column("id", &db).unwrap();
+    ///     let col = table.column("id", &db).expect("column lookup").unwrap();
     ///     db.dialect().is_uuid(&db, col)
     /// }
     ///

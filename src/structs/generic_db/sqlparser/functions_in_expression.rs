@@ -139,7 +139,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let t = db.table(None, "t").unwrap();
-        let check = t.check_constraints(&db).next().expect("check");
+        let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
         assert!(names.contains(&"ping"));
@@ -155,7 +155,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let t = db.table(None, "t").unwrap();
-        let check = t.check_constraints(&db).next().expect("check");
+        let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
         assert_eq!(names.len(), 1, "ping() appears twice in source but dedups to one");
@@ -173,7 +173,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let t = db.table(None, "t").unwrap();
-        let check = t.check_constraints(&db).next().expect("check");
+        let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
         assert!(names.contains(&"outer_fn"), "outer function attributed");
@@ -194,7 +194,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let t = db.table(None, "t").unwrap();
-        let check = t.check_constraints(&db).next().expect("check");
+        let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
         assert!(names.contains(&"classify"));
@@ -215,7 +215,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let t = db.table(None, "t").unwrap();
-        let check = t.check_constraints(&db).next().expect("check");
+        let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
         assert!(names.contains(&"lo"));

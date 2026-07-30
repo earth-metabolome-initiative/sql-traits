@@ -69,15 +69,15 @@ fn table_exposes_column<'db, DB: DatabaseLike>(
     table: &'db DB::Table,
     column: &Ident,
     database: &'db DB,
-) -> bool {
-    table.columns(database).any(|candidate| {
+) -> Result<bool, LookupError> {
+    Ok(table.columns(database)?.any(|candidate| {
         identifiers_match(
             candidate.column_name(),
             candidate.column_name_is_quoted(),
             column.value.as_str(),
             column.quote_style.is_some(),
         )
-    })
+    }))
 }
 
 /// Finds the base table whose qualifying key matches `value`/`quoted`.
@@ -107,11 +107,12 @@ fn unqualified_column_source<'db, DB: DatabaseLike>(
         return Ok(None);
     }
 
-    let matches: Vec<&'db DB::Table> = bases
-        .iter()
-        .filter(|base| table_exposes_column(base.table, column, database))
-        .map(|base| base.table)
-        .collect();
+    let mut matches: Vec<&'db DB::Table> = Vec::new();
+    for base in bases {
+        if table_exposes_column(base.table, column, database)? {
+            matches.push(base.table);
+        }
+    }
 
     match matches.as_slice() {
         [] => Ok(None),
@@ -144,7 +145,7 @@ fn column_source<'db, DB: DatabaseLike>(
                 qualifier.value.as_str(),
                 qualifier.quote_style.is_some(),
             ) {
-                Some(table) if table_exposes_column(table, column, database) => Ok(Some(table)),
+                Some(table) if table_exposes_column(table, column, database)? => Ok(Some(table)),
                 _ => Ok(None),
             }
         }

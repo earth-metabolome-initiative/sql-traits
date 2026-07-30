@@ -1,14 +1,12 @@
 //! Implement the [`ForeignKeyConstraint`] trait for the `sqlparser` crate's
-#![allow(
-    clippy::panic,
-    reason = "reference targets are validated for table-level constraints by ParserDB::parse and for inline references by ParserDB::validate_foreign_key_targets; these accessors assume a reference-closed model"
-)]
+//! [`TableAttribute`] wrapper.
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::string::ToString;
 
 use sqlparser::ast::{ConstraintReferenceMatchKind, CreateTable, ForeignKeyConstraint};
 
 use crate::{
+    errors::LookupError,
     structs::{ParserDB, TableAttribute},
     traits::{ForeignKeyLike, Metadata, database::DatabaseLike, table::TableLike},
     utils::{identifier_resolution::identifiers_match, object_name::object_name_last_part},
@@ -40,16 +38,15 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
     fn referenced_table<'db>(
         &self,
         database: &'db Self::DB,
-    ) -> &'db <Self::DB as DatabaseLike>::Table {
+    ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError> {
         let foreign_table = &self.attribute().foreign_table;
         let (referenced_name, referenced_quoted) = object_name_last_part(foreign_table)
-            .unwrap_or_else(|| {
-                let host_table = self.host_table(database);
-                panic!(
-                    "Foreign key in table `{}` has an empty referenced table name",
-                    host_table.table_name()
-                )
-            });
+            .ok_or_else(|| {
+                LookupError::InvalidObjectName {
+                    object_name: foreign_table.to_string(),
+                    reason: "a foreign key reference must name a table".to_string(),
+                }
+            })?;
         database
             .tables()
             .find(|table: &&<Self::DB as DatabaseLike>::Table| {
@@ -60,13 +57,7 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
                     referenced_quoted,
                 )
             })
-            .unwrap_or_else(|| {
-                let host_table = self.host_table(database);
-                panic!(
-                    "Referenced table `{referenced_name}` not found for foreign key in table `{}`",
-                    host_table.table_name()
-                )
-            })
+            .ok_or_else(|| LookupError::TableNotFound { object_name: foreign_table.to_string() })
     }
 
     #[inline]
@@ -82,52 +73,55 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
     fn host_columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
         let host_table = self.host_table(database);
-        self.attribute().columns.iter().map(move |col_name| {
-            host_table
-                .columns(database)
-                .find(|col: &&<Self::DB as DatabaseLike>::Column| &col.attribute().name == col_name)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Host column `{}` not found in table `{}` for foreign key, options: {:?}",
-                        col_name,
-                        host_table.table_name(),
-                        host_table
-                            .columns(database)
-                            .map(|c| c.attribute().name.to_string())
-                            .collect::<Vec<_>>()
-                    )
-                })
-        })
+        resolve_columns(host_table, database, &self.attribute().columns)
     }
 
     fn referenced_columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
-        let host_table = self.host_table(database);
-        let referenced_table = self.referenced_table(database);
-        self.attribute().referred_columns.iter().map(move |col_name| {
-            referenced_table
-                .columns(database)
-                .find(|col: &&<Self::DB as DatabaseLike>::Column| &col.attribute().name == col_name)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Referenced column `{}` in table `{}` not found in table `{}` for foreign key",
-                        col_name,
-                        host_table.table_name(),
-                        referenced_table.table_name()
-                    )
-                })
-        })
+        let referenced_table = self.referenced_table(database)?;
+        resolve_columns(referenced_table, database, &self.attribute().referred_columns)
     }
+}
+
+/// Resolves `column_names` against the columns `table` declares.
+///
+/// A foreign key naming a column its table does not declare is a dangling
+/// reference rather than a translatable constraint, so it is reported instead
+/// of being skipped.
+fn resolve_columns<'db>(
+    table: &'db <ParserDB as DatabaseLike>::Table,
+    database: &'db ParserDB,
+    column_names: &[sqlparser::ast::Ident],
+) -> Result<alloc::vec::IntoIter<&'db <ParserDB as DatabaseLike>::Column>, LookupError> {
+    // Resolve the declared columns once rather than per named column: the
+    // metadata lookup is the expensive half and the answer does not change.
+    let declared: alloc::vec::Vec<_> = table.columns(database)?.collect();
+    let mut columns = alloc::vec::Vec::with_capacity(column_names.len());
+    for column_name in column_names {
+        let column = declared
+            .iter()
+            .copied()
+            .find(|column| &column.attribute().name == column_name)
+            .ok_or_else(|| {
+                LookupError::ColumnNotFound {
+                    table_name: table.table_name().to_string(),
+                    column_name: column_name.value.clone(),
+                }
+            })?;
+        columns.push(column);
+    }
+
+    Ok(columns.into_iter())
 }
 
 #[cfg(test)]
@@ -149,7 +143,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let child = db.table(None, "child").unwrap();
-        let fk = child.foreign_keys(&db).next().expect("FK should exist");
+        let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
         assert!(fk.foreign_key_name().is_none(), "inline REFERENCES has no name");
     }
 
@@ -166,7 +160,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let child = db.table(None, "child").unwrap();
-        let fk = child.foreign_keys(&db).next().expect("FK should exist");
+        let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
         assert!(!fk.on_delete_cascade(&db));
     }
 
@@ -184,11 +178,18 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let child = db.table(None, "child").unwrap();
-        let fk = child.foreign_keys(&db).next().expect("FK should exist");
+        let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
 
-        let host_names: Vec<&str> = fk.host_columns(&db).map(ColumnLike::column_name).collect();
-        let ref_names: Vec<&str> =
-            fk.referenced_columns(&db).map(ColumnLike::column_name).collect();
+        let host_names: Vec<&str> = fk
+            .host_columns(&db)
+            .expect("host_columns lookup")
+            .map(ColumnLike::column_name)
+            .collect();
+        let ref_names: Vec<&str> = fk
+            .referenced_columns(&db)
+            .expect("referenced_columns lookup")
+            .map(ColumnLike::column_name)
+            .collect();
         assert_eq!(host_names, vec!["x", "y"]);
         assert_eq!(ref_names, vec!["a", "b"]);
     }
@@ -204,10 +205,10 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let t = db.table(None, "t").unwrap();
-        let fk = t.foreign_keys(&db).next().expect("FK should exist");
+        let fk = t.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
 
         assert_eq!(fk.host_table(&db).table_name(), "t");
-        assert_eq!(fk.referenced_table(&db).table_name(), "t");
+        assert_eq!(fk.referenced_table(&db).expect("ref table lookup").table_name(), "t");
     }
 
     /// The referenced table resolves under PostgreSQL identifier folding even
@@ -223,8 +224,8 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let child = db.table(None, "child").unwrap();
-        let fk = child.foreign_keys(&db).next().expect("FK should exist");
-        assert_eq!(fk.referenced_table(&db).table_name(), "parent");
+        let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
+        assert_eq!(fk.referenced_table(&db).expect("ref table lookup").table_name(), "parent");
     }
 
     /// `match_kind()` defaults to `Simple` when no `MATCH` clause is given.
@@ -238,7 +239,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
         let child = db.table(None, "child").unwrap();
-        let fk = child.foreign_keys(&db).next().expect("FK should exist");
+        let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
         assert!(matches!(fk.match_kind(&db), ConstraintReferenceMatchKind::Simple));
     }
 }

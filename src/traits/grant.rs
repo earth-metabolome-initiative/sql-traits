@@ -13,7 +13,10 @@ use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use sqlparser::ast::{Action, Grantee};
 
-use crate::traits::{DatabaseLike, Metadata};
+use crate::{
+    errors::LookupError,
+    traits::{DatabaseLike, Metadata},
+};
 
 /// A trait for types that can be treated as SQL grants.
 ///
@@ -384,6 +387,11 @@ pub trait ColumnGrantLike:
     /// REFERENCES on specific columns rather than the entire table.
     /// The iterator yields references to column objects from the database.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold `table`.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -400,7 +408,7 @@ pub trait ColumnGrantLike:
     /// )?;
     /// let grant = db.column_grants().next().unwrap();
     /// let table = db.table(None, "my_table").unwrap();
-    /// let columns: Vec<_> = grant.columns(table, &db).collect();
+    /// let columns: Vec<_> = grant.columns(table, &db)?.collect();
     /// assert_eq!(columns.len(), 2);
     /// # Ok(())
     /// # }
@@ -409,7 +417,7 @@ pub trait ColumnGrantLike:
         &'a self,
         table: &'a <Self::DB as DatabaseLike>::Table,
         database: &'a Self::DB,
-    ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Column>;
+    ) -> Result<impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Column>, LookupError>;
 
     /// Returns the table this column grant applies to.
     ///
@@ -445,7 +453,7 @@ where
         &'a self,
         table: &'a <Self::DB as DatabaseLike>::Table,
         database: &'a Self::DB,
-    ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Column> {
+    ) -> Result<impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Column>, LookupError> {
         (*self).columns(table, database)
     }
 
@@ -523,7 +531,8 @@ mod tests {
         // ColumnGrantLike methods routed through &T.
         let table = <&_ as ColumnGrantLike>::table(&cg_ref, &db).expect("column grant has a table");
         assert_eq!(table.table_name(), "users");
-        let cols: Vec<_> = <&_ as ColumnGrantLike>::columns(&cg_ref, table, &db).collect();
+        let cols: Vec<_> =
+            <&_ as ColumnGrantLike>::columns(&cg_ref, table, &db).expect("columns").collect();
         assert!(!cols.is_empty(), "column grant must surface at least one column");
     }
 }

@@ -55,7 +55,7 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (a INT, b INT, CHECK (a < b));")?;
     /// let t = db.table(None, "t").unwrap();
-    /// let check = t.check_constraints(&db).next().unwrap();
+    /// let check = t.check_constraints(&db)?.next().unwrap();
     /// let meta = db.check_constraint_metadata(check).unwrap();
     /// let names: Vec<&str> = meta.columns().map(|c| c.column_name()).collect();
     /// assert!(names.contains(&"a") && names.contains(&"b"));
@@ -82,7 +82,7 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     ///     ",
     /// )?;
     /// let t = db.table(None, "t").unwrap();
-    /// let check = t.check_constraints(&db).next().unwrap();
+    /// let check = t.check_constraints(&db)?.next().unwrap();
     /// let meta = db.check_constraint_metadata(check).unwrap();
     /// let names: Vec<&str> = meta.functions().map(|f| f.name()).collect();
     /// assert!(names.contains(&"is_valid"));
