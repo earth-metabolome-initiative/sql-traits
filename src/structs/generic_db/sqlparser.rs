@@ -306,6 +306,48 @@ impl ParserDBBuilder {
         });
     }
 
+    /// Detaches every model object derived from the stored node of a table,
+    /// leaving the table entry itself in place.
+    ///
+    /// Derived objects wrap the node they were built from, so a statement that
+    /// edits the node has to rebuild them. Columns and constraint-implied
+    /// objects follow from the node and are recomputed, while `CREATE INDEX`
+    /// indexes do not and are returned with their expressions so the caller can
+    /// re-attach them.
+    fn take_table_derived_objects(
+        &mut self,
+        table_name: &str,
+        table_name_quoted: bool,
+        schema_name: Option<&str>,
+        schema_quoted: bool,
+    ) -> Vec<(CreateIndex, Expr)> {
+        let belongs_to = |table: &CreateTable| {
+            table_matches_resolved_identity(
+                table,
+                table_name,
+                table_name_quoted,
+                schema_name,
+                schema_quoted,
+            )
+        };
+
+        let mut detached_indices = Vec::new();
+        self.indices_mut().retain(|(index, metadata)| {
+            if belongs_to(TableAttribute::table(index)) {
+                detached_indices.push((index.attribute().clone(), metadata.expression().clone()));
+                return false;
+            }
+            true
+        });
+
+        self.columns_mut().retain(|(column, ())| !belongs_to(TableAttribute::table(column)));
+        self.unique_indices_mut().retain(|(index, _)| !belongs_to(TableAttribute::table(index)));
+        self.foreign_keys_mut().retain(|(fk, ())| !belongs_to(TableAttribute::table(fk)));
+        self.check_constraints_mut().retain(|(check, _)| !belongs_to(TableAttribute::table(check)));
+
+        detached_indices
+    }
+
     /// Checks if a role with the given name is referenced by any grants.
     ///
     /// Returns `true` if the role is a grantee in any table or column grant.
@@ -489,6 +531,33 @@ fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
     })
 }
 
+/// Returns whether a table constraint was declared under `name`.
+///
+/// PostgreSQL spells the name as a constraint name while MySQL spells some of
+/// them as an index name, and sqlparser keeps the two in separate fields. A
+/// constraint declared without a name has no name to be found by.
+fn table_constraint_has_name(constraint: &TableConstraint, name: &Ident) -> bool {
+    let declared = match constraint {
+        TableConstraint::Unique(unique) => unique.name.as_ref().or(unique.index_name.as_ref()),
+        TableConstraint::PrimaryKey(pk) => pk.name.as_ref().or(pk.index_name.as_ref()),
+        TableConstraint::ForeignKey(fk) => fk.name.as_ref(),
+        TableConstraint::Check(check) => check.name.as_ref(),
+        TableConstraint::Index(index) => index.name.as_ref(),
+        TableConstraint::FulltextOrSpatial(index) => index.opt_index_name.as_ref(),
+        TableConstraint::PrimaryKeyUsingIndex(using_index)
+        | TableConstraint::UniqueUsingIndex(using_index) => using_index.name.as_ref(),
+    };
+
+    declared.is_some_and(|declared| {
+        identifiers_match(
+            declared.value.as_str(),
+            declared.quote_style.is_some(),
+            name.value.as_str(),
+            name.quote_style.is_some(),
+        )
+    })
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct RevokeStoreApplication {
     matched_any: bool,
@@ -583,6 +652,29 @@ fn apply_revoke_to_grant_store(
 /// let db = ParserDB::parse::<PostgreSqlDialect>(sql)?;
 /// let role = db.role("admin").unwrap();
 /// assert!(role.is_superuser());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Constraints declared after the table
+///
+/// A key declared by `ALTER TABLE ... ADD CONSTRAINT`, which is how `pg_dump`
+/// always spells one, answers exactly as the inline declaration does, and
+/// `DROP CONSTRAINT` removes it again.
+///
+/// ```rust
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// use sql_traits::prelude::*;
+/// use sqlparser::dialect::PostgreSqlDialect;
+///
+/// let db = ParserDB::parse::<PostgreSqlDialect>(
+///     "
+///     CREATE TABLE t (id uuid NOT NULL);
+///     ALTER TABLE ONLY t ADD CONSTRAINT t_pkey PRIMARY KEY (id);
+///     ",
+/// )?;
+/// let table = db.table(None, "t").unwrap();
+/// assert_eq!(table.primary_key_column(&db)?.unwrap().column_name(), "id");
 /// # Ok(())
 /// # }
 /// ```
@@ -1025,6 +1117,7 @@ impl ParserDB {
         for constraint in constraints {
             match constraint {
                 TableConstraint::Unique(uc) => {
+                    Self::validate_constraint_columns(&uc.columns, create_table, table_metadata)?;
                     if let Some((unique_index, unique_index_metadata)) =
                         Self::process_unique_constraint(uc.clone(), create_table)
                     {
@@ -1062,6 +1155,7 @@ impl ParserDB {
                     );
                 }
                 TableConstraint::PrimaryKey(pk) => {
+                    Self::validate_constraint_columns(&pk.columns, create_table, table_metadata)?;
                     let mut primary_key_columns = Vec::new();
                     for col_name in &pk.columns {
                         let Expr::Identifier(column_name) = &col_name.column.expr else {
@@ -1111,6 +1205,142 @@ impl ParserDB {
                 _ => {}
             }
         }
+        Ok(builder)
+    }
+
+    /// Checks that every plain column an index-shaped constraint names is
+    /// declared by the table the constraint is attached to.
+    ///
+    /// Entries that are expressions rather than plain columns name no single
+    /// column, so they are left alone.
+    fn validate_constraint_columns(
+        columns: &[IndexColumn],
+        create_table: &CreateTable,
+        table_metadata: &TableMetadata<CreateTable>,
+    ) -> Result<(), LookupError> {
+        for column in columns {
+            let Expr::Identifier(column_name) = &column.column.expr else {
+                continue;
+            };
+            let declared = table_metadata.column_arcs().any(|declared| {
+                identifiers_match(
+                    declared.column_name(),
+                    declared.column_name_is_quoted(),
+                    column_name.value.as_str(),
+                    column_name.quote_style.is_some(),
+                )
+            });
+            if !declared {
+                return Err(LookupError::ColumnNotFound {
+                    table_name: create_table.name.to_string(),
+                    column_name: column_name.value.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Ingests a table node, deriving its columns and everything its column
+    /// options and table constraints imply.
+    ///
+    /// `table_metadata` carries the state the node does not express: row level
+    /// security flags and `CREATE INDEX` indexes.
+    fn ingest_table_node(
+        mut builder: ParserDBBuilder,
+        create_table: Arc<CreateTable>,
+        mut table_metadata: TableMetadata<CreateTable>,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        for column in create_table.columns.clone() {
+            table_metadata.add_column(Arc::new(TableAttribute::new(create_table.clone(), column)));
+        }
+
+        for column in table_metadata.clone().column_arcs() {
+            builder =
+                Self::process_column_options(column, &create_table, &mut table_metadata, builder)?;
+            builder = builder.add_column(column.clone(), ());
+        }
+
+        builder = Self::process_table_constraints(
+            &create_table.constraints,
+            &create_table,
+            &mut table_metadata,
+            builder,
+        )?;
+
+        Ok(builder.add_table(create_table, table_metadata)?)
+    }
+
+    /// Applies `edit` to the constraint list of the table an `ALTER TABLE`
+    /// statement targets, then rebuilds the model objects derived from it.
+    ///
+    /// A constraint reaches a table either inline in `CREATE TABLE` or later
+    /// through `ALTER TABLE`, and both spellings have to answer alike, so the
+    /// table node stays the single source of truth and everything derived from
+    /// it is recomputed rather than patched.
+    fn alter_table_constraints(
+        mut builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        if_exists: bool,
+        edit: impl FnOnce(&CreateTable, &mut Vec<TableConstraint>) -> Result<(), crate::errors::Error>,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(resolved_table) = builder.resolve_table_object_name(table_name)? else {
+            if if_exists {
+                return Ok(builder);
+            }
+            return Err(crate::errors::Error::AlterTableNotFound {
+                table_name: last_str(table_name).to_string(),
+            });
+        };
+        let resolved_table_name = resolved_table.table_name().to_string();
+        let resolved_table_quoted = resolved_table.table_name_is_quoted();
+        let resolved_schema_name = resolved_table.table_schema().map(str::to_string);
+        let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+
+        let Some(table_position) = builder.tables().iter().position(|(table, _)| {
+            table_matches_resolved_identity(
+                table.as_ref(),
+                &resolved_table_name,
+                resolved_table_quoted,
+                resolved_schema_name.as_deref(),
+                resolved_schema_quoted,
+            )
+        }) else {
+            if if_exists {
+                return Ok(builder);
+            }
+            return Err(crate::errors::Error::AlterTableNotFound {
+                table_name: last_str(table_name).to_string(),
+            });
+        };
+
+        let (previous_table, previous_metadata) = builder.tables_mut().remove(table_position);
+        let mut altered_table = (*previous_table).clone();
+        edit(&previous_table, &mut altered_table.constraints)?;
+
+        let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
+        table_metadata.set_rls_enabled(previous_metadata.rls_enabled());
+        table_metadata.set_rls_forced(previous_metadata.rls_forced());
+
+        let detached_indices = builder.take_table_derived_objects(
+            &resolved_table_name,
+            resolved_table_quoted,
+            resolved_schema_name.as_deref(),
+            resolved_schema_quoted,
+        );
+
+        let altered_table = Arc::new(altered_table);
+        for (index, expression) in detached_indices {
+            let index = Arc::new(TableAttribute::new(altered_table.clone(), index));
+            table_metadata.add_index(index.clone());
+            builder =
+                builder.add_index(index, IndexMetadata::new(expression, altered_table.clone()));
+        }
+
+        builder = Self::ingest_table_node(builder, altered_table, table_metadata)?;
+        builder.tables_mut().sort_by(|(a, _), (b, _)| {
+            (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name()))
+        });
+
         Ok(builder)
     }
 
@@ -1746,38 +1976,49 @@ impl ParserDB {
                                     alter_table.if_exists,
                                 )?;
                             }
+                            AlterTableOperation::AddConstraint { constraint, .. } => {
+                                builder = Self::alter_table_constraints(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    |_, constraints| {
+                                        constraints.push(constraint);
+                                        Ok(())
+                                    },
+                                )?;
+                            }
+                            AlterTableOperation::DropConstraint { if_exists, name, .. } => {
+                                builder = Self::alter_table_constraints(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    |table, constraints| {
+                                        let declared = constraints.len();
+                                        constraints.retain(|constraint| {
+                                            !table_constraint_has_name(constraint, &name)
+                                        });
+                                        if constraints.len() == declared && !if_exists {
+                                            return Err(
+                                                crate::errors::Error::DropConstraintNotFound {
+                                                    table_name: table.name.to_string(),
+                                                    constraint_name: name.value.clone(),
+                                                },
+                                            );
+                                        }
+                                        Ok(())
+                                    },
+                                )?;
+                            }
                             _ => {}
                         }
                     }
                 }
                 Statement::CreateTable(create_table) => {
-                    let create_table = Arc::new(create_table);
-                    let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
-
-                    for column in create_table.columns.clone() {
-                        let column_arc =
-                            Arc::new(TableAttribute::new(create_table.clone(), column));
-                        table_metadata.add_column(column_arc.clone());
-                    }
-
-                    for column in table_metadata.clone().column_arcs() {
-                        builder = Self::process_column_options(
-                            column,
-                            &create_table,
-                            &mut table_metadata,
-                            builder,
-                        )?;
-                        builder = builder.add_column(column.clone(), ());
-                    }
-
-                    builder = Self::process_table_constraints(
-                        &create_table.constraints,
-                        &create_table,
-                        &mut table_metadata,
+                    builder = Self::ingest_table_node(
                         builder,
+                        Arc::new(create_table),
+                        TableMetadata::default(),
                     )?;
-
-                    builder = builder.add_table(create_table, table_metadata)?;
                 }
                 Statement::CreatePolicy(policy) => {
                     let using_functions = if let Some(using_expr) = &policy.using {
@@ -4661,6 +4902,258 @@ mod tests {
                 .map(ColumnLike::column_name)
                 .collect();
             assert_eq!(pk, vec!["a", "b"]);
+        }
+    }
+
+    mod alter_table_constraints {
+        use sqlparser::dialect::PostgreSqlDialect;
+
+        use super::*;
+        use crate::traits::{ColumnLike, IndexLike, PolicyLike};
+
+        fn parse(sql: &str) -> ParserDB {
+            ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse")
+        }
+
+        fn primary_key(db: &ParserDB, table_name: &str) -> Vec<String> {
+            db.table(None, table_name)
+                .expect("table")
+                .primary_key_columns(db)
+                .expect("pk columns")
+                .map(|column| column.column_name().to_string())
+                .collect()
+        }
+
+        fn unique_index_count(db: &ParserDB, table_name: &str) -> usize {
+            db.table(None, table_name)
+                .expect("table")
+                .unique_indices(db)
+                .expect("unique indices")
+                .count()
+        }
+
+        fn foreign_key_count(db: &ParserDB, table_name: &str) -> usize {
+            db.table(None, table_name)
+                .expect("table")
+                .foreign_keys(db)
+                .expect("foreign keys")
+                .count()
+        }
+
+        #[test]
+        fn added_primary_key_answers_as_the_inline_one() {
+            let inline = parse("CREATE TABLE t (id uuid PRIMARY KEY, o uuid);");
+            let altered = parse(
+                "CREATE TABLE t (id uuid NOT NULL, o uuid);
+                 ALTER TABLE ONLY t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
+            );
+
+            assert_eq!(primary_key(&inline, "t"), primary_key(&altered, "t"));
+            assert_eq!(primary_key(&altered, "t"), vec!["id".to_string()]);
+            assert_eq!(unique_index_count(&inline, "t"), unique_index_count(&altered, "t"));
+            assert_eq!(unique_index_count(&altered, "t"), 1);
+        }
+
+        #[test]
+        fn unnamed_added_primary_key_is_applied() {
+            let db = parse(
+                "CREATE TABLE t (id uuid NOT NULL);
+                 ALTER TABLE t ADD PRIMARY KEY (id);",
+            );
+            assert_eq!(primary_key(&db, "t"), vec!["id".to_string()]);
+        }
+
+        #[test]
+        fn added_unique_constraint_registers_a_unique_index() {
+            let db = parse(
+                "CREATE TABLE t (id uuid NOT NULL);
+                 ALTER TABLE ONLY t ADD CONSTRAINT t_id_key UNIQUE (id);",
+            );
+            assert_eq!(unique_index_count(&db, "t"), 1);
+            assert!(primary_key(&db, "t").is_empty(), "UNIQUE alone is not a primary key");
+        }
+
+        #[test]
+        fn schema_qualified_alter_table_applies_the_constraint() {
+            let db = parse(
+                "CREATE TABLE public.t (id uuid NOT NULL);
+                 ALTER TABLE ONLY public.t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
+            );
+            let table = db.table(Some("public"), "t").expect("table");
+            let pk: Vec<&str> = table
+                .primary_key_columns(&db)
+                .expect("pk columns")
+                .map(ColumnLike::column_name)
+                .collect();
+            assert_eq!(pk, vec!["id"]);
+        }
+
+        #[test]
+        fn added_foreign_key_resolves_a_later_declared_target() {
+            let db = parse(
+                "CREATE TABLE t (id uuid NOT NULL, o uuid);
+                 CREATE TABLE u (id uuid NOT NULL);
+                 ALTER TABLE ONLY t ADD CONSTRAINT t_o_fkey FOREIGN KEY (o) REFERENCES u(id);",
+            );
+            assert_eq!(foreign_key_count(&db, "t"), 1);
+            assert!(db.validate_foreign_key_targets().is_ok());
+        }
+
+        #[test]
+        fn added_check_constraint_is_registered() {
+            let db = parse(
+                "CREATE TABLE t (id INT NOT NULL);
+                 ALTER TABLE t ADD CONSTRAINT t_id_positive CHECK (id > 0);",
+            );
+            let table = db.table(None, "t").expect("table");
+            assert_eq!(table.check_constraints(&db).expect("check constraints").count(), 1);
+        }
+
+        #[test]
+        fn altering_constraints_preserves_the_rest_of_the_table() {
+            let db = parse(
+                "CREATE TABLE t (id uuid NOT NULL, o uuid);
+                 CREATE INDEX t_o_idx ON t (o);
+                 ALTER TABLE t ENABLE ROW LEVEL SECURITY;
+                 ALTER TABLE t FORCE ROW LEVEL SECURITY;
+                 CREATE POLICY t_all ON t USING (true);
+                 ALTER TABLE ONLY t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
+            );
+            let table = db.table(None, "t").expect("table");
+
+            assert!(table.has_row_level_security(&db).expect("rls"));
+            assert!(table.has_forced_row_level_security(&db).expect("forced rls"));
+
+            let columns: Vec<&str> =
+                table.columns(&db).expect("columns").map(ColumnLike::column_name).collect();
+            assert_eq!(columns, vec!["id", "o"]);
+            for column in table.columns(&db).expect("columns") {
+                assert!(
+                    db.column_metadata(column).is_some(),
+                    "re-seated columns must stay findable in the database"
+                );
+            }
+
+            let indices: Vec<_> = table.indices(&db).expect("indices").collect();
+            assert_eq!(indices.len(), 1);
+            for index in indices {
+                assert_eq!(index.name().map(last_str), Some("t_o_idx"));
+                assert!(
+                    db.index_metadata(index).is_some(),
+                    "re-seated indexes must stay findable in the database"
+                );
+            }
+            for unique_index in table.unique_indices(&db).expect("unique indices") {
+                assert!(
+                    db.unique_index_metadata(unique_index).is_some(),
+                    "unique indexes must stay findable in the database"
+                );
+            }
+
+            let policy = db.policies().next().expect("policy");
+            assert_eq!(
+                PolicyLike::table(policy, &db).expect("policy table").table_name(),
+                "t",
+                "a policy must still resolve the table it guards"
+            );
+        }
+
+        #[test]
+        fn dropping_a_constraint_undoes_it() {
+            let db = parse(
+                "CREATE TABLE u (id uuid NOT NULL, PRIMARY KEY (id));
+                 CREATE TABLE t (id uuid NOT NULL, o uuid);
+                 ALTER TABLE t ADD CONSTRAINT t_pkey PRIMARY KEY (id);
+                 ALTER TABLE t ADD CONSTRAINT t_o_key UNIQUE (o);
+                 ALTER TABLE t ADD CONSTRAINT t_o_fkey FOREIGN KEY (o) REFERENCES u(id);
+                 ALTER TABLE t DROP CONSTRAINT t_o_fkey;
+                 ALTER TABLE t DROP CONSTRAINT t_o_key;",
+            );
+
+            assert_eq!(foreign_key_count(&db, "t"), 0);
+            assert_eq!(unique_index_count(&db, "t"), 1, "the primary key index survives");
+            assert_eq!(primary_key(&db, "t"), vec!["id".to_string()]);
+
+            let dropped_pk = parse(
+                "CREATE TABLE t (id uuid NOT NULL);
+                 ALTER TABLE t ADD CONSTRAINT t_pkey PRIMARY KEY (id);
+                 ALTER TABLE t DROP CONSTRAINT t_pkey;",
+            );
+            assert!(primary_key(&dropped_pk, "t").is_empty());
+            assert_eq!(unique_index_count(&dropped_pk, "t"), 0);
+        }
+
+        #[test]
+        fn dropping_an_undeclared_constraint_is_reported() {
+            match ParserDB::parse::<PostgreSqlDialect>(
+                "CREATE TABLE t (id uuid NOT NULL);
+                 ALTER TABLE t DROP CONSTRAINT t_pkey;",
+            ) {
+                Err(Error::DropConstraintNotFound { table_name, constraint_name }) => {
+                    assert_eq!(table_name, "t");
+                    assert_eq!(constraint_name, "t_pkey");
+                }
+                other => panic!("expected DropConstraintNotFound, got {other:?}"),
+            }
+
+            let tolerated = parse(
+                "CREATE TABLE t (id uuid NOT NULL);
+                 ALTER TABLE t DROP CONSTRAINT IF EXISTS t_pkey;",
+            );
+            assert!(primary_key(&tolerated, "t").is_empty());
+        }
+
+        #[test]
+        fn altering_an_absent_table_is_reported() {
+            match ParserDB::parse::<PostgreSqlDialect>(
+                "ALTER TABLE ONLY t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
+            ) {
+                Err(Error::AlterTableNotFound { table_name }) => assert_eq!(table_name, "t"),
+                other => panic!("expected AlterTableNotFound, got {other:?}"),
+            }
+
+            let tolerated = ParserDB::parse::<PostgreSqlDialect>(
+                "ALTER TABLE IF EXISTS t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
+            )
+            .expect("IF EXISTS tolerates an absent table");
+            assert!(tolerated.table(None, "t").is_none());
+        }
+
+        #[test]
+        fn constraints_naming_an_undeclared_column_are_reported() {
+            for sql in [
+                "ALTER TABLE t ADD CONSTRAINT t_pkey PRIMARY KEY (missing);",
+                "ALTER TABLE t ADD CONSTRAINT t_key UNIQUE (missing);",
+            ] {
+                let sql = format!("CREATE TABLE t (id uuid NOT NULL);\n{sql}");
+                assert!(
+                    matches!(
+                        ParserDB::parse::<PostgreSqlDialect>(&sql),
+                        Err(Error::IdentifierLookupError(LookupError::ColumnNotFound {
+                            ref table_name,
+                            ref column_name,
+                        })) if table_name == "t" && column_name == "missing"
+                    ),
+                    "expected ColumnNotFound for `{sql}`"
+                );
+            }
+
+            assert!(matches!(
+                ParserDB::parse::<PostgreSqlDialect>(
+                    "CREATE TABLE u (id uuid NOT NULL);
+                     CREATE TABLE t (id uuid NOT NULL);
+                     ALTER TABLE t ADD CONSTRAINT t_fkey FOREIGN KEY (missing) REFERENCES u(id);",
+                ),
+                Err(Error::HostColumnNotFoundForForeignKey { .. })
+            ));
+
+            assert!(matches!(
+                ParserDB::parse::<PostgreSqlDialect>(
+                    "CREATE TABLE t (id uuid NOT NULL, o uuid);
+                     ALTER TABLE t ADD CONSTRAINT t_fkey FOREIGN KEY (o) REFERENCES u(id);",
+                ),
+                Err(Error::ReferencedTableNotFoundForForeignKey { .. })
+            ));
         }
     }
 }

@@ -349,6 +349,25 @@ pub enum Error {
         /// Name of the policy that was not found.
         policy_name: String,
     },
+    #[error("Table `{table_name}` not found for ALTER TABLE statement.")]
+    /// Error indicating that an ALTER TABLE statement references a table that
+    /// does not exist.
+    AlterTableNotFound {
+        /// Name of the table that was not found.
+        table_name: String,
+    },
+    #[error(
+        "Constraint `{constraint_name}` not found on table `{table_name}` for ALTER TABLE DROP CONSTRAINT statement."
+    )]
+    /// Error indicating that an `ALTER TABLE ... DROP CONSTRAINT` statement
+    /// names a constraint the table does not declare. Constraints declared
+    /// without a name have no name to drop them by.
+    DropConstraintNotFound {
+        /// Name of the table the constraint was looked up on.
+        table_name: String,
+        /// Name of the constraint that was not found.
+        constraint_name: String,
+    },
     #[error("Schema `{schema_name}` not found for ALTER SCHEMA statement.")]
     /// Error indicating that an ALTER SCHEMA statement references a schema
     /// that does not exist.
