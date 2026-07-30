@@ -1,15 +1,12 @@
 //! Submodule implementing the [`ColumnLike`] trait for `sqlparser`'s
 //! [`ColumnDef`] struct.
-#![allow(
-    clippy::expect_used,
-    reason = "trait receivers are obtained from this database, so their metadata is always present"
-)]
 
 use alloc::string::{String, ToString};
 
 use sqlparser::ast::{ColumnDef, CreateTable};
 
 use crate::{
+    errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableAttribute},
     traits::{ColumnLike, DatabaseLike, Metadata},
     utils::normalize_sqlparser_type,
@@ -35,15 +32,15 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
     }
 
     #[inline]
-    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db,
     {
-        database
+        Ok(database
             .table_metadata(self.table())
-            .expect("Table must exist in database")
+            .ok_or_else(|| ObjectKind::Table.not_in_database(&self.table().name.to_string()))?
             .table_doc()
-            .and_then(|d| d.column(self.column_name()).ok().and_then(|c| c.doc()))
+            .and_then(|d| d.column(self.column_name()).ok().and_then(|c| c.doc())))
     }
 
     #[inline]
@@ -57,13 +54,13 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
     }
 
     #[inline]
-    fn is_nullable(&self, database: &Self::DB) -> bool {
-        !self
+    fn is_nullable(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(!self
             .attribute()
             .options
             .iter()
             .any(|opt| matches!(opt.option, sqlparser::ast::ColumnOption::NotNull))
-            && !self.is_primary_key(database)
+            && !self.is_primary_key(database)?)
     }
 
     #[inline]
@@ -103,13 +100,13 @@ mod tests {
 
     fn bool_of(db: &ParserDB, col: &str) -> TypeMatch {
         let table = db.table(None, "t").expect("table t exists");
-        let column = table.column(col, db).expect("column exists");
+        let column = table.column(col, db).expect("column lookup").expect("column exists");
         db.dialect().is_bool(db, column)
     }
 
     fn uuid_of(db: &ParserDB, col: &str) -> TypeMatch {
         let table = db.table(None, "t").expect("table t exists");
-        let column = table.column(col, db).expect("column exists");
+        let column = table.column(col, db).expect("column lookup").expect("column exists");
         db.dialect().is_uuid(db, column)
     }
 

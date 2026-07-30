@@ -233,7 +233,7 @@ where
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
     /// let table = db.table(None, "t").unwrap();
-    /// let column = table.column("id", &db).unwrap();
+    /// let column = table.column("id", &db)?.unwrap();
     /// // The metadata for columns in ParserDB is currently unit ()
     /// assert_eq!(db.column_metadata(column), Some(&()));
     /// # Ok(())
@@ -257,7 +257,7 @@ where
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT UNIQUE);")?;
     /// let table = db.table(None, "t").unwrap();
-    /// let index = table.unique_indices(&db).next().unwrap();
+    /// let index = table.unique_indices(&db)?.next().unwrap();
     /// // The metadata for unique indices in ParserDB is currently unit ()
     /// // (actually it might be struct depending on impl, let's just check existence)
     /// assert!(db.unique_index_metadata(index).is_some());
@@ -282,7 +282,7 @@ where
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT CHECK (id > 0));")?;
     /// let table = db.table(None, "t").unwrap();
-    /// let check = table.check_constraints(&db).next().unwrap();
+    /// let check = table.check_constraints(&db)?.next().unwrap();
     /// assert!(db.check_constraint_metadata(check).is_some());
     /// # Ok(())
     /// # }
@@ -310,7 +310,7 @@ where
     ///     ",
     /// )?;
     /// let child = db.table(None, "child").unwrap();
-    /// let fk = child.foreign_keys(&db).next().unwrap();
+    /// let fk = child.foreign_keys(&db)?.next().unwrap();
     /// assert!(db.foreign_key_metadata(fk).is_some());
     /// # Ok(())
     /// # }
@@ -335,7 +335,7 @@ where
     ///     "CREATE TABLE t (id INT); CREATE INDEX my_idx ON t(id);",
     /// )?;
     /// let table = db.table(None, "t").unwrap();
-    /// let index = table.indices(&db).next().expect("index should exist");
+    /// let index = table.indices(&db)?.next().expect("index should exist");
     /// assert!(db.index_metadata(index).is_some());
     /// # Ok(())
     /// # }

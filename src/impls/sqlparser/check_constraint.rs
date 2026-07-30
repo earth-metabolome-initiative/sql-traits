@@ -1,18 +1,32 @@
 //! Implement the [`CheckConstraint`] trait for the `sqlparser` crate's
-#![allow(
-    clippy::expect_used,
-    reason = "trait receivers are obtained from this database, so their metadata is always present"
-)]
+//! [`TableAttribute`] wrapper.
 
 use sqlparser::ast::{CheckConstraint, CreateTable, Expr};
 
 use crate::{
+    errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableAttribute, metadata::CheckMetadata},
-    traits::{CheckConstraintLike, DatabaseLike, Metadata},
+    traits::{CheckConstraintLike, DatabaseLike, Metadata, TableLike},
 };
 
 impl Metadata for TableAttribute<CreateTable, CheckConstraint> {
     type Meta = CheckMetadata<Self>;
+}
+
+/// Resolves the metadata `database` holds for `constraint`.
+fn check_constraint_metadata<'db>(
+    constraint: &TableAttribute<CreateTable, CheckConstraint>,
+    database: &'db ParserDB,
+) -> Result<&'db CheckMetadata<TableAttribute<CreateTable, CheckConstraint>>, LookupError> {
+    database.check_constraint_metadata(constraint).ok_or_else(|| {
+        match constraint.attribute().name.as_ref() {
+            Some(name) => ObjectKind::CheckConstraint.not_in_database(&name.value),
+            None => {
+                ObjectKind::CheckConstraint
+                    .anonymous_not_in_database(constraint.table().table_name())
+            }
+        }
+    })
 }
 
 impl CheckConstraintLike for TableAttribute<CreateTable, CheckConstraint> {
@@ -24,32 +38,27 @@ impl CheckConstraintLike for TableAttribute<CreateTable, CheckConstraint> {
     }
 
     #[inline]
-    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table {
-        database
-            .check_constraint_metadata(self)
-            .expect("Check constraint must exist in database")
-            .table()
+    fn table<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError> {
+        Ok(check_constraint_metadata(self, database)?.table())
     }
 
     #[inline]
     fn columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as crate::prelude::DatabaseLike>::Column> {
-        database
-            .check_constraint_metadata(self)
-            .expect("Check constraint must exist in database")
-            .columns()
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError> {
+        Ok(check_constraint_metadata(self, database)?.columns())
     }
 
     #[inline]
     fn functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as crate::prelude::DatabaseLike>::Function> {
-        database
-            .check_constraint_metadata(self)
-            .expect("Check constraint must exist in database")
-            .functions()
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function> + 'db, LookupError>
+    {
+        Ok(check_constraint_metadata(self, database)?.functions())
     }
 }

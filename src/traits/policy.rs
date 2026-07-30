@@ -40,7 +40,7 @@ pub trait PolicyLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let policy = table.policies(&db).next().unwrap();
+    /// let policy = table.policies(&db)?.next().unwrap();
     /// assert_eq!(policy.name(), "my_policy");
     /// # Ok(())
     /// # }
@@ -74,7 +74,7 @@ pub trait PolicyLike:
     /// ",
     /// )?;
     /// let table = db.table(Some("app"), "\"MyTable\"").unwrap();
-    /// let policy = table.policies(&db).next().unwrap();
+    /// let policy = table.policies(&db)?.next().unwrap();
     /// assert_eq!(policy.table(&db)?, table);
     /// # Ok(())
     /// # }
@@ -122,10 +122,10 @@ pub trait PolicyLike:
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
-    /// let select_policy = table.policies(&db).find(|p| p.name() == "select_policy").unwrap();
+    /// let select_policy = table.policies(&db)?.find(|p| p.name() == "select_policy").unwrap();
     /// assert_eq!(select_policy.command(), CreatePolicyCommand::Select);
     ///
-    /// let all_policy = table.policies(&db).find(|p| p.name() == "all_policy").unwrap();
+    /// let all_policy = table.policies(&db)?.find(|p| p.name() == "all_policy").unwrap();
     /// assert_eq!(all_policy.command(), CreatePolicyCommand::All);
     /// # Ok(())
     /// # }
@@ -157,14 +157,14 @@ pub trait PolicyLike:
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
-    /// let policy = table.policies(&db).find(|p| p.name() == "restrictive_policy").unwrap();
+    /// let policy = table.policies(&db)?.find(|p| p.name() == "restrictive_policy").unwrap();
     /// assert_eq!(policy.policy_type(), CreatePolicyType::Restrictive);
     ///
-    /// let policy = table.policies(&db).find(|p| p.name() == "permissive_policy").unwrap();
+    /// let policy = table.policies(&db)?.find(|p| p.name() == "permissive_policy").unwrap();
     /// assert_eq!(policy.policy_type(), CreatePolicyType::Permissive);
     ///
     /// // The modifier is optional, and PostgreSQL defaults to permissive.
-    /// let policy = table.policies(&db).find(|p| p.name() == "implicit_policy").unwrap();
+    /// let policy = table.policies(&db)?.find(|p| p.name() == "implicit_policy").unwrap();
     /// assert_eq!(policy.policy_type(), CreatePolicyType::Permissive);
     /// # Ok(())
     /// # }
@@ -188,11 +188,11 @@ pub trait PolicyLike:
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
     /// let table = db.table(None, "my_table").unwrap();
     ///
-    /// let policy = table.policies(&db).find(|p| p.name() == "my_policy").unwrap();
+    /// let policy = table.policies(&db)?.find(|p| p.name() == "my_policy").unwrap();
     /// // Logic to verify roles (roles() returns iterator)
     /// assert_eq!(policy.roles(&db).count(), 2);
     ///
-    /// let public_policy = table.policies(&db).find(|p| p.name() == "public_policy").unwrap();
+    /// let public_policy = table.policies(&db)?.find(|p| p.name() == "public_policy").unwrap();
     /// assert_eq!(public_policy.roles(&db).count(), 1);
     /// # Ok(())
     /// # }
@@ -216,7 +216,7 @@ pub trait PolicyLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let policy = table.policies(&db).next().unwrap();
+    /// let policy = table.policies(&db)?.next().unwrap();
     /// assert!(policy.using_expression(&db).is_some());
     /// # Ok(())
     /// # }
@@ -226,6 +226,11 @@ pub trait PolicyLike:
         Self: 'db;
 
     /// Returns the functions used in the `USING` expression.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this policy.
     ///
     /// # Example
     ///
@@ -241,8 +246,8 @@ pub trait PolicyLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let policy = table.policies(&db).next().unwrap();
-    /// let functions: Vec<_> = policy.using_functions(&db).collect();
+    /// let policy = table.policies(&db)?.next().unwrap();
+    /// let functions: Vec<_> = policy.using_functions(&db)?.collect();
     /// assert_eq!(functions.len(), 1);
     /// assert_eq!(functions[0].name(), "my_func");
     /// # Ok(())
@@ -251,7 +256,7 @@ pub trait PolicyLike:
     fn using_functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>;
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>, LookupError>;
 
     /// Returns the `WITH CHECK` expression of the policy, if any.
     ///
@@ -268,7 +273,7 @@ pub trait PolicyLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let policy = table.policies(&db).next().unwrap();
+    /// let policy = table.policies(&db)?.next().unwrap();
     /// assert!(policy.check_expression(&db).is_some());
     /// # Ok(())
     /// # }
@@ -278,6 +283,11 @@ pub trait PolicyLike:
         Self: 'db;
 
     /// Returns the functions used in the `WITH CHECK` expression.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this policy.
     ///
     /// # Example
     ///
@@ -293,8 +303,8 @@ pub trait PolicyLike:
     /// ",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let policy = table.policies(&db).next().unwrap();
-    /// let functions: Vec<_> = policy.check_functions(&db).collect();
+    /// let policy = table.policies(&db)?.next().unwrap();
+    /// let functions: Vec<_> = policy.check_functions(&db)?.collect();
     /// assert_eq!(functions.len(), 1);
     /// assert_eq!(functions[0].name(), "check_func");
     /// # Ok(())
@@ -303,7 +313,7 @@ pub trait PolicyLike:
     fn check_functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>;
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>, LookupError>;
 }
 
 impl<T: PolicyLike> PolicyLike for &T
@@ -351,7 +361,7 @@ where
     fn using_functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function> {
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>, LookupError> {
         (*self).using_functions(database)
     }
 
@@ -365,7 +375,7 @@ where
     fn check_functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function> {
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>, LookupError> {
         (*self).check_functions(database)
     }
 }
@@ -397,7 +407,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let table = db.table(None, "my_table").expect("Table not found");
-        let policy = table.policies(&db).next().expect("Policy not found");
+        let policy = table.policies(&db).expect("policies").next().expect("Policy not found");
 
         // Use reference to policy
         let policy_ref = &policy;
@@ -420,7 +430,8 @@ mod tests {
         assert!(using_str.contains("id > 0"));
         assert!(using_str.contains("my_func()"));
 
-        let using_funcs: Vec<_> = policy_ref.using_functions(&db).collect();
+        let using_funcs: Vec<_> =
+            policy_ref.using_functions(&db).expect("using_functions").collect();
         assert_eq!(using_funcs.len(), 1);
         assert_eq!(using_funcs[0].name(), "my_func");
 
@@ -430,7 +441,8 @@ mod tests {
         assert!(check_str.contains("id < 10"));
         assert!(check_str.contains("check_func()"));
 
-        let check_funcs: Vec<_> = policy_ref.check_functions(&db).collect();
+        let check_funcs: Vec<_> =
+            policy_ref.check_functions(&db).expect("check_functions").collect();
         assert_eq!(check_funcs.len(), 1);
         assert_eq!(check_funcs[0].name(), "check_func");
     }
@@ -449,6 +461,7 @@ mod tests {
         let policy_type = |name: &str| {
             table
                 .policies(&db)
+                .expect("policies")
                 .find(|policy| policy.name() == name)
                 .expect("Policy not found")
                 .policy_type()
@@ -468,7 +481,7 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let table = db.table(None, "my_table").expect("Table not found");
-        let policies: Vec<_> = table.policies(&db).collect();
+        let policies: Vec<_> = table.policies(&db).expect("policies").collect();
 
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0].name(), "new_policy");
@@ -502,7 +515,7 @@ mod tests {
 
         assert_eq!(table.table_name(), "docs");
         assert_eq!(table.table_schema(), Some("app"));
-        assert_eq!(table.policies(&db).count(), 1);
+        assert_eq!(table.policies(&db).expect("policies").count(), 1);
     }
 
     #[test]
@@ -517,7 +530,7 @@ mod tests {
 
         assert_eq!(table.table_name(), "MyTable");
         assert_eq!(table.table_schema(), None);
-        assert_eq!(table.policies(&db).count(), 1);
+        assert_eq!(table.policies(&db).expect("policies").count(), 1);
     }
 
     #[test]

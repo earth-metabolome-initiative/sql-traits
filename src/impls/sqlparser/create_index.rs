@@ -1,14 +1,13 @@
 //! Implement the `IndexLike` trait for `sqlparser`'s `CreateIndex`.
-#![allow(
-    clippy::expect_used,
-    reason = "trait receivers are obtained from this database, so their metadata is always present"
-)]
+
+use alloc::string::ToString;
 
 use sqlparser::ast::{CreateIndex, CreateTable, Expr};
 
 use crate::{
+    errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableAttribute, metadata::IndexMetadata},
-    traits::{DatabaseLike, IndexLike, Metadata},
+    traits::{DatabaseLike, IndexLike, Metadata, TableLike},
 };
 
 impl Metadata for TableAttribute<CreateTable, CreateIndex> {
@@ -32,10 +31,18 @@ impl IndexLike for TableAttribute<CreateTable, CreateIndex> {
     }
 
     #[inline]
-    fn expression<'db>(&'db self, database: &'db Self::DB) -> &'db Expr
+    fn expression<'db>(&'db self, database: &'db Self::DB) -> Result<&'db Expr, LookupError>
     where
         Self: 'db,
     {
-        database.index_metadata(self).expect("Index must exist in database").expression()
+        Ok(database
+            .index_metadata(self)
+            .ok_or_else(|| {
+                match self.attribute().name.as_ref() {
+                    Some(name) => ObjectKind::Index.not_in_database(&name.to_string()),
+                    None => ObjectKind::Index.anonymous_not_in_database(self.table().table_name()),
+                }
+            })?
+            .expression())
     }
 }

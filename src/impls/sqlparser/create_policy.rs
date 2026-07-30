@@ -1,13 +1,9 @@
-#![allow(
-    clippy::expect_used,
-    reason = "policy metadata is always present for policies obtained from this database"
-)]
 //! Implementation of the `PolicyLike` trait for `CreatePolicy` struct.
 
 use sqlparser::ast::{CreatePolicy, CreatePolicyCommand, CreatePolicyType, Expr, Owner};
 
 use crate::{
-    errors::LookupError,
+    errors::{LookupError, ObjectKind},
     structs::{ParserDB, metadata::PolicyMetadata},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, PolicyLike},
     utils::object_name::resolve_required_table,
@@ -19,6 +15,16 @@ impl Metadata for CreatePolicy {
 
 impl DocumentationMetadata for CreatePolicy {
     type Documentation = ();
+}
+
+/// Resolves the metadata `database` holds for `policy`.
+fn policy_metadata<'db>(
+    policy: &CreatePolicy,
+    database: &'db ParserDB,
+) -> Result<&'db PolicyMetadata<CreatePolicy>, LookupError> {
+    database
+        .policy_metadata(policy)
+        .ok_or_else(|| ObjectKind::Policy.not_in_database(&policy.name.value))
 }
 
 impl PolicyLike for CreatePolicy {
@@ -63,8 +69,8 @@ impl PolicyLike for CreatePolicy {
     fn using_functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function> {
-        database.policy_metadata(self).expect("Policy must exist in database").using_functions()
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>, LookupError> {
+        Ok(policy_metadata(self, database)?.using_functions())
     }
 
     fn check_expression<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db Expr>
@@ -77,7 +83,7 @@ impl PolicyLike for CreatePolicy {
     fn check_functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function> {
-        database.policy_metadata(self).expect("Policy must exist in database").check_functions()
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function>, LookupError> {
+        Ok(policy_metadata(self, database)?.check_functions())
     }
 }

@@ -1,14 +1,13 @@
 //! Submodule implementing the [`TableLike`] trait for `sqlparser`'s
 //! [`CreateTable`] struct.
-#![allow(
-    clippy::expect_used,
-    reason = "trait receivers are obtained from this database, so their metadata is always present"
-)]
+
+use alloc::string::ToString;
 
 use ::sqlparser::ast::{CreateTable, Ident, ObjectNamePart};
 use sql_docs::docs::TableDoc;
 
 use crate::{
+    errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableMetadata},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, TableLike},
     utils::last_str,
@@ -20,6 +19,20 @@ impl Metadata for CreateTable {
 
 impl DocumentationMetadata for CreateTable {
     type Documentation = TableDoc;
+}
+
+/// Resolves the metadata `database` holds for `table`.
+///
+/// A [`CreateTable`] node and a [`ParserDB`] are independent values, so a node
+/// the database does not hold (renamed away, dropped, or parsed from different
+/// input) has no metadata to report.
+fn table_metadata<'db>(
+    table: &CreateTable,
+    database: &'db ParserDB,
+) -> Result<&'db TableMetadata<CreateTable>, LookupError> {
+    database
+        .table_metadata(table)
+        .ok_or_else(|| ObjectKind::Table.not_in_database(&table.name.to_string()))
 }
 
 impl TableLike for CreateTable {
@@ -38,15 +51,11 @@ impl TableLike for CreateTable {
     }
 
     #[inline]
-    fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn table_doc<'db>(&'db self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db,
     {
-        database
-            .table_metadata(self)
-            .expect("Table must exist in database")
-            .table_doc()
-            .and_then(|d| d.doc())
+        Ok(table_metadata(self, database)?.table_doc().and_then(|d| d.doc()))
     }
 
     #[inline]
@@ -80,71 +89,71 @@ impl TableLike for CreateTable {
     fn columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
-        database.table_metadata(self).expect("Table must exist in database").columns()
+        Ok(table_metadata(self, database)?.columns())
     }
 
     fn primary_key_columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
-        database.table_metadata(self).expect("Table must exist in database").primary_key_columns()
+        Ok(table_metadata(self, database)?.primary_key_columns())
     }
 
     fn unique_indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>, LookupError>
     where
         Self: 'db,
     {
-        database.table_metadata(self).expect("Table must exist in database").unique_indices()
+        Ok(table_metadata(self, database)?.unique_indices())
     }
 
     fn indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>, LookupError>
     where
         Self: 'db,
     {
-        database.table_metadata(self).expect("Table must exist in database").indices()
+        Ok(table_metadata(self, database)?.indices())
     }
 
     fn check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint>, LookupError>
     where
         Self: 'db,
     {
-        database.table_metadata(self).expect("Table must exist in database").check_constraints()
+        Ok(table_metadata(self, database)?.check_constraints())
     }
 
     fn foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        database.table_metadata(self).expect("Table must exist in database").foreign_keys()
+        Ok(table_metadata(self, database)?.foreign_keys())
     }
 
     #[inline]
-    fn has_row_level_security(&self, database: &Self::DB) -> bool {
-        database.table_metadata(self).expect("Table must exist in database").rls_enabled()
+    fn has_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(table_metadata(self, database)?.rls_enabled())
     }
 
     #[inline]
-    fn has_forced_row_level_security(&self, database: &Self::DB) -> bool {
-        database.table_metadata(self).expect("Table must exist in database").rls_forced()
+    fn has_forced_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(table_metadata(self, database)?.rls_forced())
     }
 }
 

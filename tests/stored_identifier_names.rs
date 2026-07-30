@@ -24,8 +24,11 @@ fn unquoted_identifiers_fold_to_lowercase() {
     assert_eq!(table.stored_table_name(), "docs");
     assert_eq!(table.stored_table_schema().as_deref(), Some("my_schema"));
 
-    let stored: Vec<_> =
-        table.columns(&db).map(|column| column.stored_column_name().into_owned()).collect();
+    let stored: Vec<_> = table
+        .columns(&db)
+        .expect("columns succeeds")
+        .map(|column| column.stored_column_name().into_owned())
+        .collect();
     assert_eq!(stored, vec!["id", "owner_id", "Mixed_Case"]);
 }
 

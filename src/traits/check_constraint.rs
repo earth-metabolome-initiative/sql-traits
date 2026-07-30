@@ -11,18 +11,15 @@ use sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Value,
 };
 
-use crate::traits::{
-    DatabaseLike, Metadata, TableLike, column::ColumnLike, function_like::FunctionLike,
+use crate::{
+    errors::LookupError,
+    traits::{DatabaseLike, Metadata, TableLike, column::ColumnLike, function_like::FunctionLike},
 };
 
 /// Helper function to determine if an expression evaluates to a constant
 /// boolean value. Returns `Some(true)` if always true, `Some(false)` if always
 /// false, and `None` otherwise.
-fn evaluate_constant_expr<DB: DatabaseLike>(
-    database: &DB,
-    columns: &[&<DB as DatabaseLike>::Column],
-    expr: &Expr,
-) -> Option<bool> {
+fn evaluate_constant_expr<C: ColumnLike>(columns: &[(&C, bool)], expr: &Expr) -> Option<bool> {
     match expr {
         // Literal true/false
         Expr::Value(value_with_span) => {
@@ -36,11 +33,11 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
         Expr::IsNotNull(col_expr) => {
             // Check if the column is declared NOT NULL in the table schema
             if let Expr::Identifier(ident) = col_expr.as_ref() {
-                for column in columns {
+                for (column, is_nullable) in columns {
                     if column.column_name() == ident.value {
                         // If column is NOT NULL, IS NOT NULL is TRUE.
                         // If column is NULLABLE, IS NOT NULL is variable (None).
-                        return if column.is_nullable(database) { None } else { Some(true) };
+                        return if *is_nullable { None } else { Some(true) };
                     }
                 }
                 None
@@ -52,11 +49,11 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
         Expr::IsNull(col_expr) => {
             // Check if the column is declared NOT NULL in the table schema
             if let Expr::Identifier(ident) = col_expr.as_ref() {
-                for column in columns {
+                for (column, is_nullable) in columns {
                     if column.column_name() == ident.value {
                         // If column is NOT NULL, IS NULL is FALSE.
                         // If column is NULLABLE, IS NULL is variable (None).
-                        return if column.is_nullable(database) { None } else { Some(false) };
+                        return if *is_nullable { None } else { Some(false) };
                     }
                 }
                 None
@@ -66,7 +63,7 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
         }
 
         // Nested expressions
-        Expr::Nested(inner) => evaluate_constant_expr(database, columns, inner),
+        Expr::Nested(inner) => evaluate_constant_expr(columns, inner),
 
         // Binary operations
         Expr::BinaryOp { left, op, right } => {
@@ -97,8 +94,8 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
             // Recursively check if both sides are tautological for AND
             if matches!(op, BinaryOperator::And) {
                 return match (
-                    evaluate_constant_expr(database, columns, left),
-                    evaluate_constant_expr(database, columns, right),
+                    evaluate_constant_expr(columns, left),
+                    evaluate_constant_expr(columns, right),
                 ) {
                     (Some(true), Some(true)) => Some(true),
                     (Some(false), _) | (_, Some(false)) => Some(false),
@@ -109,8 +106,8 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
             // Recursively check if either side is tautological for OR
             if matches!(op, BinaryOperator::Or) {
                 return match (
-                    evaluate_constant_expr(database, columns, left),
-                    evaluate_constant_expr(database, columns, right),
+                    evaluate_constant_expr(columns, left),
+                    evaluate_constant_expr(columns, right),
                 ) {
                     (Some(true), _) | (_, Some(true)) => Some(true),
                     (Some(false), Some(false)) => Some(false),
@@ -123,7 +120,7 @@ fn evaluate_constant_expr<DB: DatabaseLike>(
 
         // NOT false is true, NOT true is false
         Expr::UnaryOp { op: sqlparser::ast::UnaryOperator::Not, expr } => {
-            match evaluate_constant_expr(database, columns, expr) {
+            match evaluate_constant_expr(columns, expr) {
                 Some(true) => Some(false),
                 Some(false) => Some(true),
                 None => None,
@@ -189,7 +186,7 @@ fn resolve_global_bound<C>(
     target_col: &str,
     visited_cols: &mut Vec<String>,
     direction: BoundDirection,
-) -> Option<usize>
+) -> Result<Option<usize>, LookupError>
 where
     C: CheckConstraintLike,
 {
@@ -197,7 +194,7 @@ where
 
     let mut bound_agg = None;
 
-    for constraint in table.check_constraints(database) {
+    for constraint in table.check_constraints(database)? {
         let cc: &C = constraint.borrow();
         let expr = cc.expression(database);
         if let Some(bound) = check_text_length_bound_recursive(
@@ -207,7 +204,7 @@ where
             Some(target_col),
             visited_cols,
             direction,
-        ) {
+        )? {
             bound_agg = match (bound_agg, direction) {
                 (Some(current), BoundDirection::Upper) => Some(core::cmp::min(current, bound)),
                 (Some(current), BoundDirection::Lower) => Some(core::cmp::max(current, bound)),
@@ -217,7 +214,7 @@ where
     }
 
     visited_cols.pop();
-    bound_agg
+    Ok(bound_agg)
 }
 
 /// Helper to extract length limit from an expression
@@ -231,7 +228,7 @@ fn get_length_bound<C>(
     target_col: Option<&str>,
     visited_cols: &mut Vec<String>,
     direction: BoundDirection,
-) -> Option<usize>
+) -> Result<Option<usize>, LookupError>
 where
     C: CheckConstraintLike,
 {
@@ -241,41 +238,41 @@ where
         | (BoundDirection::Lower, BinaryOperator::Gt) => false,
         (BoundDirection::Upper, BinaryOperator::LtEq)
         | (BoundDirection::Lower, BinaryOperator::GtEq) => true,
-        _ => return None,
+        _ => return Ok(None),
     };
 
     // Parse Left Side: Function(col_ident)
     let Expr::Function(Function { name, args, .. }) = func_expr else {
-        return None;
+        return Ok(None);
     };
 
     let name_str = name.to_string();
     let valid_funcs = ["length", "len", "char_length", "character_length", "octet_length"];
     if !valid_funcs.iter().any(|&f| name_str.eq_ignore_ascii_case(f)) {
-        return None;
+        return Ok(None);
     }
 
     let args_list = match args {
         FunctionArguments::List(list) => &list.args,
-        _ => return None,
+        _ => return Ok(None),
     };
     if args_list.len() != 1 {
-        return None;
+        return Ok(None);
     }
     let FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(col_ident))) = &args_list[0]
     else {
-        return None;
+        return Ok(None);
     };
 
     // Check if col_ident matches target_col if specified
     if target_col.is_some_and(|target| col_ident.value != target) {
-        return None;
+        return Ok(None);
     }
 
     // Verify it's a textual column
-    if !check_constraint.column(database, &col_ident.value).is_some_and(|c| c.is_textual(database))
+    if !check_constraint.column(database, &col_ident.value)?.is_some_and(|c| c.is_textual(database))
     {
-        return None;
+        return Ok(None);
     }
 
     // Check Right Side
@@ -284,10 +281,10 @@ where
         && let Value::Number(num_str, _) = &val.value
         && let Ok(limit) = num_str.parse::<usize>()
     {
-        return match direction {
+        return Ok(match direction {
             BoundDirection::Upper => Some(if is_inclusive { limit + 1 } else { limit }),
             BoundDirection::Lower => Some(if is_inclusive { limit } else { limit + 1 }),
-        };
+        });
     }
 
     // Case 2: Another Function Call (Transitive Check)
@@ -296,7 +293,7 @@ where
         if valid_funcs.iter().any(|&f| inner_name_str.eq_ignore_ascii_case(f)) {
             let inner_args_list = match inner_args {
                 FunctionArguments::List(list) => &list.args,
-                _ => return None,
+                _ => return Ok(None),
             };
             if inner_args_list.len() == 1
                 && let FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
@@ -309,27 +306,27 @@ where
 
                 // Avoid cycles
                 if visited_cols.contains(&inner_col_ident.value) {
-                    return None;
+                    return Ok(None);
                 }
 
-                let table = check_constraint.table(database);
+                let table = check_constraint.table(database)?;
                 if let Some(limit) = resolve_global_bound::<C>(
                     database,
                     table,
                     &inner_col_ident.value,
                     visited_cols,
                     direction,
-                ) {
-                    return match direction {
+                )? {
+                    return Ok(match direction {
                         BoundDirection::Upper => Some(if is_inclusive { limit + 1 } else { limit }),
                         BoundDirection::Lower => Some(if is_inclusive { limit } else { limit + 1 }),
-                    };
+                    });
                 }
             }
         }
     }
 
-    None
+    Ok(None)
 }
 
 /// Helper function to recursively determine the bound of a text length
@@ -341,7 +338,7 @@ fn check_text_length_bound_recursive<C>(
     target_col: Option<&str>,
     visited_cols: &mut Vec<String>,
     direction: BoundDirection,
-) -> Option<usize>
+) -> Result<Option<usize>, LookupError>
 where
     C: CheckConstraintLike,
 {
@@ -357,8 +354,8 @@ where
                 target_col,
                 visited_cols,
                 direction,
-            ) {
-                return Some(bound);
+            )? {
+                return Ok(Some(bound));
             }
             // Check reversed comparison: right <op> func(col)
             // If checking Upper Bound (func(col) < N), we might see N > func(col).
@@ -373,8 +370,8 @@ where
                 target_col,
                 visited_cols,
                 direction,
-            ) {
-                return Some(bound);
+            )? {
+                return Ok(Some(bound));
             }
 
             if matches!(op, BinaryOperator::And) {
@@ -385,7 +382,7 @@ where
                     target_col,
                     visited_cols,
                     direction,
-                );
+                )?;
                 let r = check_text_length_bound_recursive(
                     database,
                     right,
@@ -393,8 +390,8 @@ where
                     target_col,
                     visited_cols,
                     direction,
-                );
-                return match (l, r, direction) {
+                )?;
+                return Ok(match (l, r, direction) {
                     // AND + Upper: Minimize (most restrictive limit)
                     (Some(a), Some(b), BoundDirection::Upper) => Some(core::cmp::min(a, b)),
                     // AND + Lower: Maximize (most restrictive minimum)
@@ -402,7 +399,7 @@ where
                     (Some(a), None, _) => Some(a),
                     (None, Some(b), _) => Some(b),
                     _ => None,
-                };
+                });
             }
 
             if matches!(op, BinaryOperator::Or) {
@@ -413,7 +410,7 @@ where
                     target_col,
                     visited_cols,
                     direction,
-                );
+                )?;
                 let r = check_text_length_bound_recursive(
                     database,
                     right,
@@ -421,14 +418,14 @@ where
                     target_col,
                     visited_cols,
                     direction,
-                );
-                return match (l, r, direction) {
+                )?;
+                return Ok(match (l, r, direction) {
                     // OR + Lower: Minimize (least restrictive minimum)
                     (Some(a), Some(b), BoundDirection::Lower) => Some(core::cmp::min(a, b)),
                     _ => None,
-                };
+                });
             }
-            None
+            Ok(None)
         }
         Expr::Nested(inner) => {
             check_text_length_bound_recursive(
@@ -440,48 +437,48 @@ where
                 direction,
             )
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
 /// Helper function to recursively determine if an expression checks for a
 /// not-empty text constraint.
-fn check_not_empty_text_recursive<C>(database: &C::DB, expr: &Expr, check_constraint: &C) -> bool
+fn check_not_empty_text_recursive<C>(
+    database: &C::DB,
+    expr: &Expr,
+    check_constraint: &C,
+) -> Result<bool, LookupError>
 where
     C: CheckConstraintLike,
 {
     match expr {
         Expr::BinaryOp { left, op, right } => {
             if matches!(op, BinaryOperator::NotEq) {
-                let check_side = |col_expr: &Expr, val_expr: &Expr| -> bool {
+                for (col_expr, val_expr) in
+                    [(left.as_ref(), right.as_ref()), (right.as_ref(), left.as_ref())]
+                {
                     if let (Expr::Identifier(ident), Expr::Value(val_wrapper)) =
                         (col_expr, val_expr)
                         && let Value::SingleQuotedString(s) = &val_wrapper.value
                         && s.is_empty()
+                        && check_constraint
+                            .column(database, &ident.value)?
+                            .is_some_and(|c| c.is_textual(database))
                     {
-                        return check_constraint
-                            .column(database, &ident.value)
-                            .is_some_and(|c| c.is_textual(database));
+                        return Ok(true);
                     }
-                    false
-                };
-
-                if check_side(left.as_ref(), right.as_ref())
-                    || check_side(right.as_ref(), left.as_ref())
-                {
-                    return true;
                 }
             }
 
             if matches!(op, BinaryOperator::And) {
-                return check_not_empty_text_recursive(database, left, check_constraint)
-                    || check_not_empty_text_recursive(database, right, check_constraint);
+                return Ok(check_not_empty_text_recursive(database, left, check_constraint)?
+                    || check_not_empty_text_recursive(database, right, check_constraint)?);
             }
 
-            false
+            Ok(false)
         }
         Expr::Nested(inner) => check_not_empty_text_recursive(database, inner, check_constraint),
-        _ => false,
+        _ => Ok(false),
     }
 }
 
@@ -519,7 +516,7 @@ pub trait CheckConstraintLike:
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let check_constraints: Vec<_> =
-    ///     table.check_constraints(&db).map(|cc| cc.expression(&db).to_string()).collect();
+    ///     table.check_constraints(&db)?.map(|cc| cc.expression(&db).to_string()).collect();
     /// assert_eq!(check_constraints, vec!["id > 0", "length(name) > 0"]);
     /// # Ok(())
     /// # }
@@ -534,6 +531,11 @@ pub trait CheckConstraintLike:
     /// * `database` - A reference to the database instance to query the table
     ///   from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -542,14 +544,17 @@ pub trait CheckConstraintLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, CHECK (id > 0));")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let cc = check_constraints[0];
-    /// let table_ref = CheckConstraintLike::table(cc, &db);
+    /// let table_ref = CheckConstraintLike::table(cc, &db)?;
     /// assert_eq!(table_ref, table);
     /// # Ok(())
     /// # }
     /// ```
-    fn table<'db>(&'db self, database: &'db Self::DB) -> &'db <Self::DB as DatabaseLike>::Table;
+    fn table<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError>;
 
     /// Iterates over the columns involved in the check constraint.
     ///
@@ -557,6 +562,11 @@ pub trait CheckConstraintLike:
     ///
     /// * `database` - A reference to the database instance to query the columns
     ///   from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
     ///
     /// # Example
     ///
@@ -566,25 +576,25 @@ pub trait CheckConstraintLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, CHECK ((id, name) = (1, 'test')), CHECK (length(name) > 0), CHECK (id BETWEEN 1 AND 10), CHECK (id IS NOT NULL));")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let columns = table.columns(&db).collect::<Vec<_>>();
+    /// let columns = table.columns(&db)?.collect::<Vec<_>>();
     /// let [id, name] = &columns.as_slice() else {
     ///     panic!("Expected two columns");
     /// };
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4] = &check_constraints.as_slice() else {
     ///     panic!("Expected four check constraints");
     /// };
-    /// assert_eq!(cc1.columns(&db).collect::<Vec<_>>(), vec![*id, *name]);
-    /// assert_eq!(cc2.columns(&db).collect::<Vec<_>>(), vec![*name]);
-    /// assert_eq!(cc3.columns(&db).collect::<Vec<_>>(), vec![*id]);
-    /// assert_eq!(cc4.columns(&db).collect::<Vec<_>>(), vec![*id]);
+    /// assert_eq!(cc1.columns(&db)?.collect::<Vec<_>>(), vec![*id, *name]);
+    /// assert_eq!(cc2.columns(&db)?.collect::<Vec<_>>(), vec![*name]);
+    /// assert_eq!(cc3.columns(&db)?.collect::<Vec<_>>(), vec![*id]);
+    /// assert_eq!(cc4.columns(&db)?.collect::<Vec<_>>(), vec![*id]);
     /// # Ok(())
     /// # }
     /// ```
     fn columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>;
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>;
 
     /// Returns the number of columns involved in the check constraint.
     ///
@@ -592,6 +602,11 @@ pub trait CheckConstraintLike:
     ///
     /// * `database` - A reference to the database instance to query the columns
     ///   from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
     ///
     /// # Example
     ///
@@ -603,18 +618,18 @@ pub trait CheckConstraintLike:
     ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
     /// };
-    /// assert_eq!(cc1.number_of_columns(&db), 1);
-    /// assert_eq!(cc2.number_of_columns(&db), 1);
+    /// assert_eq!(cc1.number_of_columns(&db)?, 1);
+    /// assert_eq!(cc2.number_of_columns(&db)?, 1);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn number_of_columns(&self, database: &Self::DB) -> usize {
-        self.columns(database).count()
+    fn number_of_columns(&self, database: &Self::DB) -> Result<usize, LookupError> {
+        Ok(self.columns(database)?.count())
     }
 
     /// Returns a reference to the requested column by name, if any.
@@ -625,6 +640,11 @@ pub trait CheckConstraintLike:
     ///   from.
     /// * `name` - The name of the column to retrieve.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -636,17 +656,17 @@ pub trait CheckConstraintLike:
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
-    /// let columns = table.columns(&db).collect::<Vec<_>>();
+    /// let columns = table.columns(&db)?.collect::<Vec<_>>();
     /// let [id, name] = &columns.as_slice() else {
     ///     panic!("Expected two columns");
     /// };
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
     /// };
-    /// let col = cc1.column(&db, "id").unwrap();
+    /// let col = cc1.column(&db, "id")?.unwrap();
     /// assert_eq!(col, *id);
-    /// assert!(cc2.column(&db, "id").is_none());
+    /// assert!(cc2.column(&db, "id")?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -655,8 +675,8 @@ pub trait CheckConstraintLike:
         &'db self,
         database: &'db Self::DB,
         name: &str,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Column> {
-        self.columns(database).find(|c| c.column_name() == name)
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError> {
+        Ok(self.columns(database)?.find(|c| c.column_name() == name))
     }
 
     /// Iterates over the functions used in the check constraint.
@@ -665,6 +685,11 @@ pub trait CheckConstraintLike:
     ///
     /// * `database` - A reference to the database instance to query the
     ///   functions from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
     ///
     /// # Example
     ///
@@ -677,11 +702,11 @@ pub trait CheckConstraintLike:
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc] = &check_constraints.as_slice() else {
     ///     panic!("Expected one check constraint");
     /// };
-    /// let functions: Vec<_> = cc.functions(&db).collect();
+    /// let functions: Vec<_> = cc.functions(&db)?.collect();
     /// assert_eq!(functions.len(), 1);
     /// assert_eq!(functions[0].name(), "is_positive");
     /// # Ok(())
@@ -690,7 +715,7 @@ pub trait CheckConstraintLike:
     fn functions<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function> + 'db;
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Function> + 'db, LookupError>;
 
     /// Returns a reference to the requested function by name, if any.
     ///
@@ -700,6 +725,11 @@ pub trait CheckConstraintLike:
     ///   functions from.
     /// * `name` - The name of the function to retrieve.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -711,13 +741,13 @@ pub trait CheckConstraintLike:
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
     /// };
-    /// let func = cc1.function(&db, "is_positive").unwrap();
+    /// let func = cc1.function(&db, "is_positive")?.unwrap();
     /// assert_eq!(func.name(), "is_positive");
-    /// assert!(cc2.function(&db, "is_positive").is_none());
+    /// assert!(cc2.function(&db, "is_positive")?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -725,14 +755,14 @@ pub trait CheckConstraintLike:
         &'db self,
         database: &'db Self::DB,
         name: &str,
-    ) -> Option<&'db <Self::DB as DatabaseLike>::Function> {
-        self.functions(database).find(|f| {
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Function>, LookupError> {
+        Ok(self.functions(database)?.find(|f| {
             crate::utils::identifier_resolution::stored_identifier_matches_lookup(
                 f.name(),
                 f.name_is_quoted(),
                 name,
             )
-        })
+        }))
     }
 
     /// Returns whether the check constraint involves any functions.
@@ -742,6 +772,11 @@ pub trait CheckConstraintLike:
     /// * `database` - A reference to the database instance to query the
     ///   functions from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -753,18 +788,18 @@ pub trait CheckConstraintLike:
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
     /// };
-    /// assert!(cc1.has_functions(&db));
-    /// assert!(!cc2.has_functions(&db));
+    /// assert!(cc1.has_functions(&db)?);
+    /// assert!(!cc2.has_functions(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_functions(&self, database: &Self::DB) -> bool {
-        self.functions(database).next().is_some()
+    fn has_functions(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.functions(database)?.next().is_some())
     }
 
     /// Returns whether the check constraint involves a specific column.
@@ -774,6 +809,11 @@ pub trait CheckConstraintLike:
     /// * `database` - A reference to the database instance to query the table
     ///   from.
     /// * `column` - A reference to the column to check for involvement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
     ///
     /// # Example
     ///
@@ -785,18 +825,18 @@ pub trait CheckConstraintLike:
     ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let columns = table.columns(&db).collect::<Vec<_>>();
+    /// let columns = table.columns(&db)?.collect::<Vec<_>>();
     /// let [id, name] = &columns.as_slice() else {
     ///     panic!("Expected two columns");
     /// };
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
     /// };
-    /// assert!(cc1.involves_column(&db, id));
-    /// assert!(!cc1.involves_column(&db, name));
-    /// assert!(!cc2.involves_column(&db, id));
-    /// assert!(cc2.involves_column(&db, name));
+    /// assert!(cc1.involves_column(&db, id)?);
+    /// assert!(!cc1.involves_column(&db, name)?);
+    /// assert!(!cc2.involves_column(&db, id)?);
+    /// assert!(cc2.involves_column(&db, name)?);
     /// # Ok(())
     /// # }
     /// ```
@@ -804,8 +844,8 @@ pub trait CheckConstraintLike:
         &self,
         database: &Self::DB,
         column: &<Self::DB as DatabaseLike>::Column,
-    ) -> bool {
-        self.columns(database).any(|col| col == column)
+    ) -> Result<bool, LookupError> {
+        Ok(self.columns(database)?.any(|col| col == column))
     }
 
     /// Returns whether the check constraint is a tautology (always true).
@@ -824,6 +864,11 @@ pub trait CheckConstraintLike:
     /// - `CHECK (column IS NOT NULL)` for `NOT NULL` columns
     /// - `CHECK (column IS NULL OR column IS NOT NULL)` - always true for any
     ///   column
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
     ///
     /// # Example
     ///
@@ -845,31 +890,35 @@ pub trait CheckConstraintLike:
     ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7] = &check_constraints.as_slice() else {
     ///     panic!("Expected seven check constraints");
     /// };
-    /// assert!(cc1.is_tautology(&db)); // col1 IS NOT NULL on NOT NULL column
-    /// assert!(cc2.is_tautology(&db)); // TRUE
-    /// assert!(cc3.is_tautology(&db)); // 1 = 1
-    /// assert!(cc4.is_tautology(&db)); // NOT FALSE
-    /// assert!(!cc5.is_tautology(&db)); // col2 IS NOT NULL on nullable column
-    /// assert!(cc6.is_tautology(&db)); // IS NULL OR IS NOT NULL is always true
-    /// assert!(!cc7.is_tautology(&db)); // mixed columns
+    /// assert!(cc1.is_tautology(&db)?); // col1 IS NOT NULL on NOT NULL column
+    /// assert!(cc2.is_tautology(&db)?); // TRUE
+    /// assert!(cc3.is_tautology(&db)?); // 1 = 1
+    /// assert!(cc4.is_tautology(&db)?); // NOT FALSE
+    /// assert!(!cc5.is_tautology(&db)?); // col2 IS NOT NULL on nullable column
+    /// assert!(cc6.is_tautology(&db)?); // IS NULL OR IS NOT NULL is always true
+    /// assert!(!cc7.is_tautology(&db)?); // mixed columns
     /// //
     /// # Ok(())
     /// # }
     /// ```
-    fn is_tautology(&self, database: &Self::DB) -> bool {
-        let columns = self.columns(database).collect::<Vec<_>>();
+    fn is_tautology(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        let mut columns = Vec::new();
+        for column in self.columns(database)? {
+            let is_nullable = column.is_nullable(database)?;
+            columns.push((column, is_nullable));
+        }
         let expr = self.expression(database);
 
         // First check using expression analysis
-        if let Some(true) = evaluate_constant_expr(database, &columns, expr) {
-            return true;
+        if let Some(true) = evaluate_constant_expr(&columns, expr) {
+            return Ok(true);
         }
 
-        false
+        Ok(false)
     }
 
     /// Returns whether the check constraint is a negation (always false).
@@ -888,6 +937,11 @@ pub trait CheckConstraintLike:
     /// - `CHECK (column IS NULL)` for `NOT NULL` columns
     /// - `CHECK (len(col) < X AND len(col) > Y)` where X <= Y (contradictory
     ///   length constraints)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
     ///
     /// # Example
     ///
@@ -909,43 +963,47 @@ pub trait CheckConstraintLike:
     ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc_s1, cc_s2, cc1, cc2, cc3, cc4, cc5] = &check_constraints.as_slice() else {
     ///     panic!("Expected seven check constraints");
     /// };
-    /// assert!(cc_s1.is_negation(&db)); // len < 5 AND len > 10 is impossible
-    /// assert!(!cc_s2.is_negation(&db)); // len < 5 AND len > 2 is possible (3, 4)
-    /// assert!(cc1.is_negation(&db)); // col1 IS NULL on NOT NULL column
-    /// assert!(cc2.is_negation(&db)); // FALSE
-    /// assert!(cc3.is_negation(&db)); // 1 = 0
-    /// assert!(cc4.is_negation(&db)); // NOT TRUE
-    /// assert!(!cc5.is_negation(&db)); // col2 IS NULL on nullable column
+    /// assert!(cc_s1.is_negation(&db)?); // len < 5 AND len > 10 is impossible
+    /// assert!(!cc_s2.is_negation(&db)?); // len < 5 AND len > 2 is possible (3, 4)
+    /// assert!(cc1.is_negation(&db)?); // col1 IS NULL on NOT NULL column
+    /// assert!(cc2.is_negation(&db)?); // FALSE
+    /// assert!(cc3.is_negation(&db)?); // 1 = 0
+    /// assert!(cc4.is_negation(&db)?); // NOT TRUE
+    /// assert!(!cc5.is_negation(&db)?); // col2 IS NULL on nullable column
     /// //
     /// # Ok(())
     /// # }
     /// ```
-    fn is_negation(&self, database: &Self::DB) -> bool {
-        let columns = self.columns(database).collect::<Vec<_>>();
+    fn is_negation(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        let mut columns = Vec::new();
+        for column in self.columns(database)? {
+            let is_nullable = column.is_nullable(database)?;
+            columns.push((column, is_nullable));
+        }
         let expr = self.expression(database);
 
         // First check using expression analysis
-        if let Some(false) = evaluate_constant_expr(database, &columns, expr) {
-            return true;
+        if let Some(false) = evaluate_constant_expr(&columns, expr) {
+            return Ok(true);
         }
 
         // Check for contradicting length constraints
         if let (Some(upper), Some(lower)) = (
-            self.is_upper_bounded_text_constraint(database),
-            self.is_lower_bounded_text_constraint(database),
+            self.is_upper_bounded_text_constraint(database)?,
+            self.is_lower_bounded_text_constraint(database)?,
         ) {
             // upper is exclusive upper bound, lower is inclusive lower bound
             // if lower >= upper, then impossible
             if lower >= upper {
-                return true;
+                return Ok(true);
             }
         }
 
-        false
+        Ok(false)
     }
 
     /// Returns whether the check constraint is a mutual nullability constraint.
@@ -975,7 +1033,7 @@ pub trait CheckConstraintLike:
     ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6] = &check_constraints.as_slice() else {
     ///     panic!("Expected six check constraints");
     /// };
@@ -1021,6 +1079,11 @@ pub trait CheckConstraintLike:
     /// * `database` - A reference to the database instance to query the table
     ///   from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1037,19 +1100,19 @@ pub trait CheckConstraintLike:
     ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5] = &check_constraints.as_slice() else {
     ///     panic!("Expected five check constraints");
     /// };
-    /// assert!(cc1.is_not_empty_text_constraint(&db));
-    /// assert!(!cc2.is_not_empty_text_constraint(&db));
-    /// assert!(cc3.is_not_empty_text_constraint(&db));
-    /// assert!(cc4.is_not_empty_text_constraint(&db));
-    /// assert!(!cc5.is_not_empty_text_constraint(&db));
+    /// assert!(cc1.is_not_empty_text_constraint(&db)?);
+    /// assert!(!cc2.is_not_empty_text_constraint(&db)?);
+    /// assert!(cc3.is_not_empty_text_constraint(&db)?);
+    /// assert!(cc4.is_not_empty_text_constraint(&db)?);
+    /// assert!(!cc5.is_not_empty_text_constraint(&db)?);
     /// # Ok(())
     /// # }
     /// ```
-    fn is_not_empty_text_constraint(&self, database: &Self::DB) -> bool {
+    fn is_not_empty_text_constraint(&self, database: &Self::DB) -> Result<bool, LookupError> {
         let expr = self.expression(database);
         check_not_empty_text_recursive(database, expr, self)
     }
@@ -1066,6 +1129,11 @@ pub trait CheckConstraintLike:
     ///
     /// * `database` - A reference to the database instance to query the table
     ///   from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
     ///
     /// # Example
     ///
@@ -1091,27 +1159,30 @@ pub trait CheckConstraintLike:
     ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7, cc8, cc9, cc10, cc11, cc12, cc13] =
     ///     &check_constraints.as_slice()
     /// else {
     ///     panic!("Expected thirteen check constraints");
     /// };
-    /// assert_eq!(cc1.is_upper_bounded_text_constraint(&db), Some(10));
-    /// assert_eq!(cc2.is_upper_bounded_text_constraint(&db), Some(11));
-    /// assert_eq!(cc3.is_upper_bounded_text_constraint(&db), Some(10));
-    /// assert_eq!(cc4.is_upper_bounded_text_constraint(&db), Some(11));
-    /// assert_eq!(cc5.is_upper_bounded_text_constraint(&db), Some(5));
-    /// assert_eq!(cc6.is_upper_bounded_text_constraint(&db), None);
-    /// assert_eq!(cc7.is_upper_bounded_text_constraint(&db), Some(10));
-    /// assert_eq!(cc8.is_upper_bounded_text_constraint(&db), None);
-    /// assert_eq!(cc9.is_upper_bounded_text_constraint(&db), None);
-    /// assert_eq!(cc10.is_upper_bounded_text_constraint(&db), None);
-    /// assert_eq!(cc11.is_upper_bounded_text_constraint(&db), Some(10));
+    /// assert_eq!(cc1.is_upper_bounded_text_constraint(&db)?, Some(10));
+    /// assert_eq!(cc2.is_upper_bounded_text_constraint(&db)?, Some(11));
+    /// assert_eq!(cc3.is_upper_bounded_text_constraint(&db)?, Some(10));
+    /// assert_eq!(cc4.is_upper_bounded_text_constraint(&db)?, Some(11));
+    /// assert_eq!(cc5.is_upper_bounded_text_constraint(&db)?, Some(5));
+    /// assert_eq!(cc6.is_upper_bounded_text_constraint(&db)?, None);
+    /// assert_eq!(cc7.is_upper_bounded_text_constraint(&db)?, Some(10));
+    /// assert_eq!(cc8.is_upper_bounded_text_constraint(&db)?, None);
+    /// assert_eq!(cc9.is_upper_bounded_text_constraint(&db)?, None);
+    /// assert_eq!(cc10.is_upper_bounded_text_constraint(&db)?, None);
+    /// assert_eq!(cc11.is_upper_bounded_text_constraint(&db)?, Some(10));
     /// # Ok(())
     /// # }
     /// ```
-    fn is_upper_bounded_text_constraint(&self, database: &Self::DB) -> Option<usize> {
+    fn is_upper_bounded_text_constraint(
+        &self,
+        database: &Self::DB,
+    ) -> Result<Option<usize>, LookupError> {
         let expr = self.expression(database);
         let mut visited_cols = Vec::new();
         check_text_length_bound_recursive(
@@ -1137,6 +1208,11 @@ pub trait CheckConstraintLike:
     /// * `database` - A reference to the database instance to query the table
     ///   from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this check constraint.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1156,22 +1232,25 @@ pub trait CheckConstraintLike:
     ///     );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let check_constraints: Vec<_> = table.check_constraints(&db).collect();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7, cc8] = &check_constraints.as_slice() else {
     ///     panic!("Expected eight check constraints");
     /// };
-    /// assert_eq!(cc1.is_lower_bounded_text_constraint(&db), Some(11));
-    /// assert_eq!(cc2.is_lower_bounded_text_constraint(&db), Some(10));
-    /// assert_eq!(cc3.is_lower_bounded_text_constraint(&db), Some(11));
-    /// assert_eq!(cc4.is_lower_bounded_text_constraint(&db), Some(10));
-    /// assert_eq!(cc5.is_lower_bounded_text_constraint(&db), Some(11));
-    /// assert_eq!(cc6.is_lower_bounded_text_constraint(&db), None);
-    /// assert_eq!(cc7.is_lower_bounded_text_constraint(&db), Some(12));
-    /// assert_eq!(cc8.is_lower_bounded_text_constraint(&db), Some(6));
+    /// assert_eq!(cc1.is_lower_bounded_text_constraint(&db)?, Some(11));
+    /// assert_eq!(cc2.is_lower_bounded_text_constraint(&db)?, Some(10));
+    /// assert_eq!(cc3.is_lower_bounded_text_constraint(&db)?, Some(11));
+    /// assert_eq!(cc4.is_lower_bounded_text_constraint(&db)?, Some(10));
+    /// assert_eq!(cc5.is_lower_bounded_text_constraint(&db)?, Some(11));
+    /// assert_eq!(cc6.is_lower_bounded_text_constraint(&db)?, None);
+    /// assert_eq!(cc7.is_lower_bounded_text_constraint(&db)?, Some(12));
+    /// assert_eq!(cc8.is_lower_bounded_text_constraint(&db)?, Some(6));
     /// # Ok(())
     /// # }
     /// ```
-    fn is_lower_bounded_text_constraint(&self, database: &Self::DB) -> Option<usize> {
+    fn is_lower_bounded_text_constraint(
+        &self,
+        database: &Self::DB,
+    ) -> Result<Option<usize>, LookupError> {
         let expr = self.expression(database);
         let mut visited_cols = Vec::new();
         check_text_length_bound_recursive(
@@ -1201,20 +1280,22 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let table = db.table(None, "t").expect("Table 't' not found");
-        let constraints: Vec<_> = table.check_constraints(&db).collect();
+        let constraints: Vec<_> =
+            table.check_constraints(&db).expect("check_constraints").collect();
 
         assert_eq!(constraints.len(), 2);
 
         let cc_length = &constraints[0];
         let functions_length: Vec<_> =
-            cc_length.functions(&db).map(|f| f.name().to_string()).collect();
+            cc_length.functions(&db).expect("functions").map(|f| f.name().to_string()).collect();
         assert!(
             functions_length.contains(&"length".to_string()),
             "Function 'length' not found. Found: {functions_length:?}"
         );
 
         let cc_len = &constraints[1];
-        let functions_len: Vec<_> = cc_len.functions(&db).map(|f| f.name().to_string()).collect();
+        let functions_len: Vec<_> =
+            cc_len.functions(&db).expect("functions").map(|f| f.name().to_string()).collect();
         assert!(
             functions_len.contains(&"len".to_string()),
             "Function 'len' not found. Found: {functions_len:?}"
@@ -1232,15 +1313,19 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let table = db.table(None, "t").expect("Table 't' not found");
-        let constraints: Vec<_> = table.check_constraints(&db).collect();
+        let constraints: Vec<_> =
+            table.check_constraints(&db).expect("check_constraints").collect();
 
         // Find constraint with 'now'
-        let has_now = constraints.iter().any(|cc| cc.functions(&db).any(|f| f.name() == "now"));
+        let has_now = constraints
+            .iter()
+            .any(|cc| cc.functions(&db).expect("functions").any(|f| f.name() == "now"));
         assert!(has_now, "Function 'now' not found in constraints");
 
         // Find constraint with 'coalesce'
-        let has_coalesce =
-            constraints.iter().any(|cc| cc.functions(&db).any(|f| f.name() == "coalesce"));
+        let has_coalesce = constraints
+            .iter()
+            .any(|cc| cc.functions(&db).expect("functions").any(|f| f.name() == "coalesce"));
         assert!(has_coalesce, "Function 'coalesce' not found in constraints");
     }
 
@@ -1256,12 +1341,13 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let table = db.table(None, "t").expect("Table 't' not found");
-        let constraints: Vec<_> = table.check_constraints(&db).collect();
+        let constraints: Vec<_> =
+            table.check_constraints(&db).expect("check_constraints").collect();
         assert_eq!(constraints.len(), 4);
 
         let functions: Vec<_> = constraints
             .iter()
-            .flat_map(|cc| cc.functions(&db).map(|f| f.name().to_string()))
+            .flat_map(|cc| cc.functions(&db).expect("functions").map(|f| f.name().to_string()))
             .collect();
 
         assert!(functions.contains(&"gen_random_uuid".to_string()));
@@ -1279,12 +1365,13 @@ mod tests {
         let table = db.table(None, "t").expect("Table 't' not found");
         let constraint = table
             .check_constraints(&db)
+            .expect("check_constraints")
             .next()
             .expect("Expected one check constraint on table 't'");
 
-        assert!(constraint.function(&db, "\"FooBar\"").is_some());
-        assert!(constraint.function(&db, "foobar").is_none());
-        assert!(constraint.function(&db, "\"foobar\"").is_none());
+        assert!(constraint.function(&db, "\"FooBar\"").expect("function lookup").is_some());
+        assert!(constraint.function(&db, "foobar").expect("function lookup").is_none());
+        assert!(constraint.function(&db, "\"foobar\"").expect("function lookup").is_none());
     }
 
     #[test]
@@ -1297,11 +1384,12 @@ mod tests {
         let table = db.table(None, "t").expect("Table 't' not found");
         let constraint = table
             .check_constraints(&db)
+            .expect("check_constraints")
             .next()
             .expect("Expected one check constraint on table 't'");
 
-        assert!(constraint.function(&db, "foobar").is_some());
-        assert!(constraint.function(&db, "FOOBAR").is_some());
-        assert!(constraint.function(&db, "\"FOOBAR\"").is_none());
+        assert!(constraint.function(&db, "foobar").expect("function lookup").is_some());
+        assert!(constraint.function(&db, "FOOBAR").expect("function lookup").is_some());
+        assert!(constraint.function(&db, "\"FOOBAR\"").expect("function lookup").is_none());
     }
 }

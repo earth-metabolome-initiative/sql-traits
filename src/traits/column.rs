@@ -4,6 +4,7 @@ use alloc::{borrow::Cow, string::String, vec::Vec};
 use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
+    errors::LookupError,
     traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
     utils::{identifier_resolution::normalize_identifier, normalize_postgres_type},
 };
@@ -33,7 +34,7 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let columns: Vec<&str> = table.columns(&db).map(|col| col.column_name()).collect();
+    /// let columns: Vec<&str> = table.columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(columns, vec!["id", "name"]);
     /// # Ok(())
     /// # }
@@ -67,7 +68,7 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (ID INT, \"Name\" TEXT);")?;
     /// let table = db.table(None, "t").unwrap();
-    /// let stored: Vec<_> = table.columns(&db).map(|col| col.stored_column_name()).collect();
+    /// let stored: Vec<_> = table.columns(&db)?.map(|col| col.stored_column_name()).collect();
     /// assert_eq!(stored, vec!["id", "Name"]);
     /// # Ok(())
     /// # }
@@ -84,6 +85,11 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to query the column
     ///   documentation from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -98,14 +104,14 @@ pub trait ColumnLike:
     /// );",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let column_name = table.column("name", &db).expect("Column 'name' should exist");
-    /// assert_eq!(column.column_doc(&db), Some("the id of the table_row"));
-    /// assert!(column_name.column_doc(&db).is_none());
+    /// let column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let column_name = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// assert_eq!(column.column_doc(&db)?, Some("the id of the table_row"));
+    /// assert!(column_name.column_doc(&db)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
-    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db;
 
@@ -121,9 +127,9 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT, name TEXT, score REAL);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
     /// assert_eq!(id_column.data_type(&db), "INT");
     /// assert_eq!(name_column.data_type(&db), "TEXT");
     /// assert_eq!(score_column.data_type(&db), "REAL");
@@ -147,13 +153,13 @@ pub trait ColumnLike:
     /// )?;
     /// let table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// let bigg_id_column = table.column("bigg_id", &db).expect("Column 'bigg_id' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let bigg_id_column = table.column("bigg_id", &db)?.expect("Column 'bigg_id' should exist");
     /// let parent_id_column =
-    ///     child_table.column("parent_id", &db).expect("Column 'parent_id' should exist");
-    /// let other_column = child_table.column("other", &db).expect("Column 'other' should exist");
+    ///     child_table.column("parent_id", &db)?.expect("Column 'parent_id' should exist");
+    /// let other_column = child_table.column("other", &db)?.expect("Column 'other' should exist");
     /// assert!(id_column.is_generated(), "id column should be generative");
     /// assert!(!name_column.is_generated(), "name column should not be generative");
     /// assert!(!age_column.is_generated(), "age column should not be generative");
@@ -173,6 +179,11 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to query the table
     ///   from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -183,17 +194,17 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, age INT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// assert!(id_column.is_primary_key(&db), "id column should be primary key");
-    /// assert!(!name_column.is_primary_key(&db), "name column should not be primary key");
-    /// assert!(!age_column.is_primary_key(&db), "age column should not be primary key");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// assert!(id_column.is_primary_key(&db)?, "id column should be primary key");
+    /// assert!(!name_column.is_primary_key(&db)?, "name column should not be primary key");
+    /// assert!(!age_column.is_primary_key(&db)?, "age column should not be primary key");
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn is_primary_key(&self, database: &Self::DB) -> bool {
+    fn is_primary_key(&self, database: &Self::DB) -> Result<bool, LookupError> {
         let table: &<Self::DB as DatabaseLike>::Table = ColumnLike::table(self, database);
         table.is_primary_key_column(database, self.borrow())
     }
@@ -208,6 +219,11 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to query the table
     ///   from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -218,18 +234,18 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT, age INT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// assert!(id_column.is_surrogate_key(&db), "id column should be a surrogate key");
-    /// assert!(!name_column.is_surrogate_key(&db), "name column should not be a surrogate key");
-    /// assert!(!age_column.is_surrogate_key(&db), "age column should not be a surrogate key");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// assert!(id_column.is_surrogate_key(&db)?, "id column should be a surrogate key");
+    /// assert!(!name_column.is_surrogate_key(&db)?, "name column should not be a surrogate key");
+    /// assert!(!age_column.is_surrogate_key(&db)?, "age column should not be a surrogate key");
     /// # Ok(())
     /// # }
     /// ```
-    fn is_surrogate_key(&self, database: &Self::DB) -> bool {
+    fn is_surrogate_key(&self, database: &Self::DB) -> Result<bool, LookupError> {
         let table: &<Self::DB as DatabaseLike>::Table = ColumnLike::table(self, database);
-        table.has_surrogate_primary_key(database) && self.is_primary_key(database)
+        Ok(table.has_surrogate_primary_key(database)? && self.is_primary_key(database)?)
     }
 
     /// Returns the normalized data type of the column as a string.
@@ -242,11 +258,11 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, serial_id SERIAL, bigg_id BIGSERIAL, small_id SMALLSERIAL, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let serial_id_column = table.column("serial_id", &db).expect("Column 'serial_id' should exist");
-    /// let bigg_id_column = table.column("bigg_id", &db).expect("Column 'bigg_id' should exist");
-    /// let small_id_column = table.column("small_id", &db).expect("Column 'small_id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let serial_id_column = table.column("serial_id", &db)?.expect("Column 'serial_id' should exist");
+    /// let bigg_id_column = table.column("bigg_id", &db)?.expect("Column 'bigg_id' should exist");
+    /// let small_id_column = table.column("small_id", &db)?.expect("Column 'small_id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// assert_eq!(id_column.normalized_data_type(&db), "INT");
     /// assert_eq!(serial_id_column.normalized_data_type(&db), "INT");
     /// assert_eq!(bigg_id_column.normalized_data_type(&db), "BIGINT");
@@ -277,10 +293,10 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT, name TEXT, description VARCHAR);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let description_column =
-    ///     table.column("description", &db).expect("Column 'description' should exist");
+    ///     table.column("description", &db)?.expect("Column 'description' should exist");
     /// assert!(!id_column.is_textual(&db), "id column should not be textual");
     /// assert!(name_column.is_textual(&db), "name column should be textual");
     /// assert!(description_column.is_textual(&db), "description column should be textual");
@@ -294,6 +310,11 @@ pub trait ColumnLike:
 
     /// Returns whether the column is nullable.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -304,20 +325,20 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT NOT NULL, name TEXT, optional_field INT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let optional_column =
-    ///     table.column("optional_field", &db).expect("Column 'optional_field' should exist");
-    /// assert!(!id_column.is_nullable(&db), "id column should not be nullable");
-    /// assert!(name_column.is_nullable(&db), "name column should be nullable by default");
+    ///     table.column("optional_field", &db)?.expect("Column 'optional_field' should exist");
+    /// assert!(!id_column.is_nullable(&db)?, "id column should not be nullable");
+    /// assert!(name_column.is_nullable(&db)?, "name column should be nullable by default");
     /// assert!(
-    ///     optional_column.is_nullable(&db),
+    ///     optional_column.is_nullable(&db)?,
     ///     "optional_field column should be nullable by default"
     /// );
     /// # Ok(())
     /// # }
     /// ```
-    fn is_nullable(&self, database: &Self::DB) -> bool;
+    fn is_nullable(&self, database: &Self::DB) -> Result<bool, LookupError>;
 
     /// Returns the SQL default value of the column, if any.
     ///
@@ -331,10 +352,10 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT DEFAULT 0, name TEXT, created_at TIMESTAMP DEFAULT NOW());",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let created_at_column =
-    ///     table.column("created_at", &db).expect("Column 'created_at' should exist");
+    ///     table.column("created_at", &db)?.expect("Column 'created_at' should exist");
     /// assert_eq!(
     ///     id_column.default_value(),
     ///     Some("0".to_string()),
@@ -363,10 +384,10 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT DEFAULT 0, name TEXT, created_at TIMESTAMP DEFAULT NOW());",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let created_at_column =
-    ///     table.column("created_at", &db).expect("Column 'created_at' should exist");
+    ///     table.column("created_at", &db)?.expect("Column 'created_at' should exist");
     /// assert!(id_column.has_default(), "id column should have a default value");
     /// assert!(!name_column.has_default(), "name column should not have a default value");
     /// assert!(created_at_column.has_default(), "created_at column should have a default value");
@@ -392,7 +413,7 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let column_table = ColumnLike::table(id_column, &db);
     /// assert_eq!(column_table.table_name(), "my_table");
     /// # Ok(())
@@ -410,6 +431,11 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -419,19 +445,19 @@ pub trait ColumnLike:
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// assert_eq!(id_column.column_id(&db), Some(0));
-    /// assert_eq!(name_column.column_id(&db), Some(1));
-    /// assert_eq!(age_column.column_id(&db), Some(2));
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// assert_eq!(id_column.column_id(&db)?, Some(0));
+    /// assert_eq!(name_column.column_id(&db)?, Some(1));
+    /// assert_eq!(age_column.column_id(&db)?, Some(2));
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn column_id(&self, database: &Self::DB) -> Option<usize> {
+    fn column_id(&self, database: &Self::DB) -> Result<Option<usize>, LookupError> {
         let table = ColumnLike::table(self, database);
-        table.columns(database).position(|column| column == self.borrow())
+        Ok(table.columns(database)?.position(|column| column == self.borrow()))
     }
 
     /// Returns the foreign keys associated with this column.
@@ -440,6 +466,14 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query foreign
     ///   keys from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to, and
+    /// [`LookupError::TableNotFound`] or [`LookupError::ColumnNotFound`] when a
+    /// foreign key reached from it names a table or a column `database` does
+    /// not hold.
     ///
     /// # Example
     ///
@@ -458,10 +492,10 @@ pub trait ColumnLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = host_table.column("name", &db).expect("Column 'name' should exist");
-    /// let id_fks = id_column.foreign_keys(&db).collect::<Vec<_>>();
-    /// let name_fks = name_column.foreign_keys(&db).collect::<Vec<_>>();
+    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let id_fks = id_column.foreign_keys(&db)?.collect::<Vec<_>>();
+    /// let name_fks = name_column.foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(id_fks.len(), 1);
     /// assert_eq!(name_fks.len(), 0);
     /// # Ok(())
@@ -470,14 +504,19 @@ pub trait ColumnLike:
     fn foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        ColumnLike::table(self, database).foreign_keys(database).filter(move |fk| {
-            let borrowed = self.borrow();
-            fk.host_columns(database).any(|col| col == borrowed)
-        })
+        let borrowed = self.borrow();
+        let mut foreign_keys = Vec::new();
+        for foreign_key in ColumnLike::table(self, database).foreign_keys(database)? {
+            if foreign_key.host_columns(database)?.any(|col| col == borrowed) {
+                foreign_keys.push(foreign_key);
+            }
+        }
+
+        Ok(foreign_keys.into_iter())
     }
 
     /// Returns whether the column references the given table or any of its
@@ -488,6 +527,14 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to query foreign
     ///   keys from.
     /// * `table` - A reference to the table to check references against.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to, and
+    /// [`LookupError::TableNotFound`] or [`LookupError::ColumnNotFound`] when a
+    /// foreign key reached from it names a table or a column `database` does
+    /// not hold.
     ///
     /// # Example
     ///
@@ -510,17 +557,17 @@ pub trait ColumnLike:
     /// let parent_table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
     /// let other_table = db.table(None, "other").unwrap();
-    /// let child_id_column = other_table.column("child_id", &db).unwrap();
+    /// let child_id_column = other_table.column("child_id", &db)?.unwrap();
     /// assert!(
-    ///     child_id_column.references_table_pk_or_descendant(&db, parent_table),
+    ///     child_id_column.references_table_pk_or_descendant(&db, parent_table)?,
     ///     "child_id should reference parent or its descendant"
     /// );
     /// assert!(
-    ///     child_id_column.references_table_pk_or_descendant(&db, child_table),
+    ///     child_id_column.references_table_pk_or_descendant(&db, child_table)?,
     ///     "child_id should reference child or its descendant"
     /// );
     /// assert!(
-    ///     !child_id_column.references_table_pk_or_descendant(&db, other_table),
+    ///     !child_id_column.references_table_pk_or_descendant(&db, other_table)?,
     ///     "child_id should not reference other or its descendant"
     /// );
     /// # Ok(())
@@ -530,14 +577,20 @@ pub trait ColumnLike:
         &self,
         database: &Self::DB,
         table: &<Self::DB as DatabaseLike>::Table,
-    ) -> bool {
-        self.foreign_keys(database).any(|fk| {
-            if !fk.is_referenced_primary_key(database) || fk.is_composite(database) {
-                return false;
+    ) -> Result<bool, LookupError> {
+        for foreign_key in self.foreign_keys(database)? {
+            if !foreign_key.is_referenced_primary_key(database)?
+                || foreign_key.is_composite(database)?
+            {
+                continue;
             }
-            let referenced_table = fk.referenced_table(database);
-            referenced_table == table || referenced_table.is_descendant_of(database, table)
-        })
+            let referenced_table = foreign_key.referenced_table(database)?;
+            if referenced_table == table || referenced_table.is_descendant_of(database, table)? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Returns the extension foreign keys associated with this column.
@@ -546,6 +599,14 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query foreign
     ///   keys from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to, and
+    /// [`LookupError::TableNotFound`] or [`LookupError::ColumnNotFound`] when a
+    /// foreign key reached from it names a table or a column `database` does
+    /// not hold.
     ///
     /// # Example
     ///
@@ -564,11 +625,11 @@ pub trait ColumnLike:
     /// let parent_table = db.table(None, "parent").unwrap();
     /// let child_table = db.table(None, "child").unwrap();
     /// let parent_id_column =
-    ///     child_table.column("parent_id", &db).expect("Column 'parent_id' should exist");
-    /// let ext_fks = parent_id_column.extension_foreign_keys(&db).collect::<Vec<_>>();
+    ///     child_table.column("parent_id", &db)?.expect("Column 'parent_id' should exist");
+    /// let ext_fks = parent_id_column.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(ext_fks.len(), 1);
-    /// let id_column = parent_table.column("id", &db).expect("Column 'id' should exist");
-    /// let id_fks = id_column.extension_foreign_keys(&db).collect::<Vec<_>>();
+    /// let id_column = parent_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let id_fks = id_column.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(id_fks.len(), 0);
     /// # Ok(())
     /// # }
@@ -576,11 +637,18 @@ pub trait ColumnLike:
     fn extension_foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        self.foreign_keys(database).filter(move |fk| fk.is_extension_foreign_key(database))
+        let mut foreign_keys = Vec::new();
+        for foreign_key in self.foreign_keys(database)? {
+            if foreign_key.is_extension_foreign_key(database)? {
+                foreign_keys.push(foreign_key);
+            }
+        }
+
+        Ok(foreign_keys.into_iter())
     }
 
     /// Returns whether the column is a foreign key, i.e. it is part of any
@@ -590,6 +658,14 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query foreign
     ///   keys from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to, and
+    /// [`LookupError::TableNotFound`] or [`LookupError::ColumnNotFound`] when a
+    /// foreign key reached from it names a table or a column `database` does
+    /// not hold.
     ///
     /// # Example
     ///
@@ -607,16 +683,16 @@ pub trait ColumnLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let id_column = host_table.column("id", &db).unwrap();
-    /// let name_column = host_table.column("name", &db).unwrap();
-    /// assert!(id_column.is_part_of_foreign_key(&db), "id column should be a foreign key");
-    /// assert!(!name_column.is_part_of_foreign_key(&db), "name column should not be a foreign key");
+    /// let id_column = host_table.column("id", &db)?.unwrap();
+    /// let name_column = host_table.column("name", &db)?.unwrap();
+    /// assert!(id_column.is_part_of_foreign_key(&db)?, "id column should be a foreign key");
+    /// assert!(!name_column.is_part_of_foreign_key(&db)?, "name column should not be a foreign key");
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn is_part_of_foreign_key(&self, database: &Self::DB) -> bool {
-        self.foreign_keys(database).next().is_some()
+    fn is_part_of_foreign_key(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.foreign_keys(database)?.next().is_some())
     }
 
     /// Returns the non-composite foreign keys associated with this column.
@@ -625,6 +701,14 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query foreign
     ///   keys from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to, and
+    /// [`LookupError::TableNotFound`] or [`LookupError::ColumnNotFound`] when a
+    /// foreign key reached from it names a table or a column `database` does
+    /// not hold.
     ///
     /// # Example
     ///
@@ -643,10 +727,10 @@ pub trait ColumnLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
-    /// let name_column = host_table.column("name", &db).expect("Column 'name' should exist");
-    /// let id_fks = id_column.non_composite_foreign_keys(&db).collect::<Vec<_>>();
-    /// let name_fks = name_column.non_composite_foreign_keys(&db).collect::<Vec<_>>();
+    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let id_fks = id_column.non_composite_foreign_keys(&db)?.collect::<Vec<_>>();
+    /// let name_fks = name_column.non_composite_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(id_fks.len(), 1);
     /// assert_eq!(name_fks.len(), 0);
     /// # Ok(())
@@ -655,11 +739,18 @@ pub trait ColumnLike:
     fn non_composite_foreign_keys<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::ForeignKey>, LookupError>
     where
         Self: 'db,
     {
-        self.foreign_keys(database).filter(move |fk| !fk.is_composite(database))
+        let mut foreign_keys = Vec::new();
+        for foreign_key in self.foreign_keys(database)? {
+            if !foreign_key.is_composite(database)? {
+                foreign_keys.push(foreign_key);
+            }
+        }
+
+        Ok(foreign_keys.into_iter())
     }
 
     /// Returns whether the column is compatible with another column.
@@ -678,6 +769,14 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to which the table
     ///   belongs.
     /// * `other` - The column in the other table to check.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to, and
+    /// [`LookupError::TableNotFound`] or [`LookupError::ColumnNotFound`] when a
+    /// foreign key reached from it names a table or a column `database` does
+    /// not hold. The same applies to the table `other` belongs to.
     ///
     /// # Example
     ///
@@ -702,104 +801,103 @@ pub trait ColumnLike:
     /// ",
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
-    /// let id_column = host_table.column("id", &db).expect("Column 'id' should exist");
+    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
     /// let compatible_table = db.table(None, "compatible_table").unwrap();
     /// let serial_table_one = db.table(None, "serial_table_one").unwrap();
-    /// let serial_id_column = serial_table_one.column("id", &db).expect("Column 'id' should exist");
+    /// let serial_id_column = serial_table_one.column("id", &db)?.expect("Column 'id' should exist");
     /// let serial_table_two = db.table(None, "serial_table_two").unwrap();
     /// let serial_id_column_two =
-    ///     serial_table_two.column("id", &db).expect("Column 'id' should exist");
+    ///     serial_table_two.column("id", &db)?.expect("Column 'id' should exist");
     /// let compatible_id_column =
-    ///     compatible_table.column("id", &db).expect("Column 'id' should exist");
+    ///     compatible_table.column("id", &db)?.expect("Column 'id' should exist");
     /// let incompatible_table = db.table(None, "incompatible_table").unwrap();
     /// let incompatible_id_column =
-    ///     incompatible_table.column("id", &db).expect("Column 'id' should exist");
+    ///     incompatible_table.column("id", &db)?.expect("Column 'id' should exist");
     /// let another_host_table = db.table(None, "another_host_table").unwrap();
-    /// let another_id_column = another_host_table.column("id", &db).expect("Column 'id' should exist");
+    /// let another_id_column =
+    ///     another_host_table.column("id", &db)?.expect("Column 'id' should exist");
     /// let non_fk_table = db.table(None, "non_fk_table").unwrap();
-    /// let non_fk_id_column = non_fk_table.column("id", &db).expect("Column 'id' should exist");
+    /// let non_fk_id_column = non_fk_table.column("id", &db)?.expect("Column 'id' should exist");
     /// assert!(
-    ///     id_column.is_compatible_with(&db, compatible_id_column),
+    ///     id_column.is_compatible_with(&db, compatible_id_column)?,
     ///     "Columns should be compatible as they reference the same table"
     /// );
     /// assert!(
-    ///     !id_column.is_compatible_with(&db, incompatible_id_column),
+    ///     !id_column.is_compatible_with(&db, incompatible_id_column)?,
     ///     "Columns should not be compatible as they reference different tables"
     /// );
     /// assert!(
-    ///     !id_column.is_compatible_with(&db, another_id_column),
+    ///     !id_column.is_compatible_with(&db, another_id_column)?,
     ///     "Columns should not be compatible as they reference different tables"
     /// );
     /// assert!(
-    ///     !id_column.is_compatible_with(&db, non_fk_id_column),
+    ///     !id_column.is_compatible_with(&db, non_fk_id_column)?,
     ///     "Columns should not be compatible as one of them is not a foreign key"
     /// );
     /// assert!(
-    ///     !serial_id_column.is_compatible_with(&db, serial_id_column_two),
+    ///     !serial_id_column.is_compatible_with(&db, serial_id_column_two)?,
     ///     "Columns should not be compatible as both are generative"
     /// );
     /// assert!(
-    ///     serial_id_column.is_compatible_with(&db, non_fk_id_column),
+    ///     serial_id_column.is_compatible_with(&db, non_fk_id_column)?,
     ///     "Columns should be compatible as only one is generative and they have the same data type"
     /// );
     /// # Ok(())
     /// # }
     /// ```
-    fn is_compatible_with(&self, database: &Self::DB, other: &Self) -> bool {
+    fn is_compatible_with(&self, database: &Self::DB, other: &Self) -> Result<bool, LookupError> {
         let host_table: &<Self::DB as DatabaseLike>::Table = ColumnLike::table(self, database);
         let other_table: &<Self::DB as DatabaseLike>::Table = ColumnLike::table(other, database);
 
         // If the two columns are the same, they are compatible.
         if host_table == other_table && self == other {
-            return true;
+            return Ok(true);
         }
 
         // If both columns have generative data types, they are not compatible
         // as the two values should never be the same.
         if self.is_generated() && other.is_generated() {
-            return false;
+            return Ok(false);
         }
 
         if self.normalized_data_type(database) != other.normalized_data_type(database) {
-            return false;
+            return Ok(false);
         }
 
         let mut local_referenced_tables =
-            host_table.referenced_tables_via_column(database, self.borrow());
+            host_table.referenced_tables_via_column(database, self.borrow())?;
         let mut other_referenced_tables =
-            other_table.referenced_tables_via_column(database, other.borrow());
+            other_table.referenced_tables_via_column(database, other.borrow())?;
 
         if local_referenced_tables.is_empty() && other_referenced_tables.is_empty() {
             // If both columns are not foreign keys, they are compatible.
-            return true;
+            return Ok(true);
         }
 
         // If the columns are primary keys, we include the local table as a
         // referenced table.
-        if self.is_primary_key(database) {
+        if self.is_primary_key(database)? {
             local_referenced_tables.push(host_table);
         }
-        if other.is_primary_key(database) {
+        if other.is_primary_key(database)? {
             other_referenced_tables.push(other_table);
         }
 
         // We determine the set of ancestors of the referenced tables.
-        let local_referenced_ancestors = local_referenced_tables
-            .iter()
-            .copied()
-            .flat_map(|table| table.ancestral_extended_tables(database))
-            .collect::<Vec<_>>();
-        let other_referenced_ancestors = other_referenced_tables
-            .iter()
-            .copied()
-            .flat_map(|table| table.ancestral_extended_tables(database))
-            .collect::<Vec<_>>();
+        let mut local_referenced_ancestors = Vec::new();
+        for &table in &local_referenced_tables {
+            local_referenced_ancestors.extend(table.ancestral_extended_tables(database)?);
+        }
+        let mut other_referenced_ancestors = Vec::new();
+        for &table in &other_referenced_tables {
+            other_referenced_ancestors.extend(table.ancestral_extended_tables(database)?);
+        }
 
         // We extend the referenced tables with their ancestors.
         local_referenced_tables.extend(local_referenced_ancestors);
         other_referenced_tables.extend(other_referenced_ancestors);
 
-        local_referenced_tables.iter().any(|table| other_referenced_tables.contains(table))
+        Ok(local_referenced_tables.iter().any(|table| other_referenced_tables.contains(table)))
     }
 
     /// Iterates over the
@@ -811,6 +909,11 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to query check
     ///   constraints from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -820,11 +923,11 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));")?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
     ///
-    /// let age_checks = age_column.check_constraints(&db).collect::<Vec<_>>();
-    /// let score_checks = score_column.check_constraints(&db).collect::<Vec<_>>();
+    /// let age_checks = age_column.check_constraints(&db)?.collect::<Vec<_>>();
+    /// let score_checks = score_column.check_constraints(&db)?.collect::<Vec<_>>();
     ///
     /// assert_eq!(age_checks.len(), 1, "age column should have one check constraint");
     /// assert_eq!(score_checks.len(), 1, "score column should have one check constraint");
@@ -834,11 +937,19 @@ pub trait ColumnLike:
     fn check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint> + 'db {
+    ) -> Result<
+        impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint> + 'db,
+        LookupError,
+    > {
         let table: &<Self::DB as DatabaseLike>::Table = ColumnLike::table(self, database);
-        table
-            .check_constraints(database)
-            .filter(|check| check.involves_column(database, self.borrow()))
+        let mut check_constraints = Vec::new();
+        for check in table.check_constraints(database)? {
+            if check.involves_column(database, self.borrow())? {
+                check_constraints.push(check);
+            }
+        }
+
+        Ok(check_constraints.into_iter())
     }
 
     /// Returns an iterator over the indices that involve this column.
@@ -846,6 +957,11 @@ pub trait ColumnLike:
     /// # Arguments
     ///
     /// * `database` - The database containing the column.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
     ///
     /// # Example
     ///
@@ -858,11 +974,11 @@ pub trait ColumnLike:
     /// )?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
-    /// let name_column = table.column("name", &db).expect("Column 'name' should exist");
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
+    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     ///
-    /// let name_indices: Vec<_> = name_column.indices(&db).collect();
-    /// let id_indices: Vec<_> = id_column.indices(&db).collect();
+    /// let name_indices: Vec<_> = name_column.indices(&db)?.collect();
+    /// let id_indices: Vec<_> = id_column.indices(&db)?.collect();
     ///
     /// assert_eq!(name_indices.len(), 1, "name column should have one index");
     /// assert_eq!(id_indices.len(), 0, "id column should have no indices");
@@ -872,14 +988,19 @@ pub trait ColumnLike:
     fn indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Index>, LookupError>
     where
         Self: 'db,
     {
         let table = self.table(database);
-        table
-            .indices(database)
-            .filter(move |index| index.columns(database).any(|col| col == self.borrow()))
+        let mut indices = Vec::new();
+        for index in table.indices(database)? {
+            if index.columns(database)?.any(|col| col == self.borrow()) {
+                indices.push(index);
+            }
+        }
+
+        Ok(indices.into_iter())
     }
 
     /// Returns whether the column has any check constraints.
@@ -888,6 +1009,11 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query check
     ///   constraints from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
     ///
     /// # Example
     ///
@@ -898,19 +1024,19 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
-    /// assert!(age_column.has_check_constraints(&db), "age column should have check constraints");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// assert!(age_column.has_check_constraints(&db)?, "age column should have check constraints");
     /// assert!(
-    ///     !score_column.has_check_constraints(&db),
+    ///     !score_column.has_check_constraints(&db)?,
     ///     "score column should not have check constraints"
     /// );
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_check_constraints(&self, database: &Self::DB) -> bool {
-        self.check_constraints(database).next().is_some()
+    fn has_check_constraints(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.check_constraints(database)?.next().is_some())
     }
 
     #[inline]
@@ -923,6 +1049,11 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to query check
     ///   constraints from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -931,10 +1062,10 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));")?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
-    /// let age_non_tauto = age_column.non_tautological_check_constraints(&db).collect::<Vec<_>>();
-    /// let score_non_tauto = score_column.non_tautological_check_constraints(&db).collect::<Vec<_>>();
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// let age_non_tauto = age_column.non_tautological_check_constraints(&db)?.collect::<Vec<_>>();
+    /// let score_non_tauto = score_column.non_tautological_check_constraints(&db)?.collect::<Vec<_>>();
     /// assert_eq!(age_non_tauto.len(), 1, "age column should have one non-tautological check constraint");
     /// assert_eq!(score_non_tauto.len(), 1, "score column should have one non-tautological check constraint");
     /// # Ok(())
@@ -943,8 +1074,18 @@ pub trait ColumnLike:
     fn non_tautological_check_constraints<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint> + 'db {
-        self.check_constraints(database).filter(move |check| !check.is_tautology(database))
+    ) -> Result<
+        impl Iterator<Item = &'db <Self::DB as DatabaseLike>::CheckConstraint> + 'db,
+        LookupError,
+    > {
+        let mut check_constraints = Vec::new();
+        for check in self.check_constraints(database)? {
+            if !check.is_tautology(database)? {
+                check_constraints.push(check);
+            }
+        }
+
+        Ok(check_constraints.into_iter())
     }
 
     #[inline]
@@ -954,6 +1095,11 @@ pub trait ColumnLike:
     ///
     /// * `database` - A reference to the database instance to query check
     ///   constraints from.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
     ///
     /// # Example
     ///
@@ -965,21 +1111,24 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
     /// assert!(
-    ///     age_column.has_non_tautological_check_constraints(&db),
+    ///     age_column.has_non_tautological_check_constraints(&db)?,
     ///     "age column should have non-tautological check constraints"
     /// );
     /// assert!(
-    ///     !score_column.has_non_tautological_check_constraints(&db),
+    ///     !score_column.has_non_tautological_check_constraints(&db)?,
     ///     "score column should not have non-tautological check constraints"
     /// );
     /// # Ok(())
     /// # }
     /// ```
-    fn has_non_tautological_check_constraints(&self, database: &Self::DB) -> bool {
-        self.non_tautological_check_constraints(database).next().is_some()
+    fn has_non_tautological_check_constraints(
+        &self,
+        database: &Self::DB,
+    ) -> Result<bool, LookupError> {
+        Ok(self.non_tautological_check_constraints(database)?.next().is_some())
     }
 
     /// Iterates over the
@@ -991,6 +1140,11 @@ pub trait ColumnLike:
     /// * `database` - A reference to the database instance to query unique
     ///   indices from.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold the table this column belongs to.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1000,15 +1154,15 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT PRIMARY KEY, other TEXT, age INT, score INT, UNIQUE (age, score));")?;
     ///
     /// let table = db.table(None, "my_table").unwrap();
-    /// let id_column = table.column("id", &db).expect("Column 'id' should exist");
-    /// let age_column = table.column("age", &db).expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db).expect("Column 'score' should exist");
-    /// let other_column = table.column("other", &db).expect("Column 'other' should exist");
+    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// let other_column = table.column("other", &db)?.expect("Column 'other' should exist");
     ///
-    /// let id_unique = id_column.unique_indices(&db).collect::<Vec<_>>();
-    /// let age_unique = age_column.unique_indices(&db).collect::<Vec<_>>();
-    /// let score_unique = score_column.unique_indices(&db).collect::<Vec<_>>();
-    /// let other_unique = other_column.unique_indices(&db).collect::<Vec<_>>();
+    /// let id_unique = id_column.unique_indices(&db)?.collect::<Vec<_>>();
+    /// let age_unique = age_column.unique_indices(&db)?.collect::<Vec<_>>();
+    /// let score_unique = score_column.unique_indices(&db)?.collect::<Vec<_>>();
+    /// let other_unique = other_column.unique_indices(&db)?.collect::<Vec<_>>();
     ///
     /// assert_eq!(id_unique.len(), 1, "id column should have one unique index");
     /// assert_eq!(age_unique.len(), 1, "age column should have one unique index");
@@ -1020,14 +1174,19 @@ pub trait ColumnLike:
     fn unique_indices<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::UniqueIndex>, LookupError>
     where
         Self: 'db,
     {
         let table = self.table(database);
-        table.unique_indices(database).filter(move |unique_index| {
-            unique_index.columns(database).any(|col| col == self.borrow())
-        })
+        let mut unique_indices = Vec::new();
+        for unique_index in table.unique_indices(database)? {
+            if unique_index.columns(database)?.any(|col| col == self.borrow()) {
+                unique_indices.push(unique_index);
+            }
+        }
+
+        Ok(unique_indices.into_iter())
     }
 }
 
@@ -1049,7 +1208,7 @@ where
     }
 
     #[inline]
-    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db,
     {
@@ -1067,7 +1226,7 @@ where
     }
 
     #[inline]
-    fn is_nullable(&self, database: &Self::DB) -> bool {
+    fn is_nullable(&self, database: &Self::DB) -> Result<bool, LookupError> {
         (*self).is_nullable(database)
     }
 
@@ -1103,7 +1262,7 @@ where
     }
 
     #[inline]
-    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>
+    fn column_doc<'db>(&'db self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>
     where
         Self: 'db,
     {
@@ -1121,7 +1280,7 @@ where
     }
 
     #[inline]
-    fn is_nullable(&self, database: &Self::DB) -> bool {
+    fn is_nullable(&self, database: &Self::DB) -> Result<bool, LookupError> {
         (**self).is_nullable(database)
     }
 
@@ -1156,18 +1315,25 @@ mod tests {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT DEFAULT 'val');";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
             let table = db.table(None, "users").expect("Table not found");
-            let column = table.column("name", &db).expect("Column not found");
+            let column =
+                table.column("name", &db).expect("table lookup").expect("Column not found");
 
             let col_ref = column;
 
             assert_eq!(<&_ as ColumnLike>::column_name(&col_ref), "name");
             assert_eq!(<&_ as ColumnLike>::data_type(&col_ref, &db), "TEXT");
-            assert!(<&_ as ColumnLike>::is_nullable(&col_ref, &db));
+            assert!(<&_ as ColumnLike>::is_nullable(&col_ref, &db).expect("is_nullable failed"));
             assert_eq!(<&_ as ColumnLike>::default_value(&col_ref).as_deref(), Some("'val'"));
             assert!(!<&_ as ColumnLike>::is_generated(&col_ref));
             assert_eq!(<&_ as ColumnLike>::table(&col_ref, &db).table_name(), "users");
-            assert_eq!(<&_ as ColumnLike>::column_id(&col_ref, &db), Some(1));
-            assert_eq!(<&_ as ColumnLike>::column_doc(&col_ref, &db), None);
+            assert_eq!(
+                <&_ as ColumnLike>::column_id(&col_ref, &db).expect("column_id failed"),
+                Some(1)
+            );
+            assert_eq!(
+                <&_ as ColumnLike>::column_doc(&col_ref, &db).expect("column_doc failed"),
+                None
+            );
         }
     }
 
@@ -1179,18 +1345,27 @@ mod tests {
             let sql = "CREATE TABLE products (id INT PRIMARY KEY, price INT DEFAULT 0);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
             let table = db.table(None, "products").expect("Table not found");
-            let column = table.column("price", &db).expect("Column not found");
+            let column =
+                table.column("price", &db).expect("table lookup").expect("Column not found");
 
             let col_arc = Arc::new(column.clone());
 
             assert_eq!(<Arc<_> as ColumnLike>::column_name(&col_arc), "price");
             assert_eq!(<Arc<_> as ColumnLike>::data_type(&col_arc, &db), "INT");
-            assert!(<Arc<_> as ColumnLike>::is_nullable(&col_arc, &db));
+            assert!(
+                <Arc<_> as ColumnLike>::is_nullable(&col_arc, &db).expect("is_nullable failed")
+            );
             assert_eq!(<Arc<_> as ColumnLike>::default_value(&col_arc).as_deref(), Some("0"));
             assert!(!<Arc<_> as ColumnLike>::is_generated(&col_arc));
             assert_eq!(<Arc<_> as ColumnLike>::table(&col_arc, &db).table_name(), "products");
-            assert_eq!(<Arc<_> as ColumnLike>::column_id(&col_arc, &db), Some(1));
-            assert_eq!(<Arc<_> as ColumnLike>::column_doc(&col_arc, &db), None);
+            assert_eq!(
+                <Arc<_> as ColumnLike>::column_id(&col_arc, &db).expect("column_id failed"),
+                Some(1)
+            );
+            assert_eq!(
+                <Arc<_> as ColumnLike>::column_doc(&col_arc, &db).expect("column_doc failed"),
+                None
+            );
         }
     }
 }

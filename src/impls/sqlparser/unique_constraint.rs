@@ -1,18 +1,25 @@
 //! Implement the [`UniqueConstraint`] trait for the `sqlparser` crate's
-#![allow(
-    clippy::expect_used,
-    reason = "trait receivers are obtained from this database, so their metadata is always present"
-)]
+//! [`TableAttribute`] wrapper.
 
 use sqlparser::ast::{CreateTable, Expr, UniqueConstraint};
 
 use crate::{
+    errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableAttribute, metadata::UniqueIndexMetadata},
-    traits::{DatabaseLike, IndexLike, Metadata},
+    traits::{DatabaseLike, IndexLike, Metadata, TableLike},
 };
 
 impl Metadata for TableAttribute<CreateTable, UniqueConstraint> {
     type Meta = UniqueIndexMetadata<Self>;
+}
+
+/// Returns the name a unique constraint was declared with.
+///
+/// PostgreSQL spells it as a constraint name (`CONSTRAINT uq UNIQUE (..)`)
+/// while MySQL spells it as an index name (`UNIQUE KEY uq (..)`), and sqlparser
+/// keeps the two in separate fields.
+fn unique_constraint_name(constraint: &UniqueConstraint) -> Option<&sqlparser::ast::Ident> {
+    constraint.name.as_ref().or(constraint.index_name.as_ref())
 }
 
 impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
@@ -30,7 +37,7 @@ impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
     /// [`Ident`](sqlparser::ast::Ident) (`UniqueConstraint::index_name`), not
     /// an [`ObjectName`](sqlparser::ast::ObjectName), so it is not exposed
     /// through this accessor. Unique indexes are enumerated via
-    /// [`TableLike::unique_indices`](crate::traits::TableLike::unique_indices),
+    /// [`TableLike::unique_indices`],
     /// while [`DatabaseLike::indexes`] only yields `CREATE INDEX` indexes.
     #[inline]
     fn name(&self) -> Option<&sqlparser::ast::ObjectName> {
@@ -38,13 +45,20 @@ impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
     }
 
     #[inline]
-    fn expression<'db>(&'db self, database: &'db Self::DB) -> &'db Expr
+    fn expression<'db>(&'db self, database: &'db Self::DB) -> Result<&'db Expr, LookupError>
     where
         Self: 'db,
     {
-        database
+        Ok(database
             .unique_index_metadata(self)
-            .expect("Unique index must exist in database")
-            .expression()
+            .ok_or_else(|| {
+                match unique_constraint_name(self.attribute()) {
+                    Some(name) => ObjectKind::UniqueIndex.not_in_database(&name.value),
+                    None => {
+                        ObjectKind::UniqueIndex.anonymous_not_in_database(self.table().table_name())
+                    }
+                }
+            })?
+            .expression())
     }
 }

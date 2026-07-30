@@ -1,6 +1,6 @@
 //! Submodule providing a trait for describing SQL Database-like entities.
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 use core::{borrow::Borrow, fmt::Debug};
 
 use geometric_traits::{
@@ -10,6 +10,7 @@ use geometric_traits::{
 };
 
 use crate::{
+    errors::{Error, LookupError},
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
@@ -210,6 +211,13 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// do not extend any other table. Tables which are not involved
     /// in any extension relationship are not considered root tables.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::TableNotFound`] or
+    /// [`LookupError::ColumnNotFound`] when a foreign key in this database
+    /// names a table or a column it does not hold, since the extension
+    /// relationships are read from the foreign keys.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -225,17 +233,29 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ",
     /// )?;
     ///
-    /// let root_table_names: Vec<&str> = db.root_tables().map(|t| t.table_name()).collect();
+    /// let root_table_names: Vec<&str> = db.root_tables()?.map(|t| t.table_name()).collect();
     /// assert_eq!(root_table_names, vec!["base_table"]);
     /// # Ok(())
     /// # }
     /// ```
-    fn root_tables(&self) -> impl Iterator<Item = &Self::Table> {
-        self.tables().filter(|table| !table.is_extension(self) && table.is_extended(self))
+    fn root_tables(&self) -> Result<impl Iterator<Item = &Self::Table>, LookupError> {
+        let mut tables = Vec::new();
+        for table in self.tables() {
+            if !table.is_extension(self)? && table.is_extended(self)? {
+                tables.push(table);
+            }
+        }
+
+        Ok(tables.into_iter())
     }
 
     /// Returns the maximum number of columns found in any table in the
     /// database.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError`] when the metadata of one of the tables this
+    /// database reports cannot be resolved.
     ///
     /// # Example
     ///
@@ -249,16 +269,27 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// CREATE TABLE table2 (score DECIMAL, level INT, active BOOLEAN);
     /// ",
     /// )?;
-    /// assert_eq!(db.maximum_number_of_columns(), 3);
+    /// assert_eq!(db.maximum_number_of_columns()?, 3);
     /// # Ok(())
     /// # }
     /// ```
-    fn maximum_number_of_columns(&self) -> usize {
-        self.tables().map(|table| table.columns(self).count()).max().unwrap_or(0)
+    fn maximum_number_of_columns(&self) -> Result<usize, LookupError> {
+        let mut maximum = 0;
+        for table in self.tables() {
+            maximum = maximum.max(table.columns(self)?.count());
+        }
+
+        Ok(maximum)
     }
 
     /// Returns tables as a Kahn's ordering based on foreign key dependencies,
     /// ignoring potential self-references which would create cycles.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when a foreign key references a table this database
+    /// does not hold, when the dependency graph cannot be assembled, or
+    /// when the foreign keys form a cycle.
     ///
     /// # Example
     ///
@@ -286,41 +317,33 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// let user_table = db.table(None, "users").unwrap();
     /// let comment_table = db.table(None, "comments").unwrap();
     /// let extended_comment_table = db.table(None, "extended_comments").unwrap();
-    /// let ordered_tables = db.table_dag();
+    /// let ordered_tables = db.table_dag()?;
     /// assert_eq!(ordered_tables, vec![user_table, comment_table, extended_comment_table]);
     /// # Ok(())
     /// # }
     /// ```
-    #[allow(
-        clippy::expect_used,
-        clippy::panic,
-        reason = "table_dag assumes a reference-closed, acyclic schema: dangling references and cycles must be ruled out via validate_foreign_key_targets before ordering"
-    )]
-    fn table_dag(&self) -> Vec<&Self::Table> {
+    fn table_dag(&self) -> Result<Vec<&Self::Table>, Error> {
         let tables = self.tables().collect::<Vec<&Self::Table>>();
 
-        let mut edges = tables
-            .iter()
-            .enumerate()
-            .flat_map(|(table_number, table)| {
-                let tables_ref = tables.as_slice();
-                table
-                    .foreign_keys(self)
-                    .map(Borrow::borrow)
-                    .filter_map(move |fk| {
-                        let referenced_table = fk.referenced_table(self).borrow();
-                        // We ignore self-references to avoid cycles in the DAG.
-                        if referenced_table == *table {
-                            return None;
+        let mut edges = Vec::new();
+        for (table_number, table) in tables.iter().enumerate() {
+            for foreign_key in table.foreign_keys(self)? {
+                let foreign_key: &Self::ForeignKey = foreign_key.borrow();
+                let referenced_table: &Self::Table = foreign_key.referenced_table(self)?.borrow();
+                // We ignore self-references to avoid cycles in the DAG.
+                if referenced_table == *table {
+                    continue;
+                }
+                let referenced_table_number =
+                    tables.binary_search(&referenced_table).map_err(|_| {
+                        Error::ReferencedTableNotFoundForForeignKey {
+                            referenced_table: referenced_table.table_name().to_string(),
+                            host_table: table.table_name().to_string(),
                         }
-                        Some(tables_ref.binary_search(&referenced_table).unwrap_or_else(|_| panic!("Referenced table '{}' not found in database '{}' - Tables are {:?}",
-                            referenced_table.table_name(),
-                            self.catalog_name(),
-                            tables_ref.iter().map(TableLike::table_name).collect::<Vec<&str>>())))
-                    })
-                    .map(move |referenced_table_number| (referenced_table_number, table_number))
-            })
-            .collect::<Vec<(usize, usize)>>();
+                    })?;
+                edges.push((referenced_table_number, table_number));
+            }
+        }
 
         // There is no guarantee that the foreign keys in a table are ordered,
         // so it is necessary to sort and deduplicate the edges.
@@ -333,15 +356,22 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
             .expected_shape(tables.len())
             .edges(edges)
             .build()
-            .expect("Failed to build table dependency DAG");
-        let dag_ordering = dag.kahn().expect("Failed to compute Kahn's ordering");
+            .map_err(|error| {
+                Error::TableDependencyGraph {
+                    catalog_name: self.catalog_name().to_string(),
+                    reason: error.to_string(),
+                }
+            })?;
+        let dag_ordering = dag.kahn().map_err(|_| {
+            Error::CyclicTableDependencies { catalog_name: self.catalog_name().to_string() }
+        })?;
 
         let mut ordered_tables = tables.clone();
         for (table_index, table) in dag_ordering.into_iter().zip(tables.iter()) {
             ordered_tables[table_index] = table;
         }
 
-        ordered_tables
+        Ok(ordered_tables)
     }
 
     /// Iterates over the functions created in the database.
@@ -643,6 +673,11 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     ///
     /// This includes tables with either regular RLS or forced RLS.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError`] when the metadata of one of the tables this
+    /// database reports cannot be resolved.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -660,7 +695,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ",
     /// )?;
     ///
-    /// let rls_table_names: Vec<&str> = db.rls_tables().map(|t| t.table_name()).collect();
+    /// let rls_table_names: Vec<&str> = db.rls_tables()?.map(|t| t.table_name()).collect();
     /// assert_eq!(rls_table_names.len(), 2);
     /// assert!(rls_table_names.contains(&"rls_table"));
     /// assert!(rls_table_names.contains(&"forced_rls_table"));
@@ -668,13 +703,25 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    fn rls_tables(&self) -> impl Iterator<Item = &Self::Table> {
-        self.tables().filter(|table| table.has_row_level_security(self))
+    fn rls_tables(&self) -> Result<impl Iterator<Item = &Self::Table>, LookupError> {
+        let mut tables = Vec::new();
+        for table in self.tables() {
+            if table.has_row_level_security(self)? {
+                tables.push(table);
+            }
+        }
+
+        Ok(tables.into_iter())
     }
 
     /// Iterates over tables that have forced Row Level Security (RLS) enabled.
     ///
     /// Forced RLS means that even the table owner is subject to RLS policies.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError`] when the metadata of one of the tables this
+    /// database reports cannot be resolved.
     ///
     /// # Example
     ///
@@ -694,18 +741,30 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// )?;
     ///
     /// let forced_rls_table_names: Vec<&str> =
-    ///     db.forced_rls_tables().map(|t| t.table_name()).collect();
+    ///     db.forced_rls_tables()?.map(|t| t.table_name()).collect();
     /// assert_eq!(forced_rls_table_names.len(), 1);
     /// assert_eq!(forced_rls_table_names[0], "forced_rls_table");
     /// # Ok(())
     /// # }
     /// ```
-    fn forced_rls_tables(&self) -> impl Iterator<Item = &Self::Table> {
-        self.tables().filter(|table| table.has_forced_row_level_security(self))
+    fn forced_rls_tables(&self) -> Result<impl Iterator<Item = &Self::Table>, LookupError> {
+        let mut tables = Vec::new();
+        for table in self.tables() {
+            if table.has_forced_row_level_security(self)? {
+                tables.push(table);
+            }
+        }
+
+        Ok(tables.into_iter())
     }
 
     /// Returns whether the database has any tables with Row Level Security
     /// enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError`] when the metadata of one of the tables this
+    /// database reports cannot be resolved.
     ///
     /// # Example
     ///
@@ -719,19 +778,24 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ALTER TABLE t ENABLE ROW LEVEL SECURITY;
     /// ",
     /// )?;
-    /// assert!(db_with_rls.has_rls_tables());
+    /// assert!(db_with_rls.has_rls_tables()?);
     ///
     /// let db_without_rls = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
-    /// assert!(!db_without_rls.has_rls_tables());
+    /// assert!(!db_without_rls.has_rls_tables()?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn has_rls_tables(&self) -> bool {
-        self.rls_tables().next().is_some()
+    fn has_rls_tables(&self) -> Result<bool, LookupError> {
+        Ok(self.rls_tables()?.next().is_some())
     }
 
     /// Returns the number of tables with Row Level Security enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError`] when the metadata of one of the tables this
+    /// database reports cannot be resolved.
     ///
     /// # Example
     ///
@@ -748,13 +812,13 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// CREATE TABLE t3 (id INT);
     /// ",
     /// )?;
-    /// assert_eq!(db.number_of_rls_tables(), 2);
+    /// assert_eq!(db.number_of_rls_tables()?, 2);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn number_of_rls_tables(&self) -> usize {
-        self.rls_tables().count()
+    fn number_of_rls_tables(&self) -> Result<usize, LookupError> {
+        Ok(self.rls_tables()?.count())
     }
 
     /// Iterates over the table grants defined in the database.

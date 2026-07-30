@@ -13,6 +13,7 @@ use sqlparser::ast::{
 };
 
 use crate::{
+    errors::LookupError,
     structs::ParserDB,
     traits::{
         ColumnGrantLike, ColumnLike, DatabaseLike, GrantLike, Metadata, RoleLike, TableGrantLike,
@@ -515,7 +516,7 @@ impl ColumnGrantLike for Grant {
         &'a self,
         table: &'a <Self::DB as DatabaseLike>::Table,
         database: &'a Self::DB,
-    ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Column> {
+    ) -> Result<impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Column>, LookupError> {
         let column_idents: Vec<&Ident> = match &self.privileges {
             Privileges::All { .. } => Vec::new(),
             Privileges::Actions(actions) => {
@@ -542,9 +543,9 @@ impl ColumnGrantLike for Grant {
             }
         };
 
-        table
-            .columns(database)
-            .filter(move |col| column_idents.iter().any(|ident| ident.value == col.column_name()))
+        Ok(table
+            .columns(database)?
+            .filter(move |col| column_idents.iter().any(|ident| ident.value == col.column_name())))
     }
 
     fn table<'a>(

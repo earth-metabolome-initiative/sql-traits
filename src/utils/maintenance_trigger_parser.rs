@@ -11,11 +11,28 @@ use sqlparser::{
     tokenizer::{Token, Tokenizer},
 };
 
-use crate::traits::{DatabaseLike, TableLike};
+use crate::{
+    errors::LookupError,
+    traits::{DatabaseLike, TableLike},
+};
 
 /// Result type for maintenance assignments.
 pub type MaintenanceAssignments<'a, T> =
     Vec<(&'a <<T as TableLike>::DB as DatabaseLike>::Column, Expr)>;
+
+/// Why a trigger body is not usable as a maintenance trigger body.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum MaintenanceBodyError {
+    /// The body is not a run of `NEW.column = expression;` assignments followed
+    /// by `RETURN NEW;`, or it assigns to a column the host table does not
+    /// declare.
+    #[error("The trigger body is not a maintenance trigger body.")]
+    NotMaintenanceBody,
+    /// Resolving an assigned column against the database failed, so whether the
+    /// body is a maintenance body cannot be decided.
+    #[error(transparent)]
+    Lookup(#[from] LookupError),
+}
 
 /// Parses the body of a trigger function.
 ///
@@ -29,25 +46,25 @@ pub type MaintenanceAssignments<'a, T> =
 ///
 /// * `Ok(Vec<(&Column, Expr)>)` - A vector of column-expression pairs
 ///   representing assignments.
-/// * `Err(())` - If parsing fails or invalid references are found.
 ///
 /// # Errors
 ///
-/// Returns `Err(())` if the body is not a valid maintenance trigger body or
-/// contains invalid column references.
-#[allow(clippy::result_unit_err)]
+/// Returns [`MaintenanceBodyError::NotMaintenanceBody`] when the body does not
+/// have the shape of a maintenance trigger body or assigns to a column `table`
+/// does not declare, and [`MaintenanceBodyError::Lookup`] when `database` does
+/// not hold `table`, in which case the question cannot be decided either way.
 pub fn parse_maintenance_body<'a, T>(
     body: &str,
     table: &'a T,
     database: &'a T::DB,
-) -> Result<MaintenanceAssignments<'a, T>, ()>
+) -> Result<MaintenanceAssignments<'a, T>, MaintenanceBodyError>
 where
     T: TableLike,
 {
     let dialect = PostgreSqlDialect {};
     let mut tokenizer = Tokenizer::new(&dialect, body);
     let Ok(tokens) = tokenizer.tokenize() else {
-        return Err(());
+        return Err(MaintenanceBodyError::NotMaintenanceBody);
     };
 
     let mut assignments = Vec::new();
@@ -57,21 +74,24 @@ where
         match iter.next() {
             Some(Ok(MaintenanceToken::Assignment(col_name, expr))) => {
                 // Verify column exists
-                let Some(column) = table.column(&col_name, database) else {
-                    return Err(());
+                let Some(column) = table.column(&col_name, database)? else {
+                    return Err(MaintenanceBodyError::NotMaintenanceBody);
                 };
                 assignments.push((column, *expr));
             }
             Some(Ok(MaintenanceToken::End)) => {
-                iter.finalize()?;
+                if iter.finalize().is_err() {
+                    return Err(MaintenanceBodyError::NotMaintenanceBody);
+                }
                 break;
             }
-            Some(Err(())) | None => return Err(()), // Reached EOF without RETURN NEW
+            // Reached EOF without RETURN NEW
+            Some(Err(())) | None => return Err(MaintenanceBodyError::NotMaintenanceBody),
         }
     }
 
     if assignments.is_empty() {
-        return Err(());
+        return Err(MaintenanceBodyError::NotMaintenanceBody);
     }
 
     Ok(assignments)
@@ -268,7 +288,7 @@ mod tests {
     use super::*;
     use crate::{structs::ParserDB, traits::DatabaseLike};
 
-    fn parse(schema_sql: &str, body: &str) -> Result<usize, ()> {
+    fn parse(schema_sql: &str, body: &str) -> Result<usize, MaintenanceBodyError> {
         let db =
             ParserDB::parse::<GenericDialect>(schema_sql).expect("Failed to create DB from schema");
         let table = db.table(None, "t").expect("Failed to find table 't'");

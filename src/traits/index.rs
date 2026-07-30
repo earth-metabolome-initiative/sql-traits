@@ -6,6 +6,7 @@ use core::fmt::Debug;
 use sqlparser::ast::Expr;
 
 use crate::{
+    errors::LookupError,
     traits::{DatabaseLike, Metadata, TableLike},
     utils::columns_in_expression::columns_in_expression,
 };
@@ -37,6 +38,11 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
 
     /// Returns the expression of the index as an SQL AST node.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this index.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -46,8 +52,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);")?;
     /// let table = db.table(None, "users").unwrap();
-    /// let index = table.indices(&db).next().unwrap();
-    /// let expr = index.expression(&db);
+    /// let index = table.indices(&db)?.next().unwrap();
+    /// let expr = index.expression(&db)?;
     /// let inner = match expr {
     ///     Expr::Nested(inner) => inner,
     ///     _ => expr,
@@ -56,7 +62,7 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    fn expression<'db>(&'db self, database: &'db Self::DB) -> &'db Expr
+    fn expression<'db>(&'db self, database: &'db Self::DB) -> Result<&'db Expr, LookupError>
     where
         Self: 'db;
 
@@ -72,7 +78,7 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
     /// )?;
     /// let table = db.table(None, "users").unwrap();
-    /// let index = table.indices(&db).next().unwrap();
+    /// let index = table.indices(&db)?.next().unwrap();
     /// assert_eq!(IndexLike::table(index, &db).table_name(), "users");
     /// # Ok(())
     /// # }
@@ -84,6 +90,11 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// Returns whether the index is defined using simply columns
     /// and no other expressions.
     ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this index.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -94,22 +105,27 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
     /// )?;
     /// let table = db.table(None, "users").unwrap();
-    /// let index = table.indices(&db).next().unwrap();
-    /// assert!(index.is_simple(&db));
+    /// let index = table.indices(&db)?.next().unwrap();
+    /// assert!(index.is_simple(&db)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    fn is_simple(&self, database: &Self::DB) -> bool {
-        let expr = self.expression(database);
+    fn is_simple(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        let expr = self.expression(database)?;
         let inner_expr = match expr {
             Expr::Nested(inner) => inner,
             _ => expr,
         };
-        matches!(inner_expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Tuple(_))
+        Ok(matches!(inner_expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_) | Expr::Tuple(_)))
     }
 
     /// Returns the columns which appear in the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this index.
     ///
     /// # Example
     ///
@@ -121,8 +137,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
     /// )?;
     /// let table = db.table(None, "users").unwrap();
-    /// let index = table.indices(&db).next().unwrap();
-    /// let columns: Vec<_> = index.columns(&db).collect();
+    /// let index = table.indices(&db)?.next().unwrap();
+    /// let columns: Vec<_> = index.columns(&db)?.collect();
     /// assert_eq!(columns.len(), 1);
     /// assert_eq!(columns[0].column_name(), "name");
     /// # Ok(())
@@ -131,21 +147,21 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     fn columns<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
         let table = <Self as IndexLike>::table(self, database);
-        let expr = self.expression(database);
+        let expr = self.expression(database)?;
 
         let all_columns: Vec<&<Self::DB as DatabaseLike>::Column> =
-            table.columns(database).collect();
+            table.columns(database)?.collect();
 
         let table_name = table.table_name();
 
         let found_cols: Vec<&<Self::DB as DatabaseLike>::Column> =
             columns_in_expression(expr, table_name, &all_columns).unwrap_or_default();
 
-        found_cols.into_iter()
+        Ok(found_cols.into_iter())
     }
 }

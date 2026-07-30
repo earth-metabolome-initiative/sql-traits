@@ -33,7 +33,7 @@ impl<I: IndexLike> IndexMetadata<I> {
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT); CREATE INDEX idx ON t(id);")?;
     /// let table = db.table(None, "t").unwrap();
-    /// let index = table.indices(&db).next().unwrap();
+    /// let index = table.indices(&db)?.next().unwrap();
     /// let meta = db.index_metadata(index).unwrap();
     /// // The expression is the parenthesized column list as parsed.
     /// assert_eq!(meta.expression().to_string(), "(id)");
@@ -57,7 +57,7 @@ impl<I: IndexLike> IndexMetadata<I> {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_t (id INT); CREATE INDEX idx ON my_t(id);",
     /// )?;
-    /// let index = db.table(None, "my_t").unwrap().indices(&db).next().unwrap();
+    /// let index = db.table(None, "my_t").unwrap().indices(&db)?.next().unwrap();
     /// let meta = db.index_metadata(index).unwrap();
     /// assert_eq!(meta.table().table_name(), "my_t");
     /// # Ok(())

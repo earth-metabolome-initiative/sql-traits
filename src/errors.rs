@@ -4,6 +4,55 @@ use alloc::{string::String, vec::Vec};
 
 use sqlparser::parser::ParserError;
 
+/// Kind of database object a metadata lookup was made for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObjectKind {
+    /// A base table.
+    Table,
+    /// An index declared by a `CREATE INDEX` statement.
+    Index,
+    /// A unique constraint declared inside a `CREATE TABLE` statement.
+    UniqueIndex,
+    /// A `CHECK` constraint declared inside a `CREATE TABLE` statement.
+    CheckConstraint,
+    /// A row level security policy.
+    Policy,
+}
+
+impl core::fmt::Display for ObjectKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Table => "Table",
+            Self::Index => "Index",
+            Self::UniqueIndex => "Unique index",
+            Self::CheckConstraint => "Check constraint",
+            Self::Policy => "Policy",
+        })
+    }
+}
+
+impl ObjectKind {
+    /// Reports an object of this kind that the queried database does not hold,
+    /// identified by its own `name`.
+    #[must_use]
+    pub fn not_in_database(self, name: &str) -> LookupError {
+        LookupError::ObjectNotInDatabase { object_kind: self, object: format!("`{name}`") }
+    }
+
+    /// Reports an anonymous object of this kind that the queried database does
+    /// not hold.
+    ///
+    /// A `CHECK` or `UNIQUE` constraint written without a name has no identity
+    /// of its own, so it is reported by the table it is declared on.
+    #[must_use]
+    pub fn anonymous_not_in_database(self, table_name: &str) -> LookupError {
+        LookupError::ObjectNotInDatabase {
+            object_kind: self,
+            object: format!("declared on table `{table_name}`"),
+        }
+    }
+}
+
 /// Errors produced by identifier-aware lookup and resolution APIs.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum LookupError {
@@ -39,6 +88,28 @@ pub enum LookupError {
         table: String,
         /// Existing conflicting table.
         conflicting_table: String,
+    },
+    /// A database object handed to a metadata accessor is not present in the
+    /// database being queried, for instance because it was renamed away, was
+    /// dropped, or came from a different database.
+    #[error("{object_kind} {object} is not present in the database being queried.")]
+    ObjectNotInDatabase {
+        /// Kind of object that was looked up.
+        object_kind: ObjectKind,
+        /// Best-effort rendering identifying the object: its own quoted name,
+        /// or the table it is declared on when it has no name of its
+        /// own. Build it with [`ObjectKind::not_in_database`] or
+        /// [`ObjectKind::anonymous_not_in_database`] rather than by hand.
+        object: String,
+    },
+    /// A column named by a constraint is not declared by the table that
+    /// constraint resolves it against.
+    #[error("Column `{column_name}` is not declared by table `{table_name}`.")]
+    ColumnNotFound {
+        /// Name of the table the column was looked up in.
+        table_name: String,
+        /// Name of the column that was not found.
+        column_name: String,
     },
 }
 
@@ -284,6 +355,22 @@ pub enum Error {
     AlterSchemaNotFound {
         /// Name of the schema that was not found.
         schema_name: String,
+    },
+    #[error("Failed to build the table dependency graph of database `{catalog_name}`: {reason}")]
+    /// Error indicating that the foreign key graph of a database could not be
+    /// assembled.
+    TableDependencyGraph {
+        /// Name of the database whose graph could not be assembled.
+        catalog_name: String,
+        /// Human-readable reason describing the failure.
+        reason: String,
+    },
+    #[error("The tables of database `{catalog_name}` form a foreign key cycle.")]
+    /// Error indicating that the foreign keys of a database form a cycle, so
+    /// its tables have no topological order.
+    CyclicTableDependencies {
+        /// Name of the database whose tables form a cycle.
+        catalog_name: String,
     },
 }
 
