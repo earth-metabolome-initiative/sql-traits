@@ -2,7 +2,9 @@
 
 pub(crate) mod fingerprint;
 pub mod generic_db;
-pub use generic_db::{GenericDB, ParserDB, ParserDBBuilder};
+pub use generic_db::{
+    GenericDB, GrantResolution, ParseOptions, ParserDB, ParserDBBuilder, UnresolvedGrantReference,
+};
 pub mod metadata;
 mod schema;
 

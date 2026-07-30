@@ -2,6 +2,7 @@
 
 use alloc::{
     borrow::ToOwned,
+    collections::BTreeSet,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -19,10 +20,10 @@ use sqlparser::{
         AlterPolicy, AlterPolicyOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation,
         CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateFunctionBody, CreateIndex,
         CreatePolicy, CreateRole, CreateTable, CreateTrigger, DataType, ExactNumberInfo, Expr,
-        ForeignKeyConstraint, FunctionReturnType, Grant, GranteeName, GranteesType, Ident,
-        IndexColumn, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions,
-        RenameTableNameKind, SchemaName, Statement, TableConstraint, TimezoneInfo,
-        UniqueConstraint, Value, ValueWithSpan,
+        ForeignKeyConstraint, FunctionReturnType, Grant, GrantObjects, Grantee, GranteeName,
+        GranteesType, Ident, IndexColumn, ObjectName, ObjectNamePart, OperateFunctionArg,
+        OrderByExpr, OrderByOptions, RenameTableNameKind, SchemaName, Statement, TableConstraint,
+        TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
     },
     dialect::{Dialect, GenericDialect},
     parser::Parser,
@@ -49,6 +50,9 @@ use crate::{
 };
 
 mod functions_in_expression;
+mod parse_options;
+
+pub use parse_options::{GrantResolution, ParseOptions};
 
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
 /// `CreateTable`.
@@ -531,6 +535,60 @@ fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
     })
 }
 
+/// Returns the identifier a grantee resolves a role by, or `None` when the
+/// grantee names no role of its own: the `PUBLIC` pseudo-role, however
+/// spelled, or a grantee whose name is not a plain identifier.
+fn grantee_role_ident(grantee: &Grantee) -> Option<&Ident> {
+    if grantee.grantee_type == GranteesType::Public {
+        return None;
+    }
+
+    let Some(GranteeName::ObjectName(grantee_name)) = &grantee.name else {
+        return None;
+    };
+    let grantee_ident = object_name_last_identifier(grantee_name)?;
+
+    if grantee_ident.quote_style.is_none() && grantee_ident.value.eq_ignore_ascii_case("PUBLIC") {
+        return None;
+    }
+
+    Some(grantee_ident)
+}
+
+/// Enforces [`GrantResolution::ClosedWorld`] on one `GRANT`: every grantee
+/// names a role, and every table target names a table, that the input has
+/// created up to this statement.
+fn validate_grant_against_builder(
+    builder: &ParserDBBuilder,
+    grant: &Grant,
+) -> Result<(), crate::errors::Error> {
+    for grantee in &grant.grantees {
+        let Some(grantee_ident) = grantee_role_ident(grantee) else {
+            continue;
+        };
+
+        let role_exists =
+            builder.roles().iter().any(|(role, ())| role_matches_lookup_ident(role, grantee_ident));
+        if !role_exists {
+            return Err(crate::errors::Error::RoleNotFoundForGrant {
+                role_name: grantee_ident.value.clone(),
+            });
+        }
+    }
+
+    if let Some(GrantObjects::Tables(tables)) = &grant.objects {
+        for table_obj in tables {
+            if builder.resolve_table_object_name(table_obj)?.is_none() {
+                return Err(crate::errors::Error::TableNotFoundForGrant {
+                    table_name: last_str(table_obj).to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Returns whether a table constraint was declared under `name`.
 ///
 /// PostgreSQL spells the name as a constraint name while MySQL spells some of
@@ -695,6 +753,17 @@ pub type ParserDB = GenericDB<
     SqlparserDialect,
 >;
 
+/// A grant reference that the database it was read from does not hold.
+///
+/// Yielded by [`ParserDB::unresolved_grant_references`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum UnresolvedGrantReference<'a> {
+    /// A grantee naming a role no `CREATE ROLE` in the input creates.
+    Role(&'a Ident),
+    /// A grant target naming a table no `CREATE TABLE` in the input creates.
+    Table(&'a ObjectName),
+}
+
 impl ParserDB {
     /// Resolves a schema using a parsed SQL identifier.
     ///
@@ -815,6 +884,135 @@ impl ParserDB {
             }
         }
         Ok(())
+    }
+
+    /// Reports the grantees and the table targets of this database's grants
+    /// that the database does not itself hold. The grant object shapes the
+    /// closed world never resolved either, `ALL TABLES IN SCHEMA` and the
+    /// sequence and schema forms, are left alone here too.
+    ///
+    /// A [`GrantResolution::ClosedWorld`] parse rejects such a reference on
+    /// the spot, so one surfaces here either because the database was parsed
+    /// under [`GrantResolution::OpenWorld`], or because a later statement
+    /// moved an object out from under a grant that names it: a table rename
+    /// leaves the grant naming the old name. The walk is order-insensitive,
+    /// running against the fully ingested database, so a grant preceding the
+    /// `CREATE ROLE` it names resolves. Each distinct reference is reported
+    /// once, in a deterministic order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`LookupError`] when a grant target is malformed as a table
+    /// name or matches more than one table.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParseOptions::default()
+    ///     .with_grant_resolution(GrantResolution::OpenWorld)
+    ///     .parse::<PostgreSqlDialect>(
+    ///         "CREATE TABLE docs (id uuid PRIMARY KEY);
+    ///          GRANT SELECT ON docs TO app;",
+    ///     )?;
+    ///
+    /// let unresolved: Vec<_> = db.unresolved_grant_references()?.collect();
+    /// assert!(matches!(
+    ///     unresolved[..],
+    ///     [UnresolvedGrantReference::Role(role)] if role.value == "app"
+    /// ));
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    pub fn unresolved_grant_references(
+        &self,
+    ) -> Result<impl Iterator<Item = UnresolvedGrantReference<'_>>, LookupError> {
+        // The parse path records each `GRANT` in both stores, so the set
+        // collapses the two views back into one reference per name.
+        let grants = self
+            .table_grants
+            .iter()
+            .chain(self.column_grants.iter())
+            .map(|(grant, ())| grant.as_ref());
+
+        let mut unresolved = BTreeSet::new();
+        for grant in grants {
+            for grantee in &grant.grantees {
+                let Some(grantee_ident) = grantee_role_ident(grantee) else {
+                    continue;
+                };
+                if !self
+                    .roles
+                    .iter()
+                    .any(|(role, ())| role_matches_lookup_ident(role.as_ref(), grantee_ident))
+                {
+                    unresolved.insert(UnresolvedGrantReference::Role(grantee_ident));
+                }
+            }
+
+            if let Some(GrantObjects::Tables(tables)) = &grant.objects {
+                for table_obj in tables {
+                    if self.resolve_table_object_name(table_obj)?.is_none() {
+                        unresolved.insert(UnresolvedGrantReference::Table(table_obj));
+                    }
+                }
+            }
+        }
+
+        Ok(unresolved.into_iter())
+    }
+
+    /// Checks that every recorded grant resolves: each grantee names a role
+    /// and each table target names a table this database holds.
+    ///
+    /// This is the [`GrantResolution::ClosedWorld`] verdict on a database
+    /// parsed under [`GrantResolution::OpenWorld`], deferred until the whole
+    /// input is in and therefore insensitive to statement order.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first unresolved reference as
+    /// [`RoleNotFoundForGrant`](crate::errors::Error::RoleNotFoundForGrant) or
+    /// [`TableNotFoundForGrant`](crate::errors::Error::TableNotFoundForGrant).
+    /// A malformed or ambiguous target name surfaces as
+    /// [`IdentifierLookupError`](crate::errors::Error::IdentifierLookupError).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let options = ParseOptions::default().with_grant_resolution(GrantResolution::OpenWorld);
+    ///
+    /// let db = options.parse::<PostgreSqlDialect>(
+    ///     "CREATE TABLE docs (id uuid PRIMARY KEY);
+    ///      GRANT SELECT ON docs TO app;
+    ///      CREATE ROLE app;",
+    /// )?;
+    /// assert!(db.validate_grant_targets().is_ok());
+    ///
+    /// let dangling = options.parse::<PostgreSqlDialect>(
+    ///     "CREATE TABLE docs (id uuid PRIMARY KEY); GRANT SELECT ON docs TO app;",
+    /// )?;
+    /// assert!(dangling.validate_grant_targets().is_err());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    pub fn validate_grant_targets(&self) -> Result<(), crate::errors::Error> {
+        match self.unresolved_grant_references()?.next() {
+            Some(UnresolvedGrantReference::Role(grantee_ident)) => {
+                Err(crate::errors::Error::RoleNotFoundForGrant {
+                    role_name: grantee_ident.value.clone(),
+                })
+            }
+            Some(UnresolvedGrantReference::Table(table_obj)) => {
+                Err(crate::errors::Error::TableNotFoundForGrant {
+                    table_name: last_str(table_obj).to_string(),
+                })
+            }
+            None => Ok(()),
+        }
     }
 
     /// Helper function to process check constraints.
@@ -1396,11 +1594,27 @@ impl ParserDB {
     ///
     /// Returns an error if validation fails (e.g. a foreign key references a
     /// non-existent table or column).
-    #[allow(clippy::too_many_lines)]
     pub fn from_statements_with_dialect(
         statements: Vec<Statement>,
         catalog_name: String,
         dialect: SqlparserDialect,
+    ) -> Result<Self, crate::errors::Error> {
+        Self::from_statements_with_options(
+            statements,
+            catalog_name,
+            dialect,
+            ParseOptions::default(),
+        )
+    }
+
+    /// Same as [`Self::from_statements_with_dialect`] but under caller-chosen
+    /// [`ParseOptions`].
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn from_statements_with_options(
+        statements: Vec<Statement>,
+        catalog_name: String,
+        dialect: SqlparserDialect,
+        options: ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
         let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect);
 
@@ -2101,49 +2315,8 @@ impl ParserDB {
                     }
                 }
                 Statement::Grant(grant) => {
-                    // Validate grantees exist (closed world assumption)
-                    for grantee in &grant.grantees {
-                        if grantee.grantee_type == GranteesType::Public {
-                            continue;
-                        }
-
-                        let Some(GranteeName::ObjectName(grantee_name)) = &grantee.name else {
-                            continue;
-                        };
-                        let Some(grantee_ident) = object_name_last_identifier(grantee_name) else {
-                            continue;
-                        };
-
-                        // Skip PUBLIC pseudo-role spelled as identifier.
-                        if grantee_ident.quote_style.is_none()
-                            && grantee_ident.value.eq_ignore_ascii_case("PUBLIC")
-                        {
-                            continue;
-                        }
-
-                        let role_exists = builder
-                            .roles()
-                            .iter()
-                            .any(|(role, ())| role_matches_lookup_ident(role, grantee_ident));
-                        if !role_exists {
-                            return Err(crate::errors::Error::RoleNotFoundForGrant {
-                                role_name: grantee_ident.value.clone(),
-                            });
-                        }
-                    }
-
-                    // Validate tables exist (for table grants)
-                    if let Some(sqlparser::ast::GrantObjects::Tables(tables)) = &grant.objects {
-                        for table_obj in tables {
-                            let table_name = last_str(table_obj);
-                            let table_exists =
-                                builder.resolve_table_object_name(table_obj)?.is_some();
-                            if !table_exists {
-                                return Err(crate::errors::Error::TableNotFoundForGrant {
-                                    table_name: table_name.to_string(),
-                                });
-                            }
-                        }
+                    if options.grant_resolution() == GrantResolution::ClosedWorld {
+                        validate_grant_against_builder(&builder, &grant)?;
                     }
 
                     builder = builder.add_table_grant(Arc::new(grant.clone()), ());
@@ -2170,7 +2343,14 @@ impl ParserDB {
                         });
                     }
 
-                    if !table_application.matched_any && !column_application.matched_any {
+                    // An open world cannot tell a revoke of a privilege the
+                    // input never granted (`pg_dump` emits one per function
+                    // whose default execute privilege was revoked) from a
+                    // revoke of a grant it failed to record.
+                    if options.grant_resolution() == GrantResolution::ClosedWorld
+                        && !table_application.matched_any
+                        && !column_application.matched_any
+                    {
                         return Err(crate::errors::Error::RevokeNotFound(format!(
                             "No matching grant found for REVOKE: {revoke}"
                         )));
@@ -2389,13 +2569,22 @@ impl ParserDB {
     /// # }
     /// ```
     pub fn parse<D: Dialect + Default + 'static>(sql: &str) -> Result<Self, crate::errors::Error> {
+        Self::parse_with_options::<D>(sql, ParseOptions::default())
+    }
+
+    /// Same as [`Self::parse`] but under caller-chosen [`ParseOptions`].
+    pub(crate) fn parse_with_options<D: Dialect + Default + 'static>(
+        sql: &str,
+        options: ParseOptions,
+    ) -> Result<Self, crate::errors::Error> {
         let dialect = D::default();
         let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
-        let mut db = Self::from_statements_with_dialect(
+        let mut db = Self::from_statements_with_options(
             statements,
             "unknown_catalog".to_string(),
             SqlparserDialect::of::<D>(),
+            options,
         )?;
 
         if let Ok(documentation) = SqlDoc::builder_from_str(sql).build::<D>() {
@@ -2490,6 +2679,15 @@ impl ParserDB {
     /// parsing fails.
     #[cfg(feature = "std")]
     pub fn from_paths<D: Dialect + Default>(paths: &[&Path]) -> Result<Self, crate::errors::Error> {
+        Self::from_paths_with_options::<D>(paths, ParseOptions::default())
+    }
+
+    /// Same as [`Self::from_paths`] but under caller-chosen [`ParseOptions`].
+    #[cfg(feature = "std")]
+    pub(crate) fn from_paths_with_options<D: Dialect + Default>(
+        paths: &[&Path],
+        options: ParseOptions,
+    ) -> Result<Self, crate::errors::Error> {
         let mut statements = Vec::new();
         let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
 
@@ -2526,7 +2724,12 @@ impl ParserDB {
             }
         }
 
-        let mut db = Self::from_statements(statements, "unknown_catalog".to_string())?;
+        let mut db = Self::from_statements_with_options(
+            statements,
+            "unknown_catalog".to_string(),
+            SqlparserDialect::default(),
+            options,
+        )?;
 
         if let Ok(documentation) = SqlDoc::builder_from_strs_with_paths(&sql_str).build::<D>() {
             for (table, metadata) in db.tables_metadata_mut() {

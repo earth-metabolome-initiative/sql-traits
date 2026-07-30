@@ -12,7 +12,9 @@ use alloc::{
 use core::fmt::Debug;
 
 pub use builder::GenericDBBuilder;
-pub use sqlparser::{ParserDB, ParserDBBuilder};
+pub use sqlparser::{
+    GrantResolution, ParseOptions, ParserDB, ParserDBBuilder, UnresolvedGrantReference,
+};
 
 use crate::{
     traits::{
