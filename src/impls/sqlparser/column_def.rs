@@ -1,7 +1,10 @@
 //! Submodule implementing the [`ColumnLike`] trait for `sqlparser`'s
 //! [`ColumnDef`] struct.
 
-use alloc::string::{String, ToString};
+use alloc::{
+    borrow::Cow,
+    string::{String, ToString},
+};
 
 use sqlparser::ast::{ColumnDef, CreateTable};
 
@@ -44,7 +47,7 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
     }
 
     #[inline]
-    fn data_type<'db>(&'db self, _database: &'db Self::DB) -> &'db str {
+    fn data_type<'db>(&'db self, _database: &'db Self::DB) -> Cow<'db, str> {
         normalize_sqlparser_type(&self.attribute().data_type)
     }
 

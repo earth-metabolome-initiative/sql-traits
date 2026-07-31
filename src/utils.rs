@@ -2,6 +2,7 @@
 
 mod normalize_postgres_type;
 pub use normalize_postgres_type::normalize_postgres_type;
+pub(crate) use normalize_postgres_type::normalize_postgres_type_cow;
 mod normalize_sqlparser_type;
 pub use normalize_sqlparser_type::normalize_sqlparser_type;
 pub mod columns_in_expression;

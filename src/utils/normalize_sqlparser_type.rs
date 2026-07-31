@@ -1,8 +1,8 @@
 //! Submodule providing a function for normalizing `SQLParser` data types.
 
-use alloc::string::ToString;
+use alloc::{borrow::Cow, format, string::ToString};
 
-use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
+use sqlparser::ast::{ArrayElemTypeDef, DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 
 /// Normalizes `SQLParser` data types to a standard representation.
 ///
@@ -47,6 +47,25 @@ use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 ///     vec![],
 /// );
 /// assert_eq!(normalize_sqlparser_type(&custom_other), "OTHER");
+///
+/// // Arrays canonicalize to `<element>[]` whatever spelling declared them,
+/// // recursing on the element type so nesting survives.
+/// use sqlparser::ast::ArrayElemTypeDef;
+/// let text_array =
+///     DataType::Array(ArrayElemTypeDef::SquareBracket(Box::new(DataType::Text), None));
+/// assert_eq!(normalize_sqlparser_type(&text_array), "TEXT[]");
+///
+/// // A declared length is dropped, exactly as `VARCHAR(255)` drops its length.
+/// let bounded =
+///     DataType::Array(ArrayElemTypeDef::SquareBracket(Box::new(DataType::Text), Some(3)));
+/// assert_eq!(normalize_sqlparser_type(&bounded), "TEXT[]");
+///
+/// // `ARRAY<INT>` and `INT[]` are the same type spelled two ways.
+/// let angle = DataType::Array(ArrayElemTypeDef::AngleBracket(Box::new(DataType::Int(None))));
+/// assert_eq!(normalize_sqlparser_type(&angle), "INT[]");
+///
+/// // An array with no declared element type has nothing to recurse on.
+/// assert_eq!(normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::None)), "ARRAY");
 /// ```
 ///
 /// # Panics
@@ -60,13 +79,34 @@ use sqlparser::ast::{DataType, ObjectName, ObjectNamePart, TimezoneInfo};
 /// // `HugeInt` has no canonical mapping yet — calling normalize panics.
 /// normalize_sqlparser_type(&DataType::HugeInt);
 /// ```
+#[must_use]
+#[inline]
+pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> Cow<'_, str> {
+    match sqlparser_type {
+        // An array's token is assembled from its element's, so unlike every
+        // other token it cannot be a borrow into the input.
+        DataType::Array(ArrayElemTypeDef::None) => Cow::Borrowed("ARRAY"),
+        DataType::Array(
+            ArrayElemTypeDef::AngleBracket(element)
+            | ArrayElemTypeDef::Parenthesis(element)
+            | ArrayElemTypeDef::SquareBracket(element, _),
+        ) => Cow::Owned(format!("{}[]", normalize_sqlparser_type(element))),
+        _ => Cow::Borrowed(fixed_token(sqlparser_type)),
+    }
+}
+
+/// Returns the canonical token of a data type that has a fixed one, which is
+/// every type but an array.
+///
+/// # Panics
+///
+/// Panics on data types not yet supported by the normalizer.
 #[allow(
     clippy::unimplemented,
     reason = "documented, tested behavior: data types without a canonical token are an intentional gap that panics rather than silently mis-normalizing"
 )]
-#[must_use]
 #[inline]
-pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {
+fn fixed_token(sqlparser_type: &DataType) -> &str {
     match sqlparser_type {
         // INT family. Unsigned variants fold to their signed token, dropping
         // `UNSIGNED` as the display width is dropped.
@@ -153,6 +193,8 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use alloc::boxed::Box;
+
     use sqlparser::ast::{DataType, Ident, ObjectName, ObjectNamePart, TimezoneInfo};
 
     use super::*;
@@ -398,5 +440,51 @@ mod tests {
         assert_eq!(normalize_sqlparser_type(&DataType::Int2Unsigned(None)), "INT2");
         assert_eq!(normalize_sqlparser_type(&DataType::Int4Unsigned(None)), "INT4");
         assert_eq!(normalize_sqlparser_type(&DataType::Int8Unsigned(None)), "INT8");
+    }
+
+    /// Every spelling of the same array type folds to the same token, and a
+    /// fixed token stays a borrow so the common case allocates nothing.
+    #[test]
+    fn test_normalize_sqlparser_type_array() {
+        let element = || Box::new(DataType::Int(None));
+
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::SquareBracket(
+                element(),
+                None
+            ))),
+            "INT[]"
+        );
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::SquareBracket(
+                element(),
+                Some(3)
+            ))),
+            "INT[]"
+        );
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::AngleBracket(element()))),
+            "INT[]"
+        );
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::Parenthesis(element()))),
+            "INT[]"
+        );
+        assert_eq!(normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::None)), "ARRAY");
+
+        assert!(matches!(normalize_sqlparser_type(&DataType::Int(None)), Cow::Borrowed("INT")));
+    }
+
+    /// A nested array recurses through the element type, so the depth of the
+    /// declaration survives normalization.
+    #[test]
+    fn test_normalize_sqlparser_type_nested_array() {
+        let inner = DataType::Array(ArrayElemTypeDef::SquareBracket(
+            Box::new(DataType::Timestamp(None, TimezoneInfo::Tz)),
+            None,
+        ));
+        let outer = DataType::Array(ArrayElemTypeDef::SquareBracket(Box::new(inner), Some(2)));
+
+        assert_eq!(normalize_sqlparser_type(&outer), "TIMESTAMPTZ[][]");
     }
 }

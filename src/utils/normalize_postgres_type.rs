@@ -1,5 +1,7 @@
 //! Submodule providing a function for normalizing `PostgreSQL` data types.
 
+use alloc::borrow::Cow;
+
 /// Normalizes `PostgreSQL` data types to a standard representation.
 ///
 /// # Arguments
@@ -21,7 +23,22 @@
 #[must_use]
 #[inline]
 pub fn normalize_postgres_type(pg_type: &str) -> &str {
-    match pg_type.to_lowercase().trim_matches('\"') {
+    canonical_token(pg_type).unwrap_or(pg_type)
+}
+
+/// Normalizes a `PostgreSQL` data type without disturbing its ownership: a
+/// type that has no canonical alias is handed straight back.
+#[must_use]
+#[inline]
+pub(crate) fn normalize_postgres_type_cow(pg_type: Cow<'_, str>) -> Cow<'_, str> {
+    canonical_token(&pg_type).map_or(pg_type, Cow::Borrowed)
+}
+
+/// Returns the canonical spelling of a `PostgreSQL` type alias, or `None` when
+/// the type is already canonical or unknown.
+#[inline]
+fn canonical_token(pg_type: &str) -> Option<&'static str> {
+    Some(match pg_type.to_lowercase().trim_matches('\"') {
         "int2" | "smallint" | "smallserial" => "SMALLINT",
         "int4" | "integer" | "serial" => "INT",
         "int8" | "bigint" | "bigserial" => "BIGINT",
@@ -39,12 +56,14 @@ pub fn normalize_postgres_type(pg_type: &str) -> &str {
         "time" | "time without time zone" => "time without time zone",
         "timetz" | "time with time zone" => "time with time zone",
         "bytea" => "bytea",
-        _ => pg_type,
-    }
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::{borrow::ToOwned, string::String};
+
     use super::*;
 
     #[test]
@@ -142,5 +161,26 @@ mod tests {
     fn test_normalize_postgres_type_fallback() {
         assert_eq!(normalize_postgres_type("custom_type"), "custom_type");
         assert_eq!(normalize_postgres_type("unknown"), "unknown");
+    }
+
+    /// A type with a canonical alias becomes that alias, and one without is
+    /// handed back untouched rather than reallocated.
+    #[test]
+    fn test_normalize_postgres_type_cow_preserves_ownership() {
+        assert_eq!(normalize_postgres_type_cow(Cow::Borrowed("int4")), Cow::Borrowed("INT"));
+        assert!(matches!(
+            normalize_postgres_type_cow(Cow::Owned(String::from("serial"))),
+            Cow::Borrowed("INT")
+        ));
+
+        let array = "TEXT[]".to_owned();
+        let pointer = array.as_ptr();
+        match normalize_postgres_type_cow(Cow::Owned(array)) {
+            Cow::Owned(owned) => {
+                assert_eq!(owned, "TEXT[]");
+                assert_eq!(owned.as_ptr(), pointer, "an unknown type must not be reallocated");
+            }
+            Cow::Borrowed(borrowed) => panic!("an owned unknown type must stay owned: {borrowed}"),
+        }
     }
 }

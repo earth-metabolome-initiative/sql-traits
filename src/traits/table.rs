@@ -806,7 +806,7 @@ pub trait TableLike:
     fn primary_key_type<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> Result<Vec<&'db str>, LookupError> {
+    ) -> Result<Vec<Cow<'db, str>>, LookupError> {
         Ok(self
             .primary_key_columns(database)?
             .map(|col| col.normalized_data_type(database))

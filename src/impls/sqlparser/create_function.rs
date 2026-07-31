@@ -1,6 +1,8 @@
 //! Implementation of the `FunctionLike` trait for sqlparser's `CreateFunction`
 //! type.
 
+use alloc::borrow::Cow;
+
 use sqlparser::ast::{
     CreateFunction, CreateFunctionBody, Expr, FunctionReturnType, ObjectNamePart, Value,
     ValueWithSpan,
@@ -39,14 +41,14 @@ impl FunctionLike for CreateFunction {
     fn argument_type_names<'db>(
         &'db self,
         _database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db str> {
+    ) -> impl Iterator<Item = Cow<'db, str>> {
         self.args
             .iter()
             .flat_map(|args| args.iter().map(|arg| normalize_sqlparser_type(&arg.data_type)))
     }
 
     #[inline]
-    fn return_type_name<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db str> {
+    fn return_type_name<'db>(&'db self, _database: &'db Self::DB) -> Option<Cow<'db, str>> {
         // `FunctionReturnType` was introduced in sqlparser 0.62: `RETURNS T`
         // and `RETURNS SETOF T` are distinct variants wrapping a `DataType`.
         // The canonical type name discards the SETOF marker — semantics here
