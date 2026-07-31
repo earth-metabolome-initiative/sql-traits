@@ -6,7 +6,7 @@ use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 use crate::{
     errors::LookupError,
     traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
-    utils::{identifier_resolution::normalize_identifier, normalize_postgres_type},
+    utils::{identifier_resolution::normalize_identifier, normalize_postgres_type_cow},
 };
 
 /// A trait for types that can be treated as SQL columns.
@@ -117,6 +117,10 @@ pub trait ColumnLike:
 
     /// Returns the data type of the column as a string.
     ///
+    /// The type is a borrowed canonical token whenever the implementation can
+    /// name one literally. An array type has to be assembled from its element
+    /// type, so it is owned.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -136,7 +140,7 @@ pub trait ColumnLike:
     /// # Ok(())
     /// # }
     /// ```
-    fn data_type<'db>(&'db self, database: &'db Self::DB) -> &'db str;
+    fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str>;
 
     /// Returns whether the data type of the column is generative, i.e., it
     /// generates values automatically (e.g., SERIAL in `PostgreSQL`).
@@ -272,8 +276,8 @@ pub trait ColumnLike:
     /// # }
     /// ```
     #[inline]
-    fn normalized_data_type<'db>(&'db self, database: &'db Self::DB) -> &'db str {
-        normalize_postgres_type(self.data_type(database))
+    fn normalized_data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str> {
+        normalize_postgres_type_cow(self.data_type(database))
     }
 
     /// Returns whether the column type is textual.
@@ -305,7 +309,7 @@ pub trait ColumnLike:
     /// ```
     #[inline]
     fn is_textual(&self, database: &Self::DB) -> bool {
-        matches!(self.normalized_data_type(database), "TEXT" | "VARCHAR" | "CHAR")
+        matches!(self.normalized_data_type(database).as_ref(), "TEXT" | "VARCHAR" | "CHAR")
     }
 
     /// Returns whether the column is nullable.
@@ -1216,7 +1220,7 @@ where
     }
 
     #[inline]
-    fn data_type<'db>(&'db self, database: &'db Self::DB) -> &'db str {
+    fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str> {
         (*self).data_type(database)
     }
 
@@ -1270,7 +1274,7 @@ where
     }
 
     #[inline]
-    fn data_type<'db>(&'db self, database: &'db Self::DB) -> &'db str {
+    fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str> {
         (**self).data_type(database)
     }
 

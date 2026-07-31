@@ -5,7 +5,7 @@ use core::{fmt::Debug, hash::Hash};
 
 use crate::{
     traits::{DatabaseLike, Metadata},
-    utils::{identifier_resolution::normalize_identifier, normalize_postgres_type},
+    utils::{identifier_resolution::normalize_identifier, normalize_postgres_type_cow},
 };
 
 /// A trait for describing SQL Function-like entities.
@@ -92,7 +92,7 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     fn argument_type_names<'db>(
         &'db self,
         database: &'db Self::DB,
-    ) -> impl Iterator<Item = &'db str>;
+    ) -> impl Iterator<Item = Cow<'db, str>>;
 
     /// Returns the normalized argument type names (if any) of the function as
     /// strings.
@@ -116,8 +116,11 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// # Ok(())
     /// # }
     /// ```
-    fn normalized_argument_type_names<'db>(&'db self, database: &'db Self::DB) -> Vec<&'db str> {
-        self.argument_type_names(database).map(normalize_postgres_type).collect()
+    fn normalized_argument_type_names<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Vec<Cow<'db, str>> {
+        self.argument_type_names(database).map(normalize_postgres_type_cow).collect()
     }
 
     /// Returns the return type name of the function as a string.
@@ -144,7 +147,7 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// # Ok(())
     /// # }
     /// ```
-    fn return_type_name<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str>;
+    fn return_type_name<'db>(&'db self, database: &'db Self::DB) -> Option<Cow<'db, str>>;
 
     /// Returns the body of the function.
     ///
@@ -191,8 +194,11 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// # }
     /// ```
     #[inline]
-    fn normalized_return_type_name<'db>(&'db self, database: &'db Self::DB) -> Option<&'db str> {
-        self.return_type_name(database).map(normalize_postgres_type)
+    fn normalized_return_type_name<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Option<Cow<'db, str>> {
+        self.return_type_name(database).map(normalize_postgres_type_cow)
     }
 }
 
@@ -220,7 +226,7 @@ mod tests {
         // `normalized_return_type_name` default delegates to
         // `return_type_name` then runs the result through
         // `normalize_postgres_type`.
-        assert_eq!(f.normalized_return_type_name(&db), Some("INT"));
+        assert_eq!(f.normalized_return_type_name(&db).as_deref(), Some("INT"));
     }
 
     #[test]
@@ -296,7 +302,7 @@ mod tests {
         assert_eq!(func.name(), "my_func");
 
         // Should have the new return type
-        assert_eq!(func.return_type_name(&db), Some("TEXT"));
+        assert_eq!(func.return_type_name(&db).as_deref(), Some("TEXT"));
     }
 
     #[test]
