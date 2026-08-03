@@ -2,6 +2,7 @@
 
 use alloc::{
     borrow::ToOwned,
+    boxed::Box,
     collections::BTreeSet,
     string::{String, ToString},
     sync::Arc,
@@ -25,7 +26,7 @@ use sqlparser::{
         OrderByExpr, OrderByOptions, RenameTableNameKind, SchemaName, Statement, TableConstraint,
         TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
     },
-    dialect::{Dialect, GenericDialect},
+    dialect::Dialect,
     parser::Parser,
     tokenizer::Span,
 };
@@ -1037,19 +1038,20 @@ impl ParserDB {
     }
 
     /// Helper function to create an index expression from columns.
+    ///
+    /// The shape mirrors a parsed parenthesized list, which is what
+    /// [`crate::traits::IndexLike::is_simple`] reads: one key nests, several
+    /// keys form a tuple. An ordering qualifier or an operator class qualifies
+    /// a key rather than forming part of the expression, so neither appears
+    /// here.
     fn create_index_expression(columns: &[IndexColumn]) -> Option<Expr> {
-        if columns.is_empty() {
-            return None;
+        match columns {
+            [] => None,
+            [single] => Some(Expr::Nested(Box::new(single.column.expr.clone()))),
+            _ => {
+                Some(Expr::Tuple(columns.iter().map(|column| column.column.expr.clone()).collect()))
+            }
         }
-        let expression_string = format!(
-            "({})",
-            columns.iter().map(|ident| ident.column.to_string()).collect::<Vec<_>>().join(", ")
-        );
-        Parser::new(&GenericDialect)
-            .try_with_sql(expression_string.as_str())
-            .ok()?
-            .parse_expr()
-            .ok()
     }
 
     /// Helper function to process unique constraints.
