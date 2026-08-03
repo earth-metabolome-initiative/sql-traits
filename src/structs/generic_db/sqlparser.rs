@@ -604,6 +604,7 @@ fn table_constraint_has_name(constraint: &TableConstraint, name: &Ident) -> bool
         TableConstraint::FulltextOrSpatial(index) => index.opt_index_name.as_ref(),
         TableConstraint::PrimaryKeyUsingIndex(using_index)
         | TableConstraint::UniqueUsingIndex(using_index) => using_index.name.as_ref(),
+        TableConstraint::Exclude(exclude) => exclude.name.as_ref(),
     };
 
     declared.is_some_and(|declared| {
@@ -1218,6 +1219,7 @@ impl ParserDB {
                             },
                             operator_class: None,
                         }],
+                        include: vec![],
                         index_options: vec![],
                         characteristics: None,
                         nulls_distinct: sqlparser::ast::NullsDistinctOption::None,
@@ -1386,6 +1388,7 @@ impl ParserDB {
                         index_type_display: sqlparser::ast::KeyOrIndexDisplay::None,
                         index_type: None,
                         columns: pk.columns.clone(),
+                        include: pk.include.clone(),
                         index_options: vec![],
                         characteristics: pk.characteristics,
                         nulls_distinct: sqlparser::ast::NullsDistinctOption::None,
