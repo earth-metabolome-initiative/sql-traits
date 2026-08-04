@@ -86,4 +86,11 @@ impl<T, A> TableAttribute<T, A> {
     pub fn attribute(&self) -> &A {
         &self.attribute
     }
+
+    /// Returns a mutable reference to the attribute, for the parse-time
+    /// rewrites that follow a rename.
+    #[inline]
+    pub(crate) fn attribute_mut(&mut self) -> &mut A {
+        &mut self.attribute
+    }
 }

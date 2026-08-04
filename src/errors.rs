@@ -279,6 +279,29 @@ pub enum Error {
         /// Name of the table being dropped.
         table_name: String,
     },
+    #[error(
+        "Cannot drop column `{column_name}` of table `{table_name}`: still referenced from outside the table."
+    )]
+    /// Error indicating that an `ALTER TABLE ... DROP COLUMN` statement names a
+    /// column something outside its table depends on, without saying `CASCADE`.
+    ///
+    /// Indexes and constraints on the table itself are dropped along with the
+    /// column and never raise this.
+    ColumnReferenced {
+        /// Name of the table the column belongs to.
+        table_name: String,
+        /// Name of the column being dropped.
+        column_name: String,
+    },
+    #[error("Column `{column_name}` already exists on table `{table_name}`.")]
+    /// Error indicating that a statement tries to introduce a column name the
+    /// table already declares.
+    ColumnAlreadyExists {
+        /// Name of the table the column belongs to.
+        table_name: String,
+        /// Name of the column that already exists.
+        column_name: String,
+    },
     #[error("Index `{index_name}` not found for DROP INDEX statement.")]
     /// Error indicating that a DROP INDEX statement references an index
     /// that does not exist.

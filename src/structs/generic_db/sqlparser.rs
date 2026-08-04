@@ -8,6 +8,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use core::ops::ControlFlow;
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
@@ -18,13 +19,16 @@ use sql_docs::SqlDoc;
 use sqlparser::parser::ParserError;
 use sqlparser::{
     ast::{
-        AlterPolicy, AlterPolicyOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation,
-        CheckConstraint, ColumnDef, ColumnOption, CreateFunction, CreateFunctionBody, CreateIndex,
-        CreatePolicy, CreateRole, CreateTable, CreateTrigger, DataType, ExactNumberInfo, Expr,
-        ForeignKeyConstraint, FunctionReturnType, Grant, GrantObjects, Grantee, GranteeName,
-        GranteesType, Ident, IndexColumn, ObjectName, ObjectNamePart, OperateFunctionArg,
-        OrderByExpr, OrderByOptions, RenameTableNameKind, SchemaName, Statement, TableConstraint,
-        TimezoneInfo, UniqueConstraint, Value, ValueWithSpan,
+        Action, AlterColumnOperation, AlterPolicy, AlterPolicyOperation, AlterSchema,
+        AlterSchemaOperation, AlterTableOperation, CheckConstraint, ColumnDef, ColumnOption,
+        ColumnOptionDef, CreateFunction, CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole,
+        CreateTable, CreateTrigger, DataType, DropBehavior, ExactNumberInfo, Expr,
+        ForeignKeyConstraint, FunctionReturnType, GeneratedAs, Grant, GrantObjects, Grantee,
+        GranteeName, GranteesType, Ident, IndexColumn, MySQLColumnPosition, ObjectName,
+        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Privileges, Query,
+        RenameTableNameKind, SchemaName, Statement, TableConstraint, TimezoneInfo, TriggerEvent,
+        UniqueConstraint, Value, ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut,
+        visit_relations,
     },
     dialect::Dialect,
     parser::Parser,
@@ -340,6 +344,126 @@ impl ParserDBBuilder {
         }
     }
 
+    /// Whether anything outside the table depends on one of its columns.
+    ///
+    /// The indexes and constraints that live on the table are dropped along
+    /// with the column, so only a foreign key from another table, a policy that
+    /// reads the column, and a trigger that fires on updates to it call for
+    /// `CASCADE`.
+    fn column_has_outside_dependents(
+        &self,
+        table: &StoredTable,
+        declaring: &[StoredTable],
+        column: &NamedColumn,
+    ) -> bool {
+        self.tables().iter().any(|(host, _)| {
+            !table.matches(host.as_ref()) && refers_to_column(host.as_ref(), table, column)
+        }) || self.policies().iter().any(|(policy, _)| {
+            table.named_by(&policy.table_name)
+                && column.in_expressions(policy.as_ref(), table, declaring)
+        }) || self.triggers().iter().any(|(trigger, ())| {
+            table.named_by(&trigger.table_name) && trigger_fires_on_column(trigger, column)
+        })
+    }
+
+    /// Removes what a column carries with it inside its own table: the indexes
+    /// that name it and its entry in the permissions granted on it.
+    ///
+    /// A grant is recorded in both grant stores, so both copies of the
+    /// statement have to lose the column, the same way
+    /// [`Self::remove_table`] sweeps both.
+    fn take_column_dependents(
+        &mut self,
+        table: &StoredTable,
+        declaring: &[StoredTable],
+        column: &NamedColumn,
+    ) {
+        self.indices_mut().retain(|(index, _)| {
+            !(table.matches(TableAttribute::table(index))
+                && (column.in_expressions(index.attribute(), table, declaring)
+                    || column.in_idents(&index.attribute().include)))
+        });
+
+        self.table_grants_mut().retain_mut(|(grant, ())| {
+            !grant_names_table(grant, table) || drop_grant_column(Arc::make_mut(grant), column)
+        });
+        self.column_grants_mut().retain_mut(|(grant, ())| {
+            !grant_names_table(grant, table) || drop_grant_column(Arc::make_mut(grant), column)
+        });
+    }
+
+    /// Removes the objects outside the table that depend on one of its columns,
+    /// and returns the tables whose node changed so the caller can rebuild
+    /// them. Only reached once the statement said `CASCADE`.
+    fn take_column_outside_dependents(
+        &mut self,
+        table: &StoredTable,
+        declaring: &[StoredTable],
+        column: &NamedColumn,
+    ) -> Vec<StoredTable> {
+        self.policies_mut().retain(|(policy, _)| {
+            !(table.named_by(&policy.table_name)
+                && column.in_expressions(policy.as_ref(), table, declaring))
+        });
+        self.triggers_mut().retain(|(trigger, ())| {
+            !(table.named_by(&trigger.table_name) && trigger_fires_on_column(trigger, column))
+        });
+
+        self.tables()
+            .iter()
+            .map(|(host, _)| host.as_ref())
+            .filter(|host| !table.matches(host) && refers_to_column(host, table, column))
+            .map(StoredTable::of)
+            .collect()
+    }
+
+    /// Renames a column in the objects that name it from outside the table's
+    /// own node: the indexes built by `CREATE INDEX`, the policies that
+    /// read it, the triggers that fire on it, and the permissions granted
+    /// on it.
+    fn rewrite_column_references(
+        &mut self,
+        table: &StoredTable,
+        declaring: &[StoredTable],
+        from: &NamedColumn,
+        to: &Ident,
+    ) {
+        for (index, _) in self.indices_mut() {
+            if table.matches(TableAttribute::table(index)) {
+                let index = Arc::make_mut(index).attribute_mut();
+                rename_column_in_expressions(index, table, declaring, from, to);
+                rename_column_idents(&mut index.include, from, to);
+            }
+        }
+
+        for (policy, _) in self.policies_mut() {
+            if table.named_by(&policy.table_name) {
+                rename_column_in_expressions(Arc::make_mut(policy), table, declaring, from, to);
+            }
+        }
+
+        for (trigger, ()) in self.triggers_mut() {
+            if table.named_by(&trigger.table_name) {
+                for event in &mut Arc::make_mut(trigger).events {
+                    if let TriggerEvent::Update(columns) = event {
+                        rename_column_idents(columns, from, to);
+                    }
+                }
+            }
+        }
+
+        for (grant, ()) in self.table_grants_mut() {
+            if grant_names_table(grant, table) {
+                rename_grant_columns(Arc::make_mut(grant), from, to);
+            }
+        }
+        for (grant, ()) in self.column_grants_mut() {
+            if grant_names_table(grant, table) {
+                rename_grant_columns(Arc::make_mut(grant), from, to);
+            }
+        }
+    }
+
     /// Detaches every model object derived from the stored node of a table,
     /// leaving the table entry itself in place.
     ///
@@ -590,6 +714,17 @@ impl StoredTable {
             self.schema_quoted,
         )
     }
+
+    /// Whether an identifier used to qualify a column reference denotes this
+    /// table.
+    fn qualifies(&self, ident: &Ident) -> bool {
+        identifiers_match(
+            &self.name,
+            self.name_quoted,
+            ident.value.as_str(),
+            ident.quote_style.is_some(),
+        )
+    }
 }
 
 /// The name a rename moves a table to, and whether the schema moved with it.
@@ -693,6 +828,21 @@ fn rewrite_grant_tables(grant: &mut Grant, renamed: &StoredTable, target: &Renam
     }
 }
 
+/// Whether a grant lists a table among its targets.
+fn grant_names_table(grant: &Grant, table: &StoredTable) -> bool {
+    matches!(&grant.objects, Some(GrantObjects::Tables(tables))
+        if tables.iter().any(|named| table.named_by(named)))
+}
+
+/// Restates a column's type and options, which is what MySQL's `CHANGE COLUMN`
+/// and `MODIFY COLUMN` do: the clause carries the whole declaration, so what it
+/// leaves out is dropped rather than kept.
+fn redeclare_column(declared: &mut ColumnDef, data_type: DataType, options: Vec<ColumnOption>) {
+    declared.data_type = data_type;
+    declared.options =
+        options.into_iter().map(|option| ColumnOptionDef { name: None, option }).collect();
+}
+
 /// Whether any foreign key on `node` targets `renamed`.
 fn table_references(node: &CreateTable, renamed: &StoredTable) -> bool {
     let in_constraints = node.constraints.iter().any(|constraint| {
@@ -707,6 +857,463 @@ fn table_references(node: &CreateTable, renamed: &StoredTable) -> bool {
                     if renamed.named_by(&foreign_key.foreign_table))
             })
         })
+}
+
+/// Every foreign key a table declares, in either spelling.
+fn foreign_keys_of(node: &CreateTable) -> impl Iterator<Item = &ForeignKeyConstraint> {
+    node.constraints
+        .iter()
+        .filter_map(|constraint| {
+            match constraint {
+                TableConstraint::ForeignKey(foreign_key) => Some(foreign_key),
+                _ => None,
+            }
+        })
+        .chain(node.columns.iter().flat_map(|column| {
+            column.options.iter().filter_map(|option| {
+                match &option.option {
+                    ColumnOption::ForeignKey(foreign_key) => Some(foreign_key),
+                    _ => None,
+                }
+            })
+        }))
+}
+
+/// A column identifier as a statement spells it, for matching against the
+/// identifiers and expressions the model stores.
+struct NamedColumn {
+    name: String,
+    quoted: bool,
+}
+
+impl NamedColumn {
+    fn of(ident: &Ident) -> Self {
+        Self { name: ident.value.clone(), quoted: ident.quote_style.is_some() }
+    }
+
+    fn matches(&self, ident: &Ident) -> bool {
+        identifiers_match(
+            &self.name,
+            self.quoted,
+            ident.value.as_str(),
+            ident.quote_style.is_some(),
+        )
+    }
+
+    fn declared_by(&self, node: &CreateTable) -> bool {
+        node.columns.iter().any(|column| self.matches(&column.name))
+    }
+
+    fn in_idents(&self, idents: &[Ident]) -> bool {
+        idents.iter().any(|ident| self.matches(ident))
+    }
+
+    /// Whether any expression the node carries names this column of `table`.
+    fn in_expressions<N: Visit>(
+        &self,
+        node: &N,
+        table: &StoredTable,
+        declaring: &[StoredTable],
+    ) -> bool {
+        let mut mentioned = ColumnMentioned { scope: ColumnScope::new(self, table, declaring) };
+        node.visit(&mut mentioned).is_break()
+    }
+}
+
+/// Decides, while walking a condition, whether a column mention belongs to the
+/// table being altered.
+///
+/// A mention carrying a table prefix belongs to that table. A mention without
+/// one belongs to a nested query when that query reads a table declaring the
+/// same name, and otherwise can only be the altered table's.
+struct ColumnScope<'a> {
+    column: &'a NamedColumn,
+    table: &'a StoredTable,
+    /// The other tables of the input that declare a column of this name.
+    declaring: &'a [StoredTable],
+    /// One entry per nested query currently open, set when that query reads a
+    /// table declaring the name.
+    nested: Vec<bool>,
+}
+
+impl<'a> ColumnScope<'a> {
+    fn new(column: &'a NamedColumn, table: &'a StoredTable, declaring: &'a [StoredTable]) -> Self {
+        Self { column, table, declaring, nested: Vec::new() }
+    }
+
+    fn enter(&mut self, query: &Query) {
+        let reads_declaring = !self.declaring.is_empty()
+            && visit_relations(query, |relation| {
+                if self.declaring.iter().any(|declared| declared.named_by(relation)) {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .is_break();
+        self.nested.push(reads_declaring);
+    }
+
+    fn leave(&mut self) {
+        self.nested.pop();
+    }
+
+    /// Whether the expression names the altered table's column.
+    fn names(&self, expr: &Expr) -> bool {
+        match expr {
+            // A bare mention belongs to an enclosing nested query when one of
+            // them reads a table declaring the name.
+            Expr::Identifier(ident) => {
+                self.column.matches(ident) && !self.nested.iter().any(|reads| *reads)
+            }
+            // A prefix that is an alias rather than the table name denotes
+            // nothing here, which errs towards leaving a mention alone.
+            Expr::CompoundIdentifier(parts) => {
+                match parts.as_slice() {
+                    [.., qualifier, column] => {
+                        self.column.matches(column) && self.table.qualifies(qualifier)
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Breaks on the first expression naming the column.
+struct ColumnMentioned<'a> {
+    scope: ColumnScope<'a>,
+}
+
+impl Visitor for ColumnMentioned<'_> {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
+        self.scope.enter(query);
+        ControlFlow::Continue(())
+    }
+
+    fn post_visit_query(&mut self, _query: &Query) -> ControlFlow<()> {
+        self.scope.leave();
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<()> {
+        if self.scope.names(expr) { ControlFlow::Break(()) } else { ControlFlow::Continue(()) }
+    }
+}
+
+/// Rewrites every expression naming the column.
+struct ColumnRenamer<'a> {
+    scope: ColumnScope<'a>,
+    to: &'a Ident,
+}
+
+impl VisitorMut for ColumnRenamer<'_> {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, query: &mut Query) -> ControlFlow<()> {
+        self.scope.enter(query);
+        ControlFlow::Continue(())
+    }
+
+    fn post_visit_query(&mut self, _query: &mut Query) -> ControlFlow<()> {
+        self.scope.leave();
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<()> {
+        if self.scope.names(expr) {
+            match expr {
+                Expr::Identifier(ident) => *ident = self.to.clone(),
+                Expr::CompoundIdentifier(parts) => {
+                    if let Some(last) = parts.last_mut() {
+                        *last = self.to.clone();
+                    }
+                }
+                _ => {}
+            }
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+/// Renames every mention of a column in the expressions a node carries.
+///
+/// The identifier lists a node also carries, a foreign key's column list among
+/// them, are not expressions and are rewritten by the caller.
+fn rename_column_in_expressions<N: VisitMut>(
+    node: &mut N,
+    table: &StoredTable,
+    declaring: &[StoredTable],
+    from: &NamedColumn,
+    to: &Ident,
+) {
+    let mut renamer = ColumnRenamer { scope: ColumnScope::new(from, table, declaring), to };
+    let _: ControlFlow<()> = node.visit(&mut renamer);
+}
+
+/// The tables other than `altered` that declare a column of this name.
+///
+/// A bare mention inside a nested query reading one of them belongs to it
+/// rather than to the altered table.
+fn tables_declaring_column(
+    builder: &ParserDBBuilder,
+    altered: &StoredTable,
+    column: &NamedColumn,
+) -> Vec<StoredTable> {
+    builder
+        .tables()
+        .iter()
+        .map(|(table, _)| table.as_ref())
+        .filter(|table| !altered.matches(table) && column.declared_by(table))
+        .map(StoredTable::of)
+        .collect()
+}
+
+fn rename_column_idents(idents: &mut [Ident], from: &NamedColumn, to: &Ident) {
+    for ident in idents {
+        if from.matches(ident) {
+            *ident = to.clone();
+        }
+    }
+}
+
+/// Renames a column everywhere the table's own node names it.
+///
+/// A foreign key's local column list names this table's columns and always
+/// follows. Its referred column list names the target table's columns, so it
+/// follows only when the target is this same table.
+fn rename_column_in_node(
+    node: &mut CreateTable,
+    table: &StoredTable,
+    declaring: &[StoredTable],
+    from: &NamedColumn,
+    to: &Ident,
+) {
+    for column in &mut node.columns {
+        if from.matches(&column.name) {
+            column.name = to.clone();
+        }
+    }
+
+    rename_column_in_expressions(node, table, declaring, from, to);
+
+    for foreign_key in foreign_keys_of_mut(node) {
+        rename_column_idents(&mut foreign_key.columns, from, to);
+        if table.named_by(&foreign_key.foreign_table) {
+            rename_column_idents(&mut foreign_key.referred_columns, from, to);
+        }
+    }
+
+    // An exclusion constraint's `INCLUDE` list is plain identifiers rather than
+    // expressions, so the walker above does not reach it.
+    for constraint in &mut node.constraints {
+        if let TableConstraint::Exclude(exclude) = constraint {
+            rename_column_idents(&mut exclude.include, from, to);
+        }
+    }
+}
+
+/// Renames the columns a node's foreign keys name in `target`.
+fn rename_referred_columns(
+    node: &mut CreateTable,
+    target: &StoredTable,
+    from: &NamedColumn,
+    to: &Ident,
+) {
+    for foreign_key in foreign_keys_of_mut(node) {
+        if target.named_by(&foreign_key.foreign_table) {
+            rename_column_idents(&mut foreign_key.referred_columns, from, to);
+        }
+    }
+}
+
+/// Every foreign key a table declares, in either spelling, for mutation.
+fn foreign_keys_of_mut(node: &mut CreateTable) -> impl Iterator<Item = &mut ForeignKeyConstraint> {
+    node.constraints
+        .iter_mut()
+        .filter_map(|constraint| {
+            match constraint {
+                TableConstraint::ForeignKey(foreign_key) => Some(foreign_key),
+                _ => None,
+            }
+        })
+        .chain(node.columns.iter_mut().flat_map(|column| {
+            column.options.iter_mut().filter_map(|option| {
+                match &mut option.option {
+                    ColumnOption::ForeignKey(foreign_key) => Some(foreign_key),
+                    _ => None,
+                }
+            })
+        }))
+}
+
+/// Whether a constraint involves a column of the table it is attached to.
+fn constraint_involves_column(
+    constraint: &TableConstraint,
+    table: &StoredTable,
+    declaring: &[StoredTable],
+    column: &NamedColumn,
+) -> bool {
+    match constraint {
+        TableConstraint::ForeignKey(foreign_key) => {
+            column.in_idents(&foreign_key.columns)
+                || (table.named_by(&foreign_key.foreign_table)
+                    && column.in_idents(&foreign_key.referred_columns))
+        }
+        // The `INCLUDE` list is plain identifiers, which the expression walk
+        // does not reach.
+        TableConstraint::Exclude(exclude) => {
+            column.in_idents(&exclude.include) || column.in_expressions(exclude, table, declaring)
+        }
+        other => column.in_expressions(other, table, declaring),
+    }
+}
+
+/// Removes a column and everything the table's own node hangs off it.
+///
+/// The real database drops the indexes and table constraints that involve the
+/// column along with it, so a constraint naming it goes even when it names
+/// other columns too. A constraint reaches a table inline on a sibling column
+/// as well as through the constraint list, and the inline spelling is not
+/// validated when the node is rebuilt, so it has to be swept here too.
+fn drop_column_from_node(
+    node: &mut CreateTable,
+    table: &StoredTable,
+    declaring: &[StoredTable],
+    column: &NamedColumn,
+) {
+    node.columns.retain(|declared| !column.matches(&declared.name));
+    node.constraints
+        .retain(|constraint| !constraint_involves_column(constraint, table, declaring, column));
+
+    for declared in &mut node.columns {
+        declared
+            .options
+            .retain(|option| !option_involves_column(&option.option, table, declaring, column));
+    }
+}
+
+/// Whether a column option involves another column of the same table.
+fn option_involves_column(
+    option: &ColumnOption,
+    table: &StoredTable,
+    declaring: &[StoredTable],
+    column: &NamedColumn,
+) -> bool {
+    match option {
+        ColumnOption::ForeignKey(foreign_key) => {
+            column.in_idents(&foreign_key.columns)
+                || (table.named_by(&foreign_key.foreign_table)
+                    && column.in_idents(&foreign_key.referred_columns))
+        }
+        other => column.in_expressions(other, table, declaring),
+    }
+}
+
+/// Removes the foreign keys a node declares against a column of `target`.
+fn drop_foreign_keys_to_column(node: &mut CreateTable, target: &StoredTable, column: &NamedColumn) {
+    let names = |foreign_key: &ForeignKeyConstraint| {
+        target.named_by(&foreign_key.foreign_table)
+            && column.in_idents(&foreign_key.referred_columns)
+    };
+
+    node.constraints.retain(|constraint| {
+        !matches!(constraint, TableConstraint::ForeignKey(foreign_key) if names(foreign_key))
+    });
+    for declared in &mut node.columns {
+        declared.options.retain(|option| {
+            !matches!(&option.option, ColumnOption::ForeignKey(foreign_key) if names(foreign_key))
+        });
+    }
+}
+
+/// Whether a foreign key on `node` names `column` of the table it targets.
+fn refers_to_column(node: &CreateTable, target: &StoredTable, column: &NamedColumn) -> bool {
+    foreign_keys_of(node).any(|foreign_key| {
+        target.named_by(&foreign_key.foreign_table)
+            && column.in_idents(&foreign_key.referred_columns)
+    })
+}
+
+/// Whether a trigger fires on updates to a named column.
+fn trigger_fires_on_column(trigger: &CreateTrigger, column: &NamedColumn) -> bool {
+    trigger
+        .events
+        .iter()
+        .any(|event| matches!(event, TriggerEvent::Update(columns) if column.in_idents(columns)))
+}
+
+/// Renames the columns a grant names, and reports whether it still names any.
+fn rename_grant_columns(grant: &mut Grant, from: &NamedColumn, to: &Ident) {
+    if let Privileges::Actions(actions) = &mut grant.privileges {
+        for action in actions {
+            if let Some(columns) = action_columns_mut(action) {
+                rename_column_idents(columns, from, to);
+            }
+        }
+    }
+}
+
+/// Drops a column from every list a grant names, and reports whether the grant
+/// still has anything to say.
+///
+/// Every action is stripped before the answer is decided, because a grant may
+/// name columns under more than one action. An action left naming no column has
+/// nothing to grant, so it goes, and a grant left with no action goes with it.
+fn drop_grant_column(grant: &mut Grant, column: &NamedColumn) -> bool {
+    let Privileges::Actions(actions) = &mut grant.privileges else {
+        // A grant of every privilege names no column of its own.
+        return true;
+    };
+
+    if !actions.iter().any(|action| action_columns(action).is_some()) {
+        return true;
+    }
+
+    for action in actions.iter_mut() {
+        retain_action_columns(action, |named| !column.matches(named));
+    }
+    actions.retain(|action| action_columns(action).is_none_or(|columns| !columns.is_empty()));
+
+    !actions.is_empty()
+}
+
+/// The columns an action names, when it is one of the column-scoped actions.
+fn action_columns(action: &Action) -> Option<&[Ident]> {
+    match action {
+        Action::Select { columns }
+        | Action::Insert { columns }
+        | Action::Update { columns }
+        | Action::References { columns } => columns.as_deref(),
+        _ => None,
+    }
+}
+
+fn action_columns_mut(action: &mut Action) -> Option<&mut [Ident]> {
+    match action {
+        Action::Select { columns }
+        | Action::Insert { columns }
+        | Action::Update { columns }
+        | Action::References { columns } => columns.as_deref_mut(),
+        _ => None,
+    }
+}
+
+/// Keeps only the columns an action names that `keep` answers for.
+fn retain_action_columns(action: &mut Action, keep: impl Fn(&Ident) -> bool) {
+    let (Action::Select { columns }
+    | Action::Insert { columns }
+    | Action::Update { columns }
+    | Action::References { columns }) = action
+    else {
+        return;
+    };
+    if let Some(columns) = columns {
+        columns.retain(keep);
+    }
 }
 
 fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
@@ -1380,6 +1987,9 @@ impl ParserDB {
             if renamed {
                 index.table_name = replacement.name.clone();
             }
+            // The expression follows the column list, which a column rename
+            // rewrites, so it is recomputed rather than carried over.
+            let expression = Self::create_index_expression(&index.columns).unwrap_or(expression);
             let index = Arc::new(TableAttribute::new(replacement.clone(), index));
             metadata.add_index(index.clone());
             builder = builder.add_index(index, IndexMetadata::new(expression, replacement.clone()));
@@ -1789,6 +2399,285 @@ impl ParserDB {
         edit(&mut entry.1);
 
         Ok(builder)
+    }
+
+    /// Resolves the table an `ALTER TABLE` names, or reports that it is absent
+    /// unless the statement said `IF EXISTS`.
+    fn alter_table_target(
+        builder: &ParserDBBuilder,
+        table_name: &ObjectName,
+        if_exists: bool,
+    ) -> Result<Option<StoredTable>, crate::errors::Error> {
+        match builder.resolve_table_object_name(table_name)? {
+            Some(resolved) => Ok(Some(StoredTable::of(resolved))),
+            None if if_exists => Ok(None),
+            None => {
+                Err(crate::errors::Error::AlterTableNotFound {
+                    table_name: last_str(table_name).to_string(),
+                })
+            }
+        }
+    }
+
+    /// Returns the stored node of a table whose identity is known to be
+    /// present.
+    fn stored_node<'builder>(
+        builder: &'builder ParserDBBuilder,
+        stored: &StoredTable,
+    ) -> Result<&'builder CreateTable, crate::errors::Error> {
+        builder
+            .tables()
+            .iter()
+            .map(|(table, _)| table.as_ref())
+            .find(|table| stored.matches(table))
+            .ok_or_else(|| ObjectKind::Table.not_in_database(&stored.name).into())
+    }
+
+    /// Adds a column to a table.
+    fn alter_table_add_column(
+        builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        if_exists: bool,
+        column_def: ColumnDef,
+        if_not_exists: bool,
+        position: Option<&MySQLColumnPosition>,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+            return Ok(builder);
+        };
+        let added = NamedColumn::of(&column_def.name);
+
+        if added.declared_by(Self::stored_node(&builder, &stored)?) {
+            if if_not_exists {
+                return Ok(builder);
+            }
+            return Err(crate::errors::Error::ColumnAlreadyExists {
+                table_name: stored.name.clone(),
+                column_name: added.name.clone(),
+            });
+        }
+
+        Self::replace_table_node(builder, &stored, |_, node| {
+            let at = match position {
+                Some(MySQLColumnPosition::First) => 0,
+                Some(MySQLColumnPosition::After(after)) => {
+                    let after = NamedColumn::of(after);
+                    node.columns
+                        .iter()
+                        .position(|declared| after.matches(&declared.name))
+                        .map_or(node.columns.len(), |index| index + 1)
+                }
+                None => node.columns.len(),
+            };
+            node.columns.insert(at, column_def);
+            Ok(())
+        })
+    }
+
+    /// Drops columns from a table, taking with them what the real database
+    /// takes: the indexes and constraints on the table itself go along with the
+    /// column, and anything outside the table calls for `CASCADE`.
+    fn alter_table_drop_columns(
+        mut builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        if_exists: bool,
+        column_names: &[Ident],
+        column_if_exists: bool,
+        cascade: bool,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+            return Ok(builder);
+        };
+
+        for column_name in column_names {
+            let column = NamedColumn::of(column_name);
+
+            if !column.declared_by(Self::stored_node(&builder, &stored)?) {
+                if column_if_exists {
+                    continue;
+                }
+                return Err(LookupError::ColumnNotFound {
+                    table_name: stored.name.clone(),
+                    column_name: column.name.clone(),
+                }
+                .into());
+            }
+
+            // Which other tables declare a column of this name decides who a
+            // mention inside a nested query belongs to, so it is read before
+            // anything moves.
+            let declaring = tables_declaring_column(&builder, &stored, &column);
+
+            if !cascade && builder.column_has_outside_dependents(&stored, &declaring, &column) {
+                return Err(crate::errors::Error::ColumnReferenced {
+                    table_name: stored.name.clone(),
+                    column_name: column.name.clone(),
+                });
+            }
+
+            // The referencing tables lose their foreign key before the column
+            // goes, so that rebuilding them never resolves against a column
+            // that is on its way out.
+            for host in builder.take_column_outside_dependents(&stored, &declaring, &column) {
+                builder = Self::replace_table_node(builder, &host, |_, node| {
+                    drop_foreign_keys_to_column(node, &stored, &column);
+                    Ok(())
+                })?;
+            }
+
+            builder.take_column_dependents(&stored, &declaring, &column);
+            builder = Self::replace_table_node(builder, &stored, |_, node| {
+                drop_column_from_node(node, &stored, &declaring, &column);
+                Ok(())
+            })?;
+        }
+
+        Ok(builder)
+    }
+
+    /// Renames a column and carries every mention of it along.
+    ///
+    /// The mentions outside the table's own node are rewritten first, so that
+    /// the indexes detached and rebuilt with the node already carry the new
+    /// name and their expressions are recomputed from it.
+    fn alter_table_rename_column(
+        mut builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        if_exists: bool,
+        old_column_name: &Ident,
+        new_column_name: &Ident,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+            return Ok(builder);
+        };
+        let from = NamedColumn::of(old_column_name);
+        let to = NamedColumn::of(new_column_name);
+        let node = Self::stored_node(&builder, &stored)?;
+
+        if !from.declared_by(node) {
+            return Err(LookupError::ColumnNotFound {
+                table_name: stored.name.clone(),
+                column_name: from.name.clone(),
+            }
+            .into());
+        }
+        if !from.matches(new_column_name) && to.declared_by(node) {
+            return Err(crate::errors::Error::ColumnAlreadyExists {
+                table_name: stored.name.clone(),
+                column_name: to.name.clone(),
+            });
+        }
+
+        // Both lists are read while the old name is still the key. Which other
+        // tables declare a column of this name decides who a mention inside a
+        // nested query belongs to.
+        let hosts: Vec<StoredTable> = builder
+            .tables()
+            .iter()
+            .map(|(table, _)| table.as_ref())
+            .filter(|host| !stored.matches(host) && refers_to_column(host, &stored, &from))
+            .map(StoredTable::of)
+            .collect();
+        let declaring = tables_declaring_column(&builder, &stored, &from);
+
+        builder.rewrite_column_references(&stored, &declaring, &from, new_column_name);
+        builder = Self::replace_table_node(builder, &stored, |_, node| {
+            rename_column_in_node(node, &stored, &declaring, &from, new_column_name);
+            Ok(())
+        })?;
+        for host in &hosts {
+            builder = Self::replace_table_node(builder, host, |_, node| {
+                rename_referred_columns(node, &stored, &from, new_column_name);
+                Ok(())
+            })?;
+        }
+
+        Ok(builder)
+    }
+
+    /// Applies `edit` to the declaration of one column of a table.
+    fn alter_table_column_def(
+        builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        if_exists: bool,
+        column_name: &Ident,
+        edit: impl FnOnce(&mut ColumnDef),
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+            return Ok(builder);
+        };
+        let column = NamedColumn::of(column_name);
+
+        if !column.declared_by(Self::stored_node(&builder, &stored)?) {
+            return Err(LookupError::ColumnNotFound {
+                table_name: stored.name.clone(),
+                column_name: column.name.clone(),
+            }
+            .into());
+        }
+
+        Self::replace_table_node(builder, &stored, |_, node| {
+            if let Some(declared) =
+                node.columns.iter_mut().find(|declared| column.matches(&declared.name))
+            {
+                edit(declared);
+            }
+            Ok(())
+        })
+    }
+
+    /// Applies an `ALTER COLUMN` operation to a column declaration.
+    ///
+    /// Every operation lands as the column option or data type the same clause
+    /// would have spelled inline in `CREATE TABLE`, so both spellings answer
+    /// alike.
+    fn apply_alter_column(declared: &mut ColumnDef, operation: AlterColumnOperation) {
+        let set = |declared: &mut ColumnDef, option: ColumnOption| {
+            declared.options.push(ColumnOptionDef { name: None, option });
+        };
+
+        match operation {
+            AlterColumnOperation::SetNotNull => {
+                declared.options.retain(|option| !matches!(option.option, ColumnOption::Null));
+                if !declared
+                    .options
+                    .iter()
+                    .any(|option| matches!(option.option, ColumnOption::NotNull))
+                {
+                    set(declared, ColumnOption::NotNull);
+                }
+            }
+            AlterColumnOperation::DropNotNull => {
+                declared.options.retain(|option| !matches!(option.option, ColumnOption::NotNull));
+            }
+            AlterColumnOperation::SetDefault { value } => {
+                declared
+                    .options
+                    .retain(|option| !matches!(option.option, ColumnOption::Default(_)));
+                set(declared, ColumnOption::Default(value));
+            }
+            AlterColumnOperation::DropDefault => {
+                declared
+                    .options
+                    .retain(|option| !matches!(option.option, ColumnOption::Default(_)));
+            }
+            AlterColumnOperation::SetDataType { data_type, .. } => {
+                declared.data_type = data_type;
+            }
+            AlterColumnOperation::AddGenerated { generated_as, sequence_options } => {
+                let generated_keyword = generated_as.is_some();
+                set(
+                    declared,
+                    ColumnOption::Generated {
+                        generated_as: generated_as.unwrap_or(GeneratedAs::ByDefault),
+                        sequence_options,
+                        generation_expr: None,
+                        generation_expr_mode: None,
+                        generated_keyword,
+                    },
+                );
+            }
+        }
     }
 
     /// Creates a new `ParserDB` from a vector of SQL statements and a catalog
@@ -2394,6 +3283,93 @@ impl ParserDB {
                                         }
                                         Ok(())
                                     },
+                                )?;
+                            }
+                            AlterTableOperation::AddColumn {
+                                if_not_exists,
+                                column_def,
+                                column_position,
+                                ..
+                            } => {
+                                builder = Self::alter_table_add_column(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    column_def,
+                                    if_not_exists,
+                                    column_position.as_ref(),
+                                )?;
+                            }
+                            AlterTableOperation::DropColumn {
+                                column_names,
+                                if_exists,
+                                drop_behavior,
+                                ..
+                            } => {
+                                builder = Self::alter_table_drop_columns(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    &column_names,
+                                    if_exists,
+                                    drop_behavior == Some(DropBehavior::Cascade),
+                                )?;
+                            }
+                            AlterTableOperation::RenameColumn {
+                                old_column_name,
+                                new_column_name,
+                            } => {
+                                builder = Self::alter_table_rename_column(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    &old_column_name,
+                                    &new_column_name,
+                                )?;
+                            }
+                            AlterTableOperation::AlterColumn { column_name, op } => {
+                                builder = Self::alter_table_column_def(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    &column_name,
+                                    |declared| Self::apply_alter_column(declared, op),
+                                )?;
+                            }
+                            AlterTableOperation::ChangeColumn {
+                                old_name,
+                                new_name,
+                                data_type,
+                                options,
+                                ..
+                            } => {
+                                builder = Self::alter_table_rename_column(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    &old_name,
+                                    &new_name,
+                                )?;
+                                builder = Self::alter_table_column_def(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    &new_name,
+                                    |declared| redeclare_column(declared, data_type, options),
+                                )?;
+                            }
+                            AlterTableOperation::ModifyColumn {
+                                col_name,
+                                data_type,
+                                options,
+                                ..
+                            } => {
+                                builder = Self::alter_table_column_def(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    &col_name,
+                                    |declared| redeclare_column(declared, data_type, options),
                                 )?;
                             }
                             _ => {}
