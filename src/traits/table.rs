@@ -200,7 +200,8 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE TABLE my_schema.my_table_with_schema (id INT);
+    ///     "CREATE SCHEMA my_schema;
+    /// CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);",
     /// )?;
     /// let table_no_schema = db.table(None, "my_table").unwrap();
@@ -236,7 +237,9 @@ pub trait TableLike:
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
-    ///     "CREATE TABLE My_Schema.t (id INT);
+    ///     "CREATE SCHEMA My_Schema;
+    /// CREATE SCHEMA \"Other\";
+    /// CREATE TABLE My_Schema.t (id INT);
     /// CREATE TABLE \"Other\".u (id INT);
     /// CREATE TABLE v (id INT);",
     /// )?;
@@ -3764,6 +3767,8 @@ mod tests {
         #[test]
         fn test_table_id_matches_global_table_ordering() {
             let sql = "
+                CREATE SCHEMA z_schema;
+                CREATE SCHEMA a_schema;
                 CREATE TABLE z_schema.table_z (id INT PRIMARY KEY);
                 CREATE TABLE table_without_schema (id INT PRIMARY KEY);
                 CREATE TABLE a_schema.table_a (id INT PRIMARY KEY);
@@ -3992,6 +3997,8 @@ mod tests {
         #[test]
         fn test_sensitivity_schema_name() {
             let sql = "
+                CREATE SCHEMA schema_a;
+                CREATE SCHEMA schema_b;
                 CREATE TABLE schema_a.users (id INT PRIMARY KEY, name TEXT);
                 CREATE TABLE schema_b.users (id INT PRIMARY KEY, name TEXT);
             ";
@@ -4487,7 +4494,7 @@ mod tests {
             let mutations: &[(&str, &str, Option<&str>, &str)] = &[
                 (
                     "schema_name",
-                    "CREATE TABLE myschema.users (id INT PRIMARY KEY, name TEXT, score INT NOT NULL);",
+                    "CREATE SCHEMA myschema; CREATE TABLE myschema.users (id INT PRIMARY KEY, name TEXT, score INT NOT NULL);",
                     Some("myschema"),
                     "users",
                 ),

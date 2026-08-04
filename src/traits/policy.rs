@@ -181,6 +181,8 @@ pub trait PolicyLike:
     /// use sql_traits::prelude::*;
     ///
     /// let sql = "
+    /// CREATE ROLE user1;
+    /// CREATE ROLE user2;
     /// CREATE TABLE my_table (id INT);
     /// CREATE POLICY my_policy ON my_table TO user1, user2 USING (true);
     /// CREATE POLICY public_policy ON my_table TO PUBLIC USING (true);

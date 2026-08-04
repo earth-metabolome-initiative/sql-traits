@@ -25,7 +25,7 @@ use sqlparser::{
         CreateTable, CreateTrigger, DataType, DropBehavior, ExactNumberInfo, Expr,
         ForeignKeyConstraint, FunctionReturnType, GeneratedAs, Grant, GrantObjects, Grantee,
         GranteeName, GranteesType, Ident, IndexColumn, MySQLColumnPosition, ObjectName,
-        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Privileges, Query,
+        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Owner, Privileges, Query,
         RenameTableNameKind, SchemaName, Statement, TableConstraint, TimezoneInfo, TriggerEvent,
         UniqueConstraint, Value, ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut,
         visit_relations,
@@ -1349,6 +1349,120 @@ fn grantee_role_ident(grantee: &Grantee) -> Option<&Ident> {
     Some(grantee_ident)
 }
 
+/// Returns the role a policy target names, or `None` when it names no role of
+/// its own.
+///
+/// The grammar spells the pseudo-roles as keywords, and an unquoted `PUBLIC`
+/// means every role rather than one called `public`, so neither ever demanded a
+/// `CREATE ROLE`. This mirrors [`grantee_role_ident`].
+fn policy_role_ident(owner: &Owner) -> Option<&Ident> {
+    let Owner::Ident(role_ident) = owner else {
+        return None;
+    };
+
+    if role_ident.quote_style.is_none() && role_ident.value.eq_ignore_ascii_case("PUBLIC") {
+        return None;
+    }
+
+    Some(role_ident)
+}
+
+/// Enforces [`GrantResolution::ClosedWorld`] on one `CREATE POLICY`: every role
+/// the policy applies to is one the input has created up to this statement.
+///
+/// A policy follows the grant setting rather than the stricter rule for tables,
+/// because a schema dump omits role creation for a policy exactly as it does
+/// for a grant.
+fn validate_policy_roles(
+    builder: &ParserDBBuilder,
+    policy: &CreatePolicy,
+) -> Result<(), crate::errors::Error> {
+    for owner in policy.to.iter().flatten() {
+        let Some(role_ident) = policy_role_ident(owner) else {
+            continue;
+        };
+
+        let role_exists =
+            builder.roles().iter().any(|(role, ())| role_matches_lookup_ident(role, role_ident));
+        if !role_exists {
+            return Err(crate::errors::Error::RoleNotFoundForPolicy {
+                role_name: role_ident.value.clone(),
+                policy_name: policy.name.value.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Checks that a table qualified with a schema names one the input creates.
+///
+/// The default schema is exempt, since no dump emits a statement creating it,
+/// which is the same allowance
+/// [`ParserDB::resolve_table_object_name_with_implicit_public`] makes when
+/// resolving a name against it.
+fn validate_table_schema(
+    builder: &ParserDBBuilder,
+    create_table: &CreateTable,
+) -> Result<(), crate::errors::Error> {
+    let Some(schema_name) = create_table.table_schema() else {
+        return Ok(());
+    };
+    let quoted = create_table.table_schema_is_quoted();
+
+    if identifiers_match(schema_name, quoted, "public", false) {
+        return Ok(());
+    }
+
+    let declared = builder.schemas().iter().any(|(schema, ())| {
+        identifiers_match(schema.name(), schema.is_quoted(), schema_name, quoted)
+    });
+    if declared {
+        return Ok(());
+    }
+
+    Err(crate::errors::Error::SchemaNotFoundForTable {
+        schema_name: schema_name.to_string(),
+        table_name: create_table.table_name().to_string(),
+    })
+}
+
+/// Checks that every plain column an index names is declared by its table.
+///
+/// Entries that are expressions rather than plain columns name no single
+/// column, so they are left alone, matching how an index-shaped constraint is
+/// checked.
+fn validate_index_columns(
+    columns: &[IndexColumn],
+    include: &[Ident],
+    create_table: &CreateTable,
+) -> Result<(), LookupError> {
+    let absent = |ident: &Ident| {
+        (!NamedColumn::of(ident).declared_by(create_table)).then(|| {
+            LookupError::ColumnNotFound {
+                table_name: create_table.name.to_string(),
+                column_name: ident.value.clone(),
+            }
+        })
+    };
+
+    for column in columns {
+        if let Expr::Identifier(name) = &column.column.expr
+            && let Some(error) = absent(name)
+        {
+            return Err(error);
+        }
+    }
+
+    for name in include {
+        if let Some(error) = absent(name) {
+            return Err(error);
+        }
+    }
+
+    Ok(())
+}
+
 /// Enforces [`GrantResolution::ClosedWorld`] on one `GRANT`: every grantee
 /// names a role, and every table target names a table, that the input has
 /// created up to this statement.
@@ -1878,6 +1992,7 @@ impl ParserDB {
                 index_name: create_index.name.as_ref().map_or("<unnamed>", last_str).to_string(),
             });
         };
+        validate_index_columns(&create_index.columns, &create_index.include, table)?;
 
         let index_arc = Arc::new(TableAttribute::new(Arc::new(table.clone()), create_index));
         let Some(expression) = Self::create_index_expression(&index_arc.attribute().columns) else {
@@ -2303,6 +2418,8 @@ impl ParserDB {
         create_table: Arc<CreateTable>,
         mut table_metadata: TableMetadata<CreateTable>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        validate_table_schema(&builder, &create_table)?;
+
         for column in create_table.columns.clone() {
             table_metadata.add_column(Arc::new(TableAttribute::new(create_table.clone(), column)));
         }
@@ -3475,6 +3592,10 @@ impl ParserDB {
                     )?;
                 }
                 Statement::CreatePolicy(policy) => {
+                    if options.grant_resolution() == GrantResolution::ClosedWorld {
+                        validate_policy_roles(&builder, &policy)?;
+                    }
+
                     let using_functions = if let Some(using_expr) = &policy.using {
                         functions_in_expression::functions_in_expression::<Self>(
                             using_expr,

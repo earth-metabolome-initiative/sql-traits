@@ -420,6 +420,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
+    /// CREATE SCHEMA my_schema;
     /// CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);
     /// ",

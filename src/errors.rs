@@ -317,6 +317,31 @@ pub enum Error {
         /// The operation rendered by sqlparser.
         operation: String,
     },
+    #[error("Schema `{schema_name}` not found for table `{table_name}`.")]
+    /// Error indicating that a `CREATE TABLE` statement qualifies its name with
+    /// a schema no `CREATE SCHEMA` in the input creates.
+    ///
+    /// The default schema is exempt, since no dump emits a statement creating
+    /// it.
+    SchemaNotFoundForTable {
+        /// Name of the schema that was not found.
+        schema_name: String,
+        /// Name of the table qualified with it.
+        table_name: String,
+    },
+    #[error("Role `{role_name}` not found for policy `{policy_name}`.")]
+    /// Error indicating that a `CREATE POLICY` statement applies to a role no
+    /// `CREATE ROLE` in the input creates.
+    ///
+    /// Reported under [`crate::structs::GrantResolution::ClosedWorld`], the
+    /// same setting that governs a grant naming an absent role, because a dump
+    /// of a schema omits role creation either way.
+    RoleNotFoundForPolicy {
+        /// Name of the role that was not found.
+        role_name: String,
+        /// Name of the policy applying to it.
+        policy_name: String,
+    },
     #[error("Index `{index_name}` not found for DROP INDEX statement.")]
     /// Error indicating that a DROP INDEX statement references an index
     /// that does not exist.

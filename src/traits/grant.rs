@@ -296,6 +296,7 @@ pub trait TableGrantLike:
     ///
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "
+    /// CREATE SCHEMA other_schema;
     /// CREATE TABLE public.users (id INT);
     /// CREATE TABLE public.posts (id INT);
     /// CREATE TABLE other_schema.data (id INT);

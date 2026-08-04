@@ -218,7 +218,7 @@ const GOLDEN_VECTORS: &[GoldenVector] = &[
     GoldenVector {
         id: "v17_explicit_schema",
         description: "Table with explicit `my_schema` qualifier — differs from v01 only on the schema-name bytes",
-        sql: "CREATE TABLE my_schema.t (id INT PRIMARY KEY);",
+        sql: "CREATE SCHEMA my_schema; CREATE TABLE my_schema.t (id INT PRIMARY KEY);",
         schema: Some("my_schema"),
         table_name: "t",
         canonical_bytes_hex: "5346503100010001000000096d795f736368656d610000000174000000010000000000000002696400000003494e5400000000000100000000",
