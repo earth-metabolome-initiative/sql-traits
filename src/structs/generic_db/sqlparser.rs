@@ -3372,7 +3372,98 @@ impl ParserDB {
                                     |declared| redeclare_column(declared, data_type, options),
                                 )?;
                             }
-                            _ => {}
+
+                            // Refused: each of these changes part of the schema
+                            // the model represents, so discarding it would
+                            // leave the model wrong rather than merely coarse.
+                            // An absent table is reported first, so that a
+                            // statement wrong in both ways names the plainer
+                            // fault and `IF EXISTS` still excuses it.
+                            operation @ (AlterTableOperation::DropPrimaryKey { .. }
+                            | AlterTableOperation::DropForeignKey { .. }
+                            | AlterTableOperation::DropIndex { .. }
+                            | AlterTableOperation::RenameConstraint { .. }
+                            | AlterTableOperation::SwapWith { .. }) => {
+                                if Self::alter_table_target(
+                                    &builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                )?
+                                .is_some()
+                                {
+                                    return Err(
+                                        crate::errors::Error::UnsupportedAlterTableOperation {
+                                            table_name: last_str(&alter_table.name).to_string(),
+                                            operation: operation.to_string(),
+                                        },
+                                    );
+                                }
+                            }
+
+                            // Ignored: the model carries no representation of
+                            // ownership, so nothing it answers can change.
+                            AlterTableOperation::OwnerTo { .. }
+                            // Physical layout: storage parameters, clustering
+                            // and sort keys describe how rows are kept, which
+                            // the model does not describe at all.
+                            | AlterTableOperation::SetTblProperties { .. }
+                            | AlterTableOperation::SetOptionsParens { .. }
+                            | AlterTableOperation::ClusterBy { .. }
+                            | AlterTableOperation::DropClusteringKey
+                            | AlterTableOperation::AlterSortKey { .. }
+                            | AlterTableOperation::SuspendRecluster
+                            | AlterTableOperation::ResumeRecluster
+                            // Partitions: the model describes a table, never the
+                            // partitions it is split across.
+                            | AlterTableOperation::AttachPartition { .. }
+                            | AlterTableOperation::DetachPartition { .. }
+                            | AlterTableOperation::AddPartitions { .. }
+                            | AlterTableOperation::DropPartitions { .. }
+                            | AlterTableOperation::RenamePartitions { .. }
+                            | AlterTableOperation::FreezePartition { .. }
+                            | AlterTableOperation::UnfreezePartition { .. }
+                            // Projections are a ClickHouse object the model has
+                            // no equivalent of.
+                            | AlterTableOperation::AddProjection { .. }
+                            | AlterTableOperation::DropProjection { .. }
+                            | AlterTableOperation::MaterializeProjection { .. }
+                            | AlterTableOperation::ClearProjection { .. }
+                            // Rewrite rules are not modelled, so their
+                            // enablement has nothing to attach to.
+                            | AlterTableOperation::EnableRule { .. }
+                            | AlterTableOperation::EnableAlwaysRule { .. }
+                            | AlterTableOperation::EnableReplicaRule { .. }
+                            | AlterTableOperation::DisableRule { .. }
+                            // A trigger is modelled, but whether it is armed is
+                            // not, so enablement changes nothing answerable.
+                            | AlterTableOperation::EnableTrigger { .. }
+                            | AlterTableOperation::EnableAlwaysTrigger { .. }
+                            | AlterTableOperation::EnableReplicaTrigger { .. }
+                            | AlterTableOperation::DisableTrigger { .. }
+                            // Replication identity selects which columns
+                            // identify a row downstream, which the model does
+                            // not track.
+                            | AlterTableOperation::ReplicaIdentity { .. }
+                            // Constraint validity is not modelled: a constraint
+                            // added `NOT VALID` is already stored as declared,
+                            // so validating it changes nothing.
+                            | AlterTableOperation::ValidateConstraint { .. }
+                            // The next value of an auto-increment counter is
+                            // table data rather than schema.
+                            | AlterTableOperation::AutoIncrement { .. }
+                            // Refresh, suspend and resume drive a Snowflake
+                            // dynamic table's schedule, not its shape.
+                            | AlterTableOperation::Refresh { .. }
+                            | AlterTableOperation::Suspend
+                            | AlterTableOperation::Resume
+                            // MySQL hints choosing how the server performs the
+                            // change, with no effect on the result.
+                            | AlterTableOperation::Algorithm { .. }
+                            | AlterTableOperation::Lock { .. }
+                            // Whether a table is write-ahead logged is a
+                            // durability choice the model does not describe.
+                            | AlterTableOperation::SetLogged
+                            | AlterTableOperation::SetUnlogged => {}
                         }
                     }
                 }

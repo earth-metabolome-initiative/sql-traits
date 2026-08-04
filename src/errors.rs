@@ -302,6 +302,21 @@ pub enum Error {
         /// Name of the column that already exists.
         column_name: String,
     },
+    #[error(
+        "Unsupported `ALTER TABLE` operation on `{table_name}`: `{operation}` changes something this model represents but does not yet apply."
+    )]
+    /// Error indicating that an `ALTER TABLE` operation would change part of
+    /// the schema the model represents, and is not yet applied.
+    ///
+    /// Operations that change something the model represents at all are either
+    /// applied or reported here, so nothing that would leave the model wrong is
+    /// silently discarded.
+    UnsupportedAlterTableOperation {
+        /// Name of the table the statement targets.
+        table_name: String,
+        /// The operation rendered by sqlparser.
+        operation: String,
+    },
     #[error("Index `{index_name}` not found for DROP INDEX statement.")]
     /// Error indicating that a DROP INDEX statement references an index
     /// that does not exist.
