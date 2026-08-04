@@ -311,6 +311,35 @@ impl ParserDBBuilder {
         });
     }
 
+    /// Rewrites every stored reference to a renamed table that names it
+    /// directly rather than wrapping its node.
+    ///
+    /// Mirrors [`Self::remove_table`]: the same stores carry the same
+    /// references, and a rename rewrites where a drop discards. Objects that
+    /// wrap the node instead of naming it are rebuilt from the replacement
+    /// node, so they are not touched here.
+    fn rewrite_table_references(&mut self, renamed: &StoredTable, target: &RenameTarget) {
+        for (trigger, ()) in self.triggers_mut() {
+            if renamed.named_by(&trigger.table_name) {
+                target.rewrite(&mut Arc::make_mut(trigger).table_name);
+            }
+        }
+
+        for (policy, _) in self.policies_mut() {
+            if renamed.named_by(&policy.table_name) {
+                target.rewrite(&mut Arc::make_mut(policy).table_name);
+            }
+        }
+
+        for (grant, ()) in self.table_grants_mut() {
+            rewrite_grant_tables(Arc::make_mut(grant), renamed, target);
+        }
+
+        for (grant, ()) in self.column_grants_mut() {
+            rewrite_grant_tables(Arc::make_mut(grant), renamed, target);
+        }
+    }
+
     /// Detaches every model object derived from the stored node of a table,
     /// leaving the table entry itself in place.
     ///
@@ -521,6 +550,163 @@ fn object_name_matches_resolved_identity(
         }
         _ => false,
     }
+}
+
+/// The four values every table lookup in this module keys on, owned so that it
+/// survives the mutations a rename performs on the stores it walks.
+struct StoredTable {
+    name: String,
+    name_quoted: bool,
+    schema: Option<String>,
+    schema_quoted: bool,
+}
+
+impl StoredTable {
+    fn of(table: &CreateTable) -> Self {
+        Self {
+            name: table.table_name().to_string(),
+            name_quoted: table.table_name_is_quoted(),
+            schema: table.table_schema().map(str::to_string),
+            schema_quoted: table.table_schema_is_quoted(),
+        }
+    }
+
+    fn matches(&self, table: &CreateTable) -> bool {
+        table_matches_resolved_identity(
+            table,
+            &self.name,
+            self.name_quoted,
+            self.schema.as_deref(),
+            self.schema_quoted,
+        )
+    }
+
+    fn named_by(&self, object_name: &ObjectName) -> bool {
+        object_name_matches_resolved_identity(
+            object_name,
+            &self.name,
+            self.name_quoted,
+            self.schema.as_deref(),
+            self.schema_quoted,
+        )
+    }
+}
+
+/// The name a rename moves a table to, and whether the schema moved with it.
+///
+/// A rename within a schema leaves every existing spelling of the reference
+/// resolving, so only the table identifier is replaced and the caller's
+/// qualification survives. A rename across schemas leaves no part of the old
+/// spelling resolving, so the reference is replaced whole.
+struct RenameTarget {
+    name: ObjectName,
+    schema_changed: bool,
+}
+
+impl RenameTarget {
+    /// `ALTER TABLE ... RENAME TO` spells the new name without a schema and
+    /// cannot move a table between schemas, so a bare new name inherits the
+    /// qualification the table already carried. `RENAME TABLE a TO b` may
+    /// spell both sides, and a qualified new name is taken as written.
+    fn new(new_name: ObjectName, current_name: &ObjectName) -> Result<Self, LookupError> {
+        let (new_schema, new_table) = object_name_identifiers(&new_name)?;
+
+        let Some(new_schema) = new_schema else {
+            let new_table = ObjectNamePart::Identifier(new_table.clone());
+            let mut parts = current_name.0.clone();
+            match parts.last_mut() {
+                Some(last) => *last = new_table,
+                None => parts.push(new_table),
+            }
+            return Ok(Self { name: ObjectName(parts), schema_changed: false });
+        };
+
+        let (current_schema, _) = object_name_identifiers(current_name)?;
+        let schema_changed = !current_schema.is_some_and(|current_schema| {
+            identifiers_match(
+                current_schema.value.as_str(),
+                current_schema.quote_style.is_some(),
+                new_schema.value.as_str(),
+                new_schema.quote_style.is_some(),
+            )
+        });
+
+        Ok(Self { name: new_name, schema_changed })
+    }
+
+    fn rewrite(&self, reference: &mut ObjectName) {
+        if self.schema_changed {
+            *reference = self.name.clone();
+            return;
+        }
+        if let Some(new_table) = self.name.0.last()
+            && let Some(last) = reference.0.last_mut()
+        {
+            *last = new_table.clone();
+        }
+    }
+}
+
+/// Rewrites every foreign key in `node` that targets `renamed`.
+///
+/// A foreign key reaches a table either through the constraint list or inline
+/// on a column, and the node is the source of truth for both, so both
+/// spellings are rewritten here rather than in the objects derived from them.
+fn rewrite_foreign_key_targets(
+    node: &mut CreateTable,
+    renamed: &StoredTable,
+    target: &RenameTarget,
+) -> bool {
+    let mut rewritten = false;
+
+    for constraint in &mut node.constraints {
+        if let TableConstraint::ForeignKey(foreign_key) = constraint
+            && renamed.named_by(&foreign_key.foreign_table)
+        {
+            target.rewrite(&mut foreign_key.foreign_table);
+            rewritten = true;
+        }
+    }
+
+    for column in &mut node.columns {
+        for option in &mut column.options {
+            if let ColumnOption::ForeignKey(foreign_key) = &mut option.option
+                && renamed.named_by(&foreign_key.foreign_table)
+            {
+                target.rewrite(&mut foreign_key.foreign_table);
+                rewritten = true;
+            }
+        }
+    }
+
+    rewritten
+}
+
+/// Rewrites the table names a grant lists when they name the renamed table.
+fn rewrite_grant_tables(grant: &mut Grant, renamed: &StoredTable, target: &RenameTarget) {
+    if let Some(GrantObjects::Tables(tables)) = &mut grant.objects {
+        for table in tables {
+            if renamed.named_by(table) {
+                target.rewrite(table);
+            }
+        }
+    }
+}
+
+/// Whether any foreign key on `node` targets `renamed`.
+fn table_references(node: &CreateTable, renamed: &StoredTable) -> bool {
+    let in_constraints = node.constraints.iter().any(|constraint| {
+        matches!(constraint, TableConstraint::ForeignKey(foreign_key)
+            if renamed.named_by(&foreign_key.foreign_table))
+    });
+
+    in_constraints
+        || node.columns.iter().any(|column| {
+            column.options.iter().any(|option| {
+                matches!(&option.option, ColumnOption::ForeignKey(foreign_key)
+                    if renamed.named_by(&foreign_key.foreign_table))
+            })
+        })
 }
 
 fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
@@ -1102,15 +1288,17 @@ impl ParserDB {
         Ok((index_arc, metadata))
     }
 
-    /// Helper function to rename a table while preserving lookup invariants.
+    /// Renames a table and carries every reference to it along.
+    ///
+    /// The rename happens before the referencing tables are rebuilt, because
+    /// rebuilding a table resolves its foreign key targets against the stores
+    /// and would not find the table under either name in between.
     fn rename_table_checked(
         mut builder: ParserDBBuilder,
         old_name: &ObjectName,
         new_name: ObjectName,
         if_exists: bool,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        use crate::traits::TableLike;
-
         let Some(resolved_table) = builder.resolve_table_object_name(old_name)? else {
             if if_exists {
                 return Ok(builder);
@@ -1119,33 +1307,85 @@ impl ParserDB {
                 table_name: last_str(old_name).to_string(),
             });
         };
-        let resolved_table_name = resolved_table.table_name().to_string();
-        let resolved_table_quoted = resolved_table.table_name_is_quoted();
-        let resolved_schema_name = resolved_table.table_schema().map(str::to_string);
-        let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+        let renamed = StoredTable::of(resolved_table);
+        let target = RenameTarget::new(new_name, &resolved_table.name)?;
 
-        let Some(table_position) = builder.tables().iter().position(|(table, _)| {
-            table_matches_resolved_identity(
-                table.as_ref(),
-                &resolved_table_name,
-                resolved_table_quoted,
-                resolved_schema_name.as_deref(),
-                resolved_schema_quoted,
-            )
-        }) else {
-            if if_exists {
-                return Ok(builder);
-            }
-            return Err(crate::errors::Error::RenameTableNotFound {
-                table_name: last_str(old_name).to_string(),
-            });
+        // Collected before the rename, while the old name is still the key.
+        // A self-reference is not in here: the renamed node rewrites its own.
+        let hosts: Vec<StoredTable> = builder
+            .tables()
+            .iter()
+            .map(|(table, _)| table.as_ref())
+            .filter(|table| !renamed.matches(table) && table_references(table, &renamed))
+            .map(StoredTable::of)
+            .collect();
+
+        builder = Self::replace_table_node(builder, &renamed, |_, node| {
+            node.name = target.name.clone();
+            rewrite_foreign_key_targets(node, &renamed, &target);
+            Ok(())
+        })?;
+
+        for host in &hosts {
+            builder = Self::replace_table_node(builder, host, |_, node| {
+                rewrite_foreign_key_targets(node, &renamed, &target);
+                Ok(())
+            })?;
+        }
+
+        builder.rewrite_table_references(&renamed, &target);
+
+        Ok(builder)
+    }
+
+    /// Replaces the stored node of a table with the one `edit` produces and
+    /// recomputes every model object derived from it.
+    ///
+    /// Follows [`Self::alter_table_constraints`]: the node is the single source
+    /// of truth, so objects that follow from it are rebuilt rather than
+    /// patched, and `CREATE INDEX` indexes are detached and re-attached
+    /// because they do not follow from it. An index names its table, so a node
+    /// whose name changed takes its indexes with it.
+    fn replace_table_node(
+        mut builder: ParserDBBuilder,
+        stored: &StoredTable,
+        edit: impl FnOnce(&CreateTable, &mut CreateTable) -> Result<(), crate::errors::Error>,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(position) =
+            builder.tables().iter().position(|(table, _)| stored.matches(table.as_ref()))
+        else {
+            return Err(ObjectKind::Table.not_in_database(&stored.name).into());
         };
 
-        let (old_table, meta) = builder.tables_mut().remove(table_position);
-        let mut renamed_table = (*old_table).clone();
-        renamed_table.name = new_name;
+        let (previous_node, previous_metadata) = builder.tables_mut().remove(position);
+        let mut replacement = (*previous_node).clone();
+        edit(&previous_node, &mut replacement)?;
 
-        builder = builder.add_table(Arc::new(renamed_table), meta)?;
+        let mut metadata: TableMetadata<CreateTable> = TableMetadata::default();
+        metadata.set_rls_enabled(previous_metadata.rls_enabled());
+        metadata.set_rls_forced(previous_metadata.rls_forced());
+
+        let detached_indices = builder.take_table_derived_objects(
+            &stored.name,
+            stored.name_quoted,
+            stored.schema.as_deref(),
+            stored.schema_quoted,
+        );
+
+        let replacement = Arc::new(replacement);
+        // An index names its table, so it follows a changed name. An edit that
+        // leaves the name alone leaves the spelling the caller wrote alone too.
+        let renamed = !stored.matches(&replacement);
+        for (mut index, expression) in detached_indices {
+            if renamed {
+                index.table_name = replacement.name.clone();
+            }
+            let index = Arc::new(TableAttribute::new(replacement.clone(), index));
+            metadata.add_index(index.clone());
+            builder = builder.add_index(index, IndexMetadata::new(expression, replacement.clone()));
+        }
+
+        builder = Self::ingest_table_node(builder, replacement, metadata)?;
         builder.tables_mut().sort_by(|(a, _), (b, _)| {
             (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name()))
         });
@@ -1481,7 +1721,7 @@ impl ParserDB {
     /// table node stays the single source of truth and everything derived from
     /// it is recomputed rather than patched.
     fn alter_table_constraints(
-        mut builder: ParserDBBuilder,
+        builder: ParserDBBuilder,
         table_name: &ObjectName,
         if_exists: bool,
         edit: impl FnOnce(&CreateTable, &mut Vec<TableConstraint>) -> Result<(), crate::errors::Error>,
@@ -1494,57 +1734,11 @@ impl ParserDB {
                 table_name: last_str(table_name).to_string(),
             });
         };
-        let resolved_table_name = resolved_table.table_name().to_string();
-        let resolved_table_quoted = resolved_table.table_name_is_quoted();
-        let resolved_schema_name = resolved_table.table_schema().map(str::to_string);
-        let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+        let stored = StoredTable::of(resolved_table);
 
-        let Some(table_position) = builder.tables().iter().position(|(table, _)| {
-            table_matches_resolved_identity(
-                table.as_ref(),
-                &resolved_table_name,
-                resolved_table_quoted,
-                resolved_schema_name.as_deref(),
-                resolved_schema_quoted,
-            )
-        }) else {
-            if if_exists {
-                return Ok(builder);
-            }
-            return Err(crate::errors::Error::AlterTableNotFound {
-                table_name: last_str(table_name).to_string(),
-            });
-        };
-
-        let (previous_table, previous_metadata) = builder.tables_mut().remove(table_position);
-        let mut altered_table = (*previous_table).clone();
-        edit(&previous_table, &mut altered_table.constraints)?;
-
-        let mut table_metadata: TableMetadata<CreateTable> = TableMetadata::default();
-        table_metadata.set_rls_enabled(previous_metadata.rls_enabled());
-        table_metadata.set_rls_forced(previous_metadata.rls_forced());
-
-        let detached_indices = builder.take_table_derived_objects(
-            &resolved_table_name,
-            resolved_table_quoted,
-            resolved_schema_name.as_deref(),
-            resolved_schema_quoted,
-        );
-
-        let altered_table = Arc::new(altered_table);
-        for (index, expression) in detached_indices {
-            let index = Arc::new(TableAttribute::new(altered_table.clone(), index));
-            table_metadata.add_index(index.clone());
-            builder =
-                builder.add_index(index, IndexMetadata::new(expression, altered_table.clone()));
-        }
-
-        builder = Self::ingest_table_node(builder, altered_table, table_metadata)?;
-        builder.tables_mut().sort_by(|(a, _), (b, _)| {
-            (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name()))
-        });
-
-        Ok(builder)
+        Self::replace_table_node(builder, &stored, |previous, replacement| {
+            edit(previous, &mut replacement.constraints)
+        })
     }
 
     /// Applies `edit` to the metadata of the table an `ALTER TABLE` statement

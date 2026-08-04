@@ -765,9 +765,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trigger_table_reports_dangling_target_after_rename() {
-        // Renaming a table leaves the trigger's stored target name behind, which
-        // is the one way a parsed database can hold an unresolvable trigger.
+    fn test_trigger_follows_a_table_rename() {
         let sql = r"
             CREATE TABLE users (id INT);
             CREATE FUNCTION audit() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
@@ -776,9 +774,30 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let trigger = db.triggers().next().expect("Trigger not found");
+        let table = trigger.table(&db).expect("the rename carried the trigger along");
+
+        assert_eq!(table.table_name(), "people");
+    }
+
+    #[test]
+    fn test_trigger_table_reports_a_target_absent_from_the_database() {
+        // A trigger answers about whichever database it is asked, so different
+        // input is how the absent target is reached now that a rename carries
+        // the trigger along.
+        let with_trigger = ParserDB::parse::<GenericDialect>(
+            r"
+            CREATE TABLE users (id INT);
+            CREATE FUNCTION audit() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+            CREATE TRIGGER tg AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION audit();
+        ",
+        )
+        .expect("Failed to parse SQL");
+        let elsewhere = ParserDB::parse::<GenericDialect>("CREATE TABLE people (id INT);")
+            .expect("Failed to parse SQL");
+        let trigger = with_trigger.triggers().next().expect("Trigger not found");
 
         assert_eq!(
-            trigger.table(&db).err(),
+            trigger.table(&elsewhere).err(),
             Some(LookupError::TableNotFound { object_name: "users".to_string() })
         );
     }

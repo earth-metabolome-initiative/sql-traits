@@ -150,25 +150,41 @@ fn open_world_accepts_the_revoke_pg_dump_emits_for_functions() {
     assert!(db.function("f").is_some());
 }
 
-/// The reporting is not conditional on the open world: a rename leaves a
-/// closed-world schema holding a grant whose target no longer exists.
+/// Under the closed world every grant reference resolves when it is recorded,
+/// and each statement that could move the ground under it either carries the
+/// grant along or refuses. The accessor therefore reports for the open world,
+/// which is the only way to record a reference that does not resolve.
 #[test]
-fn a_rename_leaves_the_grant_it_moved_out_from_under_unresolved() {
-    let db = ParserDB::parse::<PostgreSqlDialect>(
+fn the_closed_world_leaves_no_grant_reference_unresolved() {
+    for sql in [
         "CREATE TABLE docs (id uuid PRIMARY KEY);
          CREATE ROLE app;
          GRANT SELECT ON docs TO app;
          ALTER TABLE docs RENAME TO papers;",
-    )
-    .expect("schema parses");
+        "CREATE TABLE docs (id uuid PRIMARY KEY, title text);
+         CREATE ROLE app;
+         GRANT SELECT (title) ON docs TO app;
+         ALTER TABLE docs RENAME TO papers;",
+        "CREATE TABLE docs (id uuid PRIMARY KEY);
+         CREATE ROLE app;
+         GRANT SELECT ON docs TO app;
+         DROP TABLE docs;",
+    ] {
+        let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema parses");
+        assert_eq!(
+            db.unresolved_grant_references().expect("targets are well formed").count(),
+            0,
+            "{sql}"
+        );
+    }
 
-    let unresolved: Vec<_> =
-        db.unresolved_grant_references().expect("targets are well formed").collect();
-    assert!(
-        matches!(unresolved[..], [UnresolvedGrantReference::Table(table)]
-            if table.to_string() == "docs"),
-        "the grant still names the pre-rename table: {unresolved:?}"
+    let refused = ParserDB::parse::<PostgreSqlDialect>(
+        "CREATE TABLE docs (id uuid PRIMARY KEY);
+         CREATE ROLE app;
+         GRANT SELECT ON docs TO app;
+         DROP ROLE app;",
     );
+    assert!(matches!(refused, Err(Error::RoleReferenced { .. })), "got {refused:?}");
 }
 
 #[test]
