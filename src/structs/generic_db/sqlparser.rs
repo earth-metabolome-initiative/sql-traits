@@ -3231,23 +3231,19 @@ impl ParserDB {
                     builder.triggers_mut().retain(|(t, ())| last_str(&t.name) != trigger_name);
                 }
                 Statement::DropPolicy(drop_policy) => {
-                    let policy_name = drop_policy.name.value.as_str();
-
-                    // Find the policy
-                    let policy_exists =
-                        builder.policies().iter().any(|(p, _)| p.name.value == policy_name);
-
-                    if !policy_exists {
+                    let Some(index) = builder.policies().iter().position(|(policy, _)| {
+                        idents_match(&policy.name, &drop_policy.name)
+                            && policy_tables_match(&policy.table_name, &drop_policy.table_name)
+                    }) else {
                         if drop_policy.if_exists {
                             continue;
                         }
                         return Err(crate::errors::Error::DropPolicyNotFound {
-                            policy_name: policy_name.to_string(),
+                            policy_name: drop_policy.name.value.clone(),
                         });
-                    }
+                    };
 
-                    // Remove the policy
-                    builder.policies_mut().retain(|(p, _)| p.name.value != policy_name);
+                    builder.policies_mut().remove(index);
                 }
                 Statement::Drop {
                     object_type: sqlparser::ast::ObjectType::Role,
