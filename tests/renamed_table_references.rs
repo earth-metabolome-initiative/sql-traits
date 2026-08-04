@@ -62,7 +62,7 @@ fn a_permission_follows_the_rename() {
     .expect("t exists when the grant and the rename land");
 
     assert_eq!(
-        database.unresolved_grant_references().expect("grant targets are well formed").count(),
+        database.unresolved_access_references().expect("grant targets are well formed").count(),
         0,
         "the grant names the renamed table, so nothing is left dangling"
     );
@@ -205,7 +205,7 @@ fn dropping_a_table_is_unchanged() {
     assert_eq!(swept.indexes().count(), 0);
     assert_eq!(swept.policies().count(), 0);
     assert_eq!(
-        swept.unresolved_grant_references().expect("grant targets are well formed").count(),
+        swept.unresolved_access_references().expect("grant targets are well formed").count(),
         0
     );
 }

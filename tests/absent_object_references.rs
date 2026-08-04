@@ -23,7 +23,7 @@ fn parse(sql: &str) -> Result<ParserDB, Error> {
 }
 
 fn open_world() -> ParseOptions {
-    ParseOptions::default().with_grant_resolution(GrantResolution::OpenWorld)
+    ParseOptions::default().with_access_resolution(AccessResolution::OpenWorld)
 }
 
 /// The sharpest pair: a uniqueness rule already refused this, and an index over

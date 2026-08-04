@@ -333,7 +333,7 @@ pub enum Error {
     /// Error indicating that a `CREATE POLICY` statement applies to a role no
     /// `CREATE ROLE` in the input creates.
     ///
-    /// Reported under [`crate::structs::GrantResolution::ClosedWorld`], the
+    /// Reported under [`crate::structs::AccessResolution::ClosedWorld`], the
     /// same setting that governs a grant naming an absent role, because a dump
     /// of a schema omits role creation either way.
     RoleNotFoundForPolicy {

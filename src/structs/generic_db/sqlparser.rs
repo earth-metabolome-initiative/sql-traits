@@ -57,7 +57,7 @@ use crate::{
 mod functions_in_expression;
 mod parse_options;
 
-pub use parse_options::{GrantResolution, ParseOptions};
+pub use parse_options::{AccessResolution, ParseOptions};
 
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
 /// `CreateTable`.
@@ -1367,8 +1367,9 @@ fn policy_role_ident(owner: &Owner) -> Option<&Ident> {
     Some(role_ident)
 }
 
-/// Enforces [`GrantResolution::ClosedWorld`] on one `CREATE POLICY`: every role
-/// the policy applies to is one the input has created up to this statement.
+/// Enforces [`AccessResolution::ClosedWorld`] on one `CREATE POLICY`: every
+/// role the policy applies to is one the input has created up to this
+/// statement.
 ///
 /// A policy follows the grant setting rather than the stricter rule for tables,
 /// because a schema dump omits role creation for a policy exactly as it does
@@ -1463,7 +1464,7 @@ fn validate_index_columns(
     Ok(())
 }
 
-/// Enforces [`GrantResolution::ClosedWorld`] on one `GRANT`: every grantee
+/// Enforces [`AccessResolution::ClosedWorld`] on one `GRANT`: every grantee
 /// names a role, and every table target names a table, that the input has
 /// created up to this statement.
 fn validate_grant_against_builder(
@@ -1662,15 +1663,25 @@ pub type ParserDB = GenericDB<
     SqlparserDialect,
 >;
 
-/// A grant reference that the database it was read from does not hold.
+/// An access control reference that the database it was read from does not
+/// hold.
 ///
-/// Yielded by [`ParserDB::unresolved_grant_references`].
+/// Yielded by [`ParserDB::unresolved_access_references`]. Each case names the
+/// statement it came from, since a `GRANT` and a `CREATE POLICY` can leave the
+/// same role unresolved and are reported apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum UnresolvedGrantReference<'a> {
+pub enum UnresolvedAccessReference<'a> {
     /// A grantee naming a role no `CREATE ROLE` in the input creates.
-    Role(&'a Ident),
+    GranteeRole(&'a Ident),
     /// A grant target naming a table no `CREATE TABLE` in the input creates.
-    Table(&'a ObjectName),
+    GrantTable(&'a ObjectName),
+    /// A policy applying to a role no `CREATE ROLE` in the input creates.
+    PolicyRole {
+        /// Name of the policy.
+        policy: &'a Ident,
+        /// The role it applies to.
+        role: &'a Ident,
+    },
 }
 
 impl ParserDB {
@@ -1795,19 +1806,20 @@ impl ParserDB {
         Ok(())
     }
 
-    /// Reports the grantees and the table targets of this database's grants
-    /// that the database does not itself hold. The grant object shapes the
-    /// closed world never resolved either, `ALL TABLES IN SCHEMA` and the
-    /// sequence and schema forms, are left alone here too.
+    /// Reports the roles and table targets that this database's access control
+    /// statements name and the database does not itself hold: the grantees and
+    /// table targets of its grants, and the roles its policies apply to. The
+    /// grant object shapes the closed world never resolved either, `ALL TABLES
+    /// IN SCHEMA` and the sequence and schema forms, are left alone here
+    /// too.
     ///
-    /// A [`GrantResolution::ClosedWorld`] parse rejects such a reference on
+    /// An [`AccessResolution::ClosedWorld`] parse rejects such a reference on
     /// the spot, so one surfaces here either because the database was parsed
-    /// under [`GrantResolution::OpenWorld`], or because a later statement
-    /// moved an object out from under a grant that names it: a table rename
-    /// leaves the grant naming the old name. The walk is order-insensitive,
-    /// running against the fully ingested database, so a grant preceding the
-    /// `CREATE ROLE` it names resolves. Each distinct reference is reported
-    /// once, in a deterministic order.
+    /// under [`AccessResolution::OpenWorld`], or because a later statement
+    /// moved an object out from under a grant that names it. The walk is
+    /// order-insensitive, running against the fully ingested database, so a
+    /// grant preceding the `CREATE ROLE` it names resolves. Each distinct
+    /// reference is reported once, in a deterministic order.
     ///
     /// # Errors
     ///
@@ -1821,22 +1833,26 @@ impl ParserDB {
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
     /// let db = ParseOptions::default()
-    ///     .with_grant_resolution(GrantResolution::OpenWorld)
+    ///     .with_access_resolution(AccessResolution::OpenWorld)
     ///     .parse::<PostgreSqlDialect>(
     ///         "CREATE TABLE docs (id uuid PRIMARY KEY);
-    ///          GRANT SELECT ON docs TO app;",
+    ///          GRANT SELECT ON docs TO app;
+    ///          CREATE POLICY docs_owner ON docs TO auditor USING (true);",
     ///     )?;
     ///
-    /// let unresolved: Vec<_> = db.unresolved_grant_references()?.collect();
+    /// let unresolved: Vec<_> = db.unresolved_access_references()?.collect();
     /// assert!(matches!(
     ///     unresolved[..],
-    ///     [UnresolvedGrantReference::Role(role)] if role.value == "app"
+    ///     [
+    ///         UnresolvedAccessReference::GranteeRole(grantee),
+    ///         UnresolvedAccessReference::PolicyRole { policy, role },
+    ///     ] if grantee.value == "app" && policy.value == "docs_owner" && role.value == "auditor"
     /// ));
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```
-    pub fn unresolved_grant_references(
+    pub fn unresolved_access_references(
         &self,
-    ) -> Result<impl Iterator<Item = UnresolvedGrantReference<'_>>, LookupError> {
+    ) -> Result<impl Iterator<Item = UnresolvedAccessReference<'_>>, LookupError> {
         // The parse path records each `GRANT` in both stores, so the set
         // collapses the two views back into one reference per name.
         let grants = self
@@ -1845,26 +1861,40 @@ impl ParserDB {
             .chain(self.column_grants.iter())
             .map(|(grant, ())| grant.as_ref());
 
+        let declares = |role_ident: &Ident| {
+            self.roles.iter().any(|(role, ())| role_matches_lookup_ident(role.as_ref(), role_ident))
+        };
+
         let mut unresolved = BTreeSet::new();
         for grant in grants {
             for grantee in &grant.grantees {
                 let Some(grantee_ident) = grantee_role_ident(grantee) else {
                     continue;
                 };
-                if !self
-                    .roles
-                    .iter()
-                    .any(|(role, ())| role_matches_lookup_ident(role.as_ref(), grantee_ident))
-                {
-                    unresolved.insert(UnresolvedGrantReference::Role(grantee_ident));
+                if !declares(grantee_ident) {
+                    unresolved.insert(UnresolvedAccessReference::GranteeRole(grantee_ident));
                 }
             }
 
             if let Some(GrantObjects::Tables(tables)) = &grant.objects {
                 for table_obj in tables {
                     if self.resolve_table_object_name(table_obj)?.is_none() {
-                        unresolved.insert(UnresolvedGrantReference::Table(table_obj));
+                        unresolved.insert(UnresolvedAccessReference::GrantTable(table_obj));
                     }
+                }
+            }
+        }
+
+        for (policy, _) in &self.policies {
+            for owner in policy.to.iter().flatten() {
+                let Some(role_ident) = policy_role_ident(owner) else {
+                    continue;
+                };
+                if !declares(role_ident) {
+                    unresolved.insert(UnresolvedAccessReference::PolicyRole {
+                        policy: &policy.name,
+                        role: role_ident,
+                    });
                 }
             }
         }
@@ -1872,18 +1902,21 @@ impl ParserDB {
         Ok(unresolved.into_iter())
     }
 
-    /// Checks that every recorded grant resolves: each grantee names a role
-    /// and each table target names a table this database holds.
+    /// Checks that every access control statement resolves: each grantee names
+    /// a role, each table target names a table, and each policy applies to
+    /// a role that this database holds.
     ///
-    /// This is the [`GrantResolution::ClosedWorld`] verdict on a database
-    /// parsed under [`GrantResolution::OpenWorld`], deferred until the whole
+    /// This is the [`AccessResolution::ClosedWorld`] verdict on a database
+    /// parsed under [`AccessResolution::OpenWorld`], deferred until the whole
     /// input is in and therefore insensitive to statement order.
     ///
     /// # Errors
     ///
     /// Returns the first unresolved reference as
-    /// [`RoleNotFoundForGrant`](crate::errors::Error::RoleNotFoundForGrant) or
-    /// [`TableNotFoundForGrant`](crate::errors::Error::TableNotFoundForGrant).
+    /// [`RoleNotFoundForGrant`](crate::errors::Error::RoleNotFoundForGrant),
+    /// [`TableNotFoundForGrant`](crate::errors::Error::TableNotFoundForGrant)
+    /// or
+    /// [`RoleNotFoundForPolicy`](crate::errors::Error::RoleNotFoundForPolicy).
     /// A malformed or ambiguous target name surfaces as
     /// [`IdentifierLookupError`](crate::errors::Error::IdentifierLookupError).
     ///
@@ -1893,31 +1926,39 @@ impl ParserDB {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let options = ParseOptions::default().with_grant_resolution(GrantResolution::OpenWorld);
+    /// let options = ParseOptions::default().with_access_resolution(AccessResolution::OpenWorld);
     ///
     /// let db = options.parse::<PostgreSqlDialect>(
     ///     "CREATE TABLE docs (id uuid PRIMARY KEY);
     ///      GRANT SELECT ON docs TO app;
+    ///      CREATE POLICY docs_app ON docs TO app USING (true);
     ///      CREATE ROLE app;",
     /// )?;
-    /// assert!(db.validate_grant_targets().is_ok());
+    /// assert!(db.validate_access_targets().is_ok());
     ///
     /// let dangling = options.parse::<PostgreSqlDialect>(
-    ///     "CREATE TABLE docs (id uuid PRIMARY KEY); GRANT SELECT ON docs TO app;",
+    ///     "CREATE TABLE docs (id uuid PRIMARY KEY);
+    ///      CREATE POLICY docs_app ON docs TO app USING (true);",
     /// )?;
-    /// assert!(dangling.validate_grant_targets().is_err());
+    /// assert!(dangling.validate_access_targets().is_err());
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```
-    pub fn validate_grant_targets(&self) -> Result<(), crate::errors::Error> {
-        match self.unresolved_grant_references()?.next() {
-            Some(UnresolvedGrantReference::Role(grantee_ident)) => {
+    pub fn validate_access_targets(&self) -> Result<(), crate::errors::Error> {
+        match self.unresolved_access_references()?.next() {
+            Some(UnresolvedAccessReference::GranteeRole(grantee_ident)) => {
                 Err(crate::errors::Error::RoleNotFoundForGrant {
                     role_name: grantee_ident.value.clone(),
                 })
             }
-            Some(UnresolvedGrantReference::Table(table_obj)) => {
+            Some(UnresolvedAccessReference::GrantTable(table_obj)) => {
                 Err(crate::errors::Error::TableNotFoundForGrant {
                     table_name: last_str(table_obj).to_string(),
+                })
+            }
+            Some(UnresolvedAccessReference::PolicyRole { policy, role }) => {
+                Err(crate::errors::Error::RoleNotFoundForPolicy {
+                    role_name: role.value.clone(),
+                    policy_name: policy.value.clone(),
                 })
             }
             None => Ok(()),
@@ -3592,7 +3633,7 @@ impl ParserDB {
                     )?;
                 }
                 Statement::CreatePolicy(policy) => {
-                    if options.grant_resolution() == GrantResolution::ClosedWorld {
+                    if options.access_resolution() == AccessResolution::ClosedWorld {
                         validate_policy_roles(&builder, &policy)?;
                     }
 
@@ -3676,7 +3717,7 @@ impl ParserDB {
                     }
                 }
                 Statement::Grant(grant) => {
-                    if options.grant_resolution() == GrantResolution::ClosedWorld {
+                    if options.access_resolution() == AccessResolution::ClosedWorld {
                         validate_grant_against_builder(&builder, &grant)?;
                     }
 
@@ -3708,7 +3749,7 @@ impl ParserDB {
                     // input never granted (`pg_dump` emits one per function
                     // whose default execute privilege was revoked) from a
                     // revoke of a grant it failed to record.
-                    if options.grant_resolution() == GrantResolution::ClosedWorld
+                    if options.access_resolution() == AccessResolution::ClosedWorld
                         && !table_application.matched_any
                         && !column_application.matched_any
                     {

@@ -8,24 +8,29 @@ use sqlparser::{ast::Statement, dialect::Dialect};
 
 use crate::{errors::Error, impls::SqlparserDialect, structs::ParserDB};
 
-/// How a `GRANT` or `REVOKE` statement is resolved against the objects the
-/// parsed input creates.
+/// How an access control statement is resolved against the objects the parsed
+/// input creates.
+///
+/// Governs `GRANT`, `REVOKE` and `CREATE POLICY`, all of which name a role, and
+/// which a schema dump leaves unresolved for the same reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum GrantResolution {
-    /// Every grantee and every grant target must be created by the same input.
+pub enum AccessResolution {
+    /// Every role and every grant target must be created by the same input.
     ///
-    /// A grant naming an absent role or table, and a revoke matching no
-    /// recorded grant, each abort the parse. This is the default.
+    /// A grant naming an absent role or table, a policy applying to an absent
+    /// role, and a revoke matching no recorded grant, each abort the parse.
+    /// This is the default.
     #[default]
     ClosedWorld,
-    /// Grants may name roles and tables the input does not create.
+    /// Grants and policies may name roles, and grants may name tables, that the
+    /// input does not create.
     ///
     /// Roles are cluster objects that `pg_dump` does not emit, so a dump of a
-    /// schema carrying a single grant has no `CREATE ROLE` to resolve against.
-    /// Under this setting a grant is recorded as written and a revoke matching
-    /// no recorded grant is a no-op. Ask
-    /// [`ParserDB::unresolved_grant_references`] what failed to resolve, or
-    /// [`ParserDB::validate_grant_targets`] to enforce closure once the whole
+    /// schema carrying a single grant or policy has no `CREATE ROLE` to resolve
+    /// against. Under this setting the statement is recorded as written and a
+    /// revoke matching no recorded grant is a no-op. Ask
+    /// [`ParserDB::unresolved_access_references`] what failed to resolve, or
+    /// [`ParserDB::validate_access_targets`] to enforce closure once the whole
     /// input is in.
     OpenWorld,
 }
@@ -48,30 +53,30 @@ pub enum GrantResolution {
 /// assert!(ParserDB::parse::<PostgreSqlDialect>(sql).is_err());
 ///
 /// let db = ParseOptions::default()
-///     .with_grant_resolution(GrantResolution::OpenWorld)
+///     .with_access_resolution(AccessResolution::OpenWorld)
 ///     .parse::<PostgreSqlDialect>(sql)?;
 /// assert_eq!(db.table_grants().count(), 1);
 /// # Ok::<(), sql_traits::errors::Error>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ParseOptions {
-    grant_resolution: GrantResolution,
+    access_resolution: AccessResolution,
 }
 
 impl ParseOptions {
     /// Sets how grants resolve against the objects the input creates.
     #[must_use]
     #[inline]
-    pub const fn with_grant_resolution(mut self, grant_resolution: GrantResolution) -> Self {
-        self.grant_resolution = grant_resolution;
+    pub const fn with_access_resolution(mut self, access_resolution: AccessResolution) -> Self {
+        self.access_resolution = access_resolution;
         self
     }
 
     /// Returns how grants resolve against the objects the input creates.
     #[must_use]
     #[inline]
-    pub const fn grant_resolution(self) -> GrantResolution {
-        self.grant_resolution
+    pub const fn access_resolution(self) -> AccessResolution {
+        self.access_resolution
     }
 
     /// Parses SQL under these options using the specified dialect.
@@ -96,7 +101,7 @@ impl ParseOptions {
     /// assert!(ParserDB::parse::<PostgreSqlDialect>(sql).is_err());
     ///
     /// let db = ParseOptions::default()
-    ///     .with_grant_resolution(GrantResolution::OpenWorld)
+    ///     .with_access_resolution(AccessResolution::OpenWorld)
     ///     .parse::<PostgreSqlDialect>(sql)?;
     /// assert_eq!(db.table_grants().count(), 0);
     /// # Ok::<(), sql_traits::errors::Error>(())
@@ -128,7 +133,7 @@ impl ParseOptions {
     /// assert!(ParserDB::from_statements(statements.clone(), "docs".to_string()).is_err());
     ///
     /// let db = ParseOptions::default()
-    ///     .with_grant_resolution(GrantResolution::OpenWorld)
+    ///     .with_access_resolution(AccessResolution::OpenWorld)
     ///     .from_statements(statements, "docs".to_string())?;
     /// assert_eq!(db.table_grants().count(), 1);
     /// # Ok::<(), sql_traits::errors::Error>(())

@@ -13,7 +13,7 @@ use core::fmt::Debug;
 
 pub use builder::GenericDBBuilder;
 pub use sqlparser::{
-    GrantResolution, ParseOptions, ParserDB, ParserDBBuilder, UnresolvedGrantReference,
+    AccessResolution, ParseOptions, ParserDB, ParserDBBuilder, UnresolvedAccessReference,
 };
 
 use crate::{
