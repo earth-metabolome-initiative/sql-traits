@@ -1316,16 +1316,21 @@ fn retain_action_columns(action: &mut Action, keep: impl Fn(&Ident) -> bool) {
     }
 }
 
+/// Returns whether two identifiers name the same object under PostgreSQL
+/// folding: an unquoted one is case-insensitive, a quoted one exact.
+fn idents_match(left: &Ident, right: &Ident) -> bool {
+    identifiers_match(
+        left.value.as_str(),
+        left.quote_style.is_some(),
+        right.value.as_str(),
+        right.quote_style.is_some(),
+    )
+}
+
 fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
     role.names.iter().any(|role_name| {
-        object_name_last_identifier(role_name).is_some_and(|role_ident| {
-            identifiers_match(
-                role_ident.value.as_str(),
-                role_ident.quote_style.is_some(),
-                lookup_ident.value.as_str(),
-                lookup_ident.quote_style.is_some(),
-            )
-        })
+        object_name_last_identifier(role_name)
+            .is_some_and(|role_ident| idents_match(role_ident, lookup_ident))
     })
 }
 
@@ -1367,18 +1372,19 @@ fn policy_role_ident(owner: &Owner) -> Option<&Ident> {
     Some(role_ident)
 }
 
-/// Enforces [`AccessResolution::ClosedWorld`] on one `CREATE POLICY`: every
-/// role the policy applies to is one the input has created up to this
-/// statement.
+/// Enforces [`AccessResolution::ClosedWorld`] on the roles one policy
+/// statement names: every one of them is a role the input has created up to
+/// this statement.
 ///
 /// A policy follows the grant setting rather than the stricter rule for tables,
 /// because a schema dump omits role creation for a policy exactly as it does
 /// for a grant.
 fn validate_policy_roles(
     builder: &ParserDBBuilder,
-    policy: &CreatePolicy,
+    policy_name: &str,
+    owners: &[Owner],
 ) -> Result<(), crate::errors::Error> {
-    for owner in policy.to.iter().flatten() {
+    for owner in owners {
         let Some(role_ident) = policy_role_ident(owner) else {
             continue;
         };
@@ -1388,12 +1394,41 @@ fn validate_policy_roles(
         if !role_exists {
             return Err(crate::errors::Error::RoleNotFoundForPolicy {
                 role_name: role_ident.value.clone(),
-                policy_name: policy.name.value.clone(),
+                policy_name: policy_name.to_string(),
             });
         }
     }
 
     Ok(())
+}
+
+/// Returns whether two table references carried by policy statements name the
+/// same table.
+///
+/// A policy name is unique per table rather than per database, so an
+/// `ALTER POLICY` is resolved by both. The two statements need not spell the
+/// table the same way, and an unqualified name means schema `public`, which is
+/// the allowance
+/// [`ParserDB::resolve_table_object_name_with_implicit_public`] already makes
+/// when resolving a policy's own target.
+fn policy_tables_match(left: &ObjectName, right: &ObjectName) -> bool {
+    let (Ok((left_schema, left_table)), Ok((right_schema, right_table))) =
+        (object_name_identifiers(left), object_name_identifiers(right))
+    else {
+        return false;
+    };
+
+    if !idents_match(left_table, right_table) {
+        return false;
+    }
+
+    match (left_schema, right_schema) {
+        (None, None) => true,
+        (Some(schema), None) | (None, Some(schema)) => {
+            identifiers_match(schema.value.as_str(), schema.quote_style.is_some(), "public", false)
+        }
+        (Some(left), Some(right)) => idents_match(left, right),
+    }
 }
 
 /// Checks that a table qualified with a schema names one the input creates.
@@ -3196,23 +3231,19 @@ impl ParserDB {
                     builder.triggers_mut().retain(|(t, ())| last_str(&t.name) != trigger_name);
                 }
                 Statement::DropPolicy(drop_policy) => {
-                    let policy_name = drop_policy.name.value.as_str();
-
-                    // Find the policy
-                    let policy_exists =
-                        builder.policies().iter().any(|(p, _)| p.name.value == policy_name);
-
-                    if !policy_exists {
+                    let Some(index) = builder.policies().iter().position(|(policy, _)| {
+                        idents_match(&policy.name, &drop_policy.name)
+                            && policy_tables_match(&policy.table_name, &drop_policy.table_name)
+                    }) else {
                         if drop_policy.if_exists {
                             continue;
                         }
                         return Err(crate::errors::Error::DropPolicyNotFound {
-                            policy_name: policy_name.to_string(),
+                            policy_name: drop_policy.name.value.clone(),
                         });
-                    }
+                    };
 
-                    // Remove the policy
-                    builder.policies_mut().retain(|(p, _)| p.name.value != policy_name);
+                    builder.policies_mut().remove(index);
                 }
                 Statement::Drop {
                     object_type: sqlparser::ast::ObjectType::Role,
@@ -3655,7 +3686,11 @@ impl ParserDB {
                 }
                 Statement::CreatePolicy(policy) => {
                     if options.access_resolution() == AccessResolution::ClosedWorld {
-                        validate_policy_roles(&builder, &policy)?;
+                        validate_policy_roles(
+                            &builder,
+                            &policy.name.value,
+                            policy.to.as_deref().unwrap_or_default(),
+                        )?;
                     }
 
                     let using_functions = if let Some(using_expr) = &policy.using {
@@ -3803,42 +3838,62 @@ impl ParserDB {
                     }
                 }
                 Statement::AlterPolicy(AlterPolicy { name, table_name, operation }) => {
-                    use crate::traits::PolicyLike;
-
-                    let policy_name = &name.value;
-                    let _table_name = last_str(&table_name);
-
-                    // Check if policy exists
-                    let policy_exists =
-                        builder.policies().iter().any(|(p, _)| p.name() == policy_name);
-
-                    if !policy_exists {
+                    let Some(index) = builder.policies().iter().position(|(policy, _)| {
+                        idents_match(&policy.name, &name)
+                            && policy_tables_match(&policy.table_name, &table_name)
+                    }) else {
                         return Err(crate::errors::Error::AlterPolicyNotFound {
-                            policy_name: policy_name.clone(),
+                            policy_name: name.value.clone(),
                         });
-                    }
+                    };
 
                     match operation {
                         AlterPolicyOperation::Rename { new_name } => {
-                            // Update the policy name
-                            let policies = builder.policies_mut();
-                            if let Some(idx) =
-                                policies.iter().position(|(p, _)| p.name() == policy_name)
-                            {
-                                let (old_policy, meta) = policies.remove(idx);
-                                let mut new_policy = (*old_policy).clone();
-                                new_policy.name = new_name.clone();
-                                policies.push((Arc::new(new_policy), meta));
-                            }
+                            Arc::make_mut(&mut builder.policies_mut()[index].0).name = new_name;
                         }
-                        AlterPolicyOperation::Apply { .. } => {
-                            // For Apply operations (changing USING/WITH CHECK
-                            // expressions),
-                            // we would need to update the policy metadata with
-                            // new function refs.
-                            // This is complex and would require re-parsing
-                            // expressions. For now,
-                            // we skip detailed tracking of expression changes.
+                        AlterPolicyOperation::Apply { to, using, with_check } => {
+                            if options.access_resolution() == AccessResolution::ClosedWorld {
+                                validate_policy_roles(
+                                    &builder,
+                                    &name.value,
+                                    to.as_deref().unwrap_or_default(),
+                                )?;
+                            }
+
+                            // The functions an expression calls are resolved
+                            // against the builder, so they are collected before
+                            // the store is borrowed mutably.
+                            let functions = |expression: Option<&Expr>| {
+                                expression.map(|expression| {
+                                    functions_in_expression::functions_in_expression::<Self>(
+                                        expression,
+                                        builder.function_arc_vec().as_slice(),
+                                    )
+                                })
+                            };
+                            let using_functions = functions(using.as_ref());
+                            let check_functions = functions(with_check.as_ref());
+
+                            // PostgreSQL applies each clause on its own, so one
+                            // the statement omits is left as it was rather than
+                            // cleared.
+                            let (policy, metadata) = &mut builder.policies_mut()[index];
+                            let policy = Arc::make_mut(policy);
+                            if to.is_some() {
+                                policy.to = to;
+                            }
+                            if using.is_some() {
+                                policy.using = using;
+                            }
+                            if with_check.is_some() {
+                                policy.with_check = with_check;
+                            }
+                            if let Some(using_functions) = using_functions {
+                                metadata.set_using_functions(using_functions);
+                            }
+                            if let Some(check_functions) = check_functions {
+                                metadata.set_check_functions(check_functions);
+                            }
                         }
                     }
                 }
