@@ -225,3 +225,20 @@ fn a_pg_dump_of_a_guarded_table_is_read_whole() {
         "the later ALTER TABLE ONLY did not displace the owner recorded before it"
     );
 }
+
+/// Generic code may hold a reference to a reference, which reaches the owner
+/// through the blanket implementation for references rather than the table's
+/// own. That forward is free to answer without ever consulting the table, so
+/// it is pinned against the table's own answer.
+#[test]
+fn a_reference_to_a_table_answers_the_same() {
+    let database = db(DUMP);
+    let docs = database.table(None, "docs").expect("docs exists");
+
+    assert_eq!(
+        <&CreateTable as TableLike>::owner(&docs, &database),
+        docs.owner(&database),
+        "the blanket implementation for references disagrees with the table itself"
+    );
+    assert_eq!(<&CreateTable as TableLike>::owner(&docs, &database), Ok(Some("app_owner")));
+}
