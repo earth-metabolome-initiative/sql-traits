@@ -32,7 +32,7 @@ use sqlparser::{
 };
 
 use crate::{
-    errors::LookupError,
+    errors::{LookupError, ObjectKind},
     impls::SqlparserDialect,
     structs::{
         GenericDB, Schema, TableAttribute, TableMetadata,
@@ -1547,6 +1547,56 @@ impl ParserDB {
         Ok(builder)
     }
 
+    /// Applies `edit` to the metadata of the table an `ALTER TABLE` statement
+    /// targets.
+    ///
+    /// Metadata carries settings the table node does not spell, so unlike
+    /// [`Self::alter_table_constraints`] nothing derived from the node needs
+    /// rebuilding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::errors::Error::AlterTableNotFound`] when the statement
+    /// names a table the input never created and does not say `IF EXISTS`.
+    fn alter_table_metadata(
+        mut builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        if_exists: bool,
+        edit: impl FnOnce(&mut TableMetadata<CreateTable>),
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(resolved_table) = builder.resolve_table_object_name(table_name)? else {
+            if if_exists {
+                return Ok(builder);
+            }
+            return Err(crate::errors::Error::AlterTableNotFound {
+                table_name: last_str(table_name).to_string(),
+            });
+        };
+        let resolved_table_name = resolved_table.table_name().to_string();
+        let resolved_table_quoted = resolved_table.table_name_is_quoted();
+        let resolved_schema_name = resolved_table.table_schema().map(str::to_string);
+        let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+
+        let Some(entry) = builder.tables_mut().iter_mut().find(|(table, _)| {
+            table_matches_resolved_identity(
+                table.as_ref(),
+                &resolved_table_name,
+                resolved_table_quoted,
+                resolved_schema_name.as_deref(),
+                resolved_schema_quoted,
+            )
+        }) else {
+            // The identity came from a table this builder resolved, so this is
+            // unreachable. `IF EXISTS` does not apply: the statement's table was
+            // found, and it is the stored entry that went missing.
+            return Err(ObjectKind::Table.not_in_database(&resolved_table_name).into());
+        };
+
+        edit(&mut entry.1);
+
+        Ok(builder)
+    }
+
     /// Creates a new `ParserDB` from a vector of SQL statements and a catalog
     /// name.
     ///
@@ -2076,112 +2126,36 @@ impl ParserDB {
                     for operation in alter_table.operations {
                         match operation {
                             AlterTableOperation::EnableRowLevelSecurity => {
-                                let Some(resolved_table) =
-                                    builder.resolve_table_object_name(&alter_table.name)?
-                                else {
-                                    continue;
-                                };
-                                let resolved_table_name = resolved_table.table_name().to_string();
-                                let resolved_table_quoted = resolved_table.table_name_is_quoted();
-                                let resolved_schema_name =
-                                    resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted =
-                                    resolved_table.table_schema_is_quoted();
-
-                                if let Some(entry) =
-                                    builder.tables_mut().iter_mut().find(|(table, _)| {
-                                        table_matches_resolved_identity(
-                                            table.as_ref(),
-                                            &resolved_table_name,
-                                            resolved_table_quoted,
-                                            resolved_schema_name.as_deref(),
-                                            resolved_schema_quoted,
-                                        )
-                                    })
-                                {
-                                    entry.1.set_rls_enabled(true);
-                                }
+                                builder = Self::alter_table_metadata(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    |metadata| metadata.set_rls_enabled(true),
+                                )?;
                             }
                             AlterTableOperation::DisableRowLevelSecurity => {
-                                let Some(resolved_table) =
-                                    builder.resolve_table_object_name(&alter_table.name)?
-                                else {
-                                    continue;
-                                };
-                                let resolved_table_name = resolved_table.table_name().to_string();
-                                let resolved_table_quoted = resolved_table.table_name_is_quoted();
-                                let resolved_schema_name =
-                                    resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted =
-                                    resolved_table.table_schema_is_quoted();
-
-                                if let Some(entry) =
-                                    builder.tables_mut().iter_mut().find(|(table, _)| {
-                                        table_matches_resolved_identity(
-                                            table.as_ref(),
-                                            &resolved_table_name,
-                                            resolved_table_quoted,
-                                            resolved_schema_name.as_deref(),
-                                            resolved_schema_quoted,
-                                        )
-                                    })
-                                {
-                                    entry.1.set_rls_enabled(false);
-                                }
+                                builder = Self::alter_table_metadata(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    |metadata| metadata.set_rls_enabled(false),
+                                )?;
                             }
                             AlterTableOperation::ForceRowLevelSecurity => {
-                                let Some(resolved_table) =
-                                    builder.resolve_table_object_name(&alter_table.name)?
-                                else {
-                                    continue;
-                                };
-                                let resolved_table_name = resolved_table.table_name().to_string();
-                                let resolved_table_quoted = resolved_table.table_name_is_quoted();
-                                let resolved_schema_name =
-                                    resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted =
-                                    resolved_table.table_schema_is_quoted();
-
-                                if let Some(entry) =
-                                    builder.tables_mut().iter_mut().find(|(table, _)| {
-                                        table_matches_resolved_identity(
-                                            table.as_ref(),
-                                            &resolved_table_name,
-                                            resolved_table_quoted,
-                                            resolved_schema_name.as_deref(),
-                                            resolved_schema_quoted,
-                                        )
-                                    })
-                                {
-                                    entry.1.set_rls_forced(true);
-                                }
+                                builder = Self::alter_table_metadata(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    |metadata| metadata.set_rls_forced(true),
+                                )?;
                             }
                             AlterTableOperation::NoForceRowLevelSecurity => {
-                                let Some(resolved_table) =
-                                    builder.resolve_table_object_name(&alter_table.name)?
-                                else {
-                                    continue;
-                                };
-                                let resolved_table_name = resolved_table.table_name().to_string();
-                                let resolved_table_quoted = resolved_table.table_name_is_quoted();
-                                let resolved_schema_name =
-                                    resolved_table.table_schema().map(str::to_string);
-                                let resolved_schema_quoted =
-                                    resolved_table.table_schema_is_quoted();
-
-                                if let Some(entry) =
-                                    builder.tables_mut().iter_mut().find(|(table, _)| {
-                                        table_matches_resolved_identity(
-                                            table.as_ref(),
-                                            &resolved_table_name,
-                                            resolved_table_quoted,
-                                            resolved_schema_name.as_deref(),
-                                            resolved_schema_quoted,
-                                        )
-                                    })
-                                {
-                                    entry.1.set_rls_forced(false);
-                                }
+                                builder = Self::alter_table_metadata(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    |metadata| metadata.set_rls_forced(false),
+                                )?;
                             }
                             AlterTableOperation::RenameTable { table_name } => {
                                 let new_name = match table_name {
@@ -2889,16 +2863,17 @@ mod tests {
                 "Unquoted ALTER TABLE lookup should resolve via identifier folding"
             );
 
-            let db = parse_postgres(
+            let result = ParserDB::parse::<PostgreSqlDialect>(
                 r#"
                 CREATE TABLE Foo (id INT);
                 ALTER TABLE "Foo" ENABLE ROW LEVEL SECURITY;
                 "#,
             );
-            let foo =
-                db.table(None, "foo").expect("Expected `foo` table to exist after ALTER TABLE");
             assert!(
-                !foo.has_row_level_security(&db).expect("rls check"),
+                matches!(
+                    result,
+                    Err(Error::AlterTableNotFound { table_name }) if table_name == "Foo"
+                ),
                 "Quoted ALTER TABLE name should not match unquoted table with different case"
             );
         }
