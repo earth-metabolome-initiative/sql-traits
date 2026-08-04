@@ -2127,6 +2127,7 @@ impl ParserDB {
         let mut metadata: TableMetadata<CreateTable> = TableMetadata::default();
         metadata.set_rls_enabled(previous_metadata.rls_enabled());
         metadata.set_rls_forced(previous_metadata.rls_forced());
+        metadata.set_owner(previous_metadata.owner().map(str::to_string));
 
         let detached_indices = builder.take_table_derived_objects(
             &stored.name,
@@ -3558,13 +3559,33 @@ impl ParserDB {
                                 }
                             }
 
-                            // Ignored: the model carries no representation of
-                            // ownership, so nothing it answers can change.
-                            AlterTableOperation::OwnerTo { .. }
+                            AlterTableOperation::OwnerTo { new_owner } => {
+                                let owner = match new_owner {
+                                    Owner::Ident(ident) => Some(ident.value),
+                                    // These name whoever runs the statement,
+                                    // so the owner changed to one the input
+                                    // never spells and the model can no longer
+                                    // name it either.
+                                    Owner::CurrentRole
+                                    | Owner::CurrentUser
+                                    | Owner::SessionUser => None,
+                                };
+                                builder = Self::alter_table_metadata(
+                                    builder,
+                                    &alter_table.name,
+                                    alter_table.if_exists,
+                                    |metadata| metadata.set_owner(owner),
+                                )?;
+                            }
+
+                            // Ignored: each of these changes something the
+                            // model carries no representation of, so nothing it
+                            // answers can change.
+                            //
                             // Physical layout: storage parameters, clustering
                             // and sort keys describe how rows are kept, which
                             // the model does not describe at all.
-                            | AlterTableOperation::SetTblProperties { .. }
+                            AlterTableOperation::SetTblProperties { .. }
                             | AlterTableOperation::SetOptionsParens { .. }
                             | AlterTableOperation::ClusterBy { .. }
                             | AlterTableOperation::DropClusteringKey

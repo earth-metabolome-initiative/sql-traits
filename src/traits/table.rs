@@ -3121,6 +3121,54 @@ pub trait TableLike:
     /// ```
     fn has_forced_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError>;
 
+    /// Returns the role the input names as the table's owner.
+    ///
+    /// A table owner bypasses every policy on the table unless the table also
+    /// has forced Row Level Security, so a caller reporting that exemption
+    /// needs the role's name to say who is exempt.
+    ///
+    /// Only `ALTER TABLE ... OWNER TO <role>` names an owner. A table no such
+    /// statement altered has none, and neither has one handed to
+    /// `CURRENT_ROLE`, `CURRENT_USER` or `SESSION_USER`, which name whoever
+    /// runs the statement rather than a role the input declares.
+    ///
+    /// The role is reported as the statement spelled it, with no case folding,
+    /// which is how [`DatabaseLike::role`] stores the names it matches against.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE docs (id INT);
+    /// ALTER TABLE docs OWNER TO app_owner;
+    /// CREATE TABLE notes (id INT);
+    /// ",
+    /// )?;
+    /// let docs = db.table(None, "docs").unwrap();
+    /// assert_eq!(docs.owner(&db)?, Some("app_owner"));
+    ///
+    /// let notes = db.table(None, "notes").unwrap();
+    /// assert_eq!(notes.owner(&db)?, None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn owner<'db>(&self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>;
+
     /// Iterates over the policies associated with the table.
     ///
     /// # Arguments
@@ -3555,6 +3603,10 @@ where
 
     fn has_forced_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError> {
         T::has_forced_row_level_security(self, database)
+    }
+
+    fn owner<'db>(&self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError> {
+        T::owner(self, database)
     }
 
     fn primary_key_columns<'db>(
