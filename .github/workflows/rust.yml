@@ -18,7 +18,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         rust: [stable, beta, nightly]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
       with:
@@ -50,7 +50,7 @@ jobs:
     # "works in wasm" gate for a no-IO library.
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install Rust + no_std cross-compile targets
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -73,7 +73,7 @@ jobs:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install Rust
       uses: dtolnay/rust-toolchain@nightly
       with:
@@ -85,7 +85,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -99,7 +99,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
     - name: Rust Cache
@@ -113,7 +113,7 @@ jobs:
     name: Code Coverage
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Install Rust
       uses: dtolnay/rust-toolchain@nightly
       with:
