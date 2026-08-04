@@ -69,16 +69,16 @@ fn the_report_names_the_operation() {
     );
 }
 
-/// Ownership is the clearest case of something the model carries no
-/// representation of, and a Postgres dump emits it for every table, so refusing
-/// it would turn away ordinary input.
+/// A Postgres dump emits an ownership change for every table, so refusing it
+/// would turn away ordinary input. It is recorded instead.
 #[test]
-fn an_ownership_change_parses_and_changes_nothing() {
-    let database = parse("ALTER TABLE t OWNER TO someone").expect("ownership is not modelled");
+fn an_ownership_change_records_the_owner() {
+    let database = parse("ALTER TABLE t OWNER TO someone").expect("ownership is recorded");
 
     assert_eq!(database.tables().count(), 1);
     let table = database.table(None, "t").expect("t survives");
     assert_eq!(table.columns(&database).expect("t is in this database").count(), 3);
+    assert_eq!(table.owner(&database), Ok(Some("someone")));
 }
 
 /// A representative operation from each ignored family parses and leaves the
@@ -148,9 +148,10 @@ fn vendor_operations_parse_under_their_dialects() {
 #[test]
 fn a_multi_operation_statement_treats_each_operation_on_its_own() {
     let database = parse("ALTER TABLE t OWNER TO someone, ADD COLUMN x INT")
-        .expect("ownership is ignored, the column is added");
+        .expect("ownership is recorded, the column is added");
     let table = database.table(None, "t").expect("t survives");
     assert_eq!(table.columns(&database).expect("t is in this database").count(), 4);
+    assert_eq!(table.owner(&database), Ok(Some("someone")));
 
     let error = ParserDB::parse::<MySqlDialect>(&format!(
         "{TABLE} ALTER TABLE t ADD COLUMN x INT, DROP PRIMARY KEY;"

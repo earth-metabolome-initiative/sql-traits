@@ -155,6 +155,11 @@ impl TableLike for CreateTable {
     fn has_forced_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError> {
         Ok(table_metadata(self, database)?.rls_forced())
     }
+
+    #[inline]
+    fn owner<'db>(&self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError> {
+        Ok(table_metadata(self, database)?.owner())
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! Submodule defining a generic `TableMetadata` struct.
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::traits::{DatabaseLike, DocumentationMetadata, TableLike};
 
@@ -24,6 +24,8 @@ pub struct TableMetadata<T: TableLike> {
     /// Whether Row Level Security is forced for the table (applies to table
     /// owners too).
     rls_forced: bool,
+    /// The role the input names as the table's owner, if it names one.
+    owner: Option<String>,
     /// The optional documentation associated with the table
     documentation: Option<<T as DocumentationMetadata>::Documentation>,
 }
@@ -39,6 +41,7 @@ impl<T: TableLike> Default for TableMetadata<T> {
             primary_key: Vec::new(),
             rls_enabled: false,
             rls_forced: false,
+            owner: None,
             documentation: None,
         }
     }
@@ -78,6 +81,22 @@ impl<T: TableLike> TableMetadata<T> {
     #[inline]
     pub fn set_rls_forced(&mut self, rls_forced: bool) {
         self.rls_forced = rls_forced;
+    }
+
+    /// Returns the role the input names as the table's owner.
+    #[inline]
+    pub fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
+    /// Sets the role the input names as the table's owner.
+    ///
+    /// # Arguments
+    ///
+    /// * `owner` - The owning role, or [`None`] when the input names no role.
+    #[inline]
+    pub fn set_owner(&mut self, owner: Option<String>) {
+        self.owner = owner;
     }
 
     /// Returns an iterator over the references of columns of the table.
