@@ -30,9 +30,29 @@ impl<U: PolicyLike> PolicyMetadata<U> {
         self.using_functions.iter().map(core::convert::AsRef::as_ref)
     }
 
+    /// Replaces the functions involved in the using expression.
+    ///
+    /// # Arguments
+    ///
+    /// * `functions` - The functions the current using expression calls.
+    #[inline]
+    pub fn set_using_functions(&mut self, functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>) {
+        self.using_functions = functions;
+    }
+
     /// Returns an iterator over the functions involved in the check expression.
     #[inline]
     pub fn check_functions(&self) -> impl Iterator<Item = &<U::DB as DatabaseLike>::Function> {
         self.check_functions.iter().map(core::convert::AsRef::as_ref)
+    }
+
+    /// Replaces the functions involved in the check expression.
+    ///
+    /// # Arguments
+    ///
+    /// * `functions` - The functions the current check expression calls.
+    #[inline]
+    pub fn set_check_functions(&mut self, functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>) {
+        self.check_functions = functions;
     }
 }
