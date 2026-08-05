@@ -23,18 +23,65 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
     /// )?;
     /// let index = db.indexes().next().unwrap();
-    /// assert_eq!(index.name().unwrap().to_string(), "idx_name");
+    /// assert_eq!(index.name(), Some("idx_name"));
+    /// assert!(!index.name_is_quoted());
     /// # Ok(())
     /// # }
     /// ```
-    fn name(&self) -> Option<&sqlparser::ast::ObjectName>;
+    fn name(&self) -> Option<&str>;
+
+    /// Returns whether the index identifier was quoted in SQL.
+    ///
+    /// This only matters when [`Self::name`] returns `Some`, and answers
+    /// `false` for an anonymous index, which has no identifier to quote.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn name_is_quoted(&self) -> bool {
+        false
+    }
+
+    /// Returns the schema qualifier written on the index name, if any.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE SCHEMA app;
+    ///      CREATE TABLE app.users (id int, name text);
+    ///      CREATE INDEX app.\"IdxName\" ON app.users (name);",
+    /// )?;
+    /// let index = db.indexes().next().unwrap();
+    /// assert_eq!(index.name(), Some("IdxName"));
+    /// assert!(index.name_is_quoted());
+    /// assert_eq!(index.schema(), Some("app"));
+    /// assert!(!index.schema_is_quoted());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn schema(&self) -> Option<&str>;
+
+    /// Returns whether that schema qualifier was quoted in SQL.
+    ///
+    /// This only matters when [`Self::schema`] returns `Some`.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn schema_is_quoted(&self) -> bool {
+        false
+    }
 
     /// Returns the expression of the index as an SQL AST node.
     ///

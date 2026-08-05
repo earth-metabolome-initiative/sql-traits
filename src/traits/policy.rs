@@ -105,6 +105,82 @@ pub trait PolicyLike:
     where
         Self: 'db;
 
+    /// Returns the table name the policy wrote as its target, exactly as
+    /// written.
+    ///
+    /// Unlike [`Self::table`] this applies no resolution and cannot fail, so a
+    /// caller with its own resolution rules (a search path, a default schema)
+    /// can read the target and resolve it itself.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// CREATE TABLE app.docs (id INT);
+    /// CREATE POLICY docs_policy ON docs USING (true);
+    /// ",
+    /// )?;
+    /// let policy = db.policies().next().unwrap();
+    /// assert_eq!(policy.target_table_name(), "docs");
+    /// assert_eq!(policy.target_table_schema(), None);
+    /// // The unqualified target matches no table, and reading it back does
+    /// // not depend on it resolving.
+    /// assert!(policy.table(&db).is_err());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_table_name(&self) -> &str;
+
+    /// Returns whether the target table identifier was quoted in SQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn target_table_name_is_quoted(&self) -> bool {
+        false
+    }
+
+    /// Returns the schema qualifier the policy wrote on its target, if any.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// CREATE TABLE app.\"MyTable\" (id INT);
+    /// CREATE POLICY my_policy ON app.\"MyTable\" USING (id > 0);
+    /// ",
+    /// )?;
+    /// let policy = db.policies().next().unwrap();
+    /// assert_eq!(policy.target_table_schema(), Some("app"));
+    /// assert!(!policy.target_table_schema_is_quoted());
+    /// assert_eq!(policy.target_table_name(), "MyTable");
+    /// assert!(policy.target_table_name_is_quoted());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_table_schema(&self) -> Option<&str>;
+
+    /// Returns whether that schema qualifier was quoted in SQL.
+    ///
+    /// This only matters when [`Self::target_table_schema`] returns `Some`.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn target_table_schema_is_quoted(&self) -> bool {
+        false
+    }
+
     /// Returns the command the policy applies to.
     ///
     /// # Example
@@ -202,6 +278,45 @@ pub trait PolicyLike:
     fn roles<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Owner>
     where
         Self: 'db;
+
+    /// Returns whether the policy applies to every role.
+    ///
+    /// A policy says so in two ways, and this reader folds both: writing
+    /// `TO PUBLIC`, and writing no `TO` clause at all, which PostgreSQL
+    /// defaults to `PUBLIC`. Neither is visible in [`Self::roles`], where
+    /// `PUBLIC` arrives as an ordinary unquoted name and an absent clause
+    /// arrives as an empty iterator, so a caller reading roles alone cannot
+    /// tell "everyone" from a role somebody created called `public`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE ROLE \"PUBLIC\";
+    /// CREATE ROLE reader;
+    /// CREATE TABLE docs (id INT);
+    /// CREATE POLICY spelled ON docs TO PUBLIC USING (true);
+    /// CREATE POLICY implied ON docs USING (true);
+    /// CREATE POLICY named ON docs TO reader USING (true);
+    /// CREATE POLICY quoted ON docs TO \"PUBLIC\" USING (true);
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "docs").unwrap();
+    /// let policy = |name: &str| table.policies(&db).unwrap().find(|p| p.name() == name).unwrap();
+    ///
+    /// assert!(policy("spelled").applies_to_public());
+    /// assert!(policy("implied").applies_to_public());
+    /// assert!(!policy("named").applies_to_public());
+    /// // A quoted name is a role of that exact name, not the pseudo-role.
+    /// assert!(!policy("quoted").applies_to_public());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn applies_to_public(&self) -> bool;
 
     /// Returns the `USING` expression of the policy, if any.
     ///
@@ -338,6 +453,22 @@ where
         (*self).table(database)
     }
 
+    fn target_table_name(&self) -> &str {
+        (*self).target_table_name()
+    }
+
+    fn target_table_name_is_quoted(&self) -> bool {
+        (*self).target_table_name_is_quoted()
+    }
+
+    fn target_table_schema(&self) -> Option<&str> {
+        (*self).target_table_schema()
+    }
+
+    fn target_table_schema_is_quoted(&self) -> bool {
+        (*self).target_table_schema_is_quoted()
+    }
+
     fn command(&self) -> CreatePolicyCommand {
         (*self).command()
     }
@@ -351,6 +482,10 @@ where
         Self: 'db,
     {
         (*self).roles(database)
+    }
+
+    fn applies_to_public(&self) -> bool {
+        (*self).applies_to_public()
     }
 
     fn using_expression<'db>(&'db self, database: &'db Self::DB) -> Option<&'db Expr>

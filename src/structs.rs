@@ -7,7 +7,9 @@ pub use generic_db::{
 };
 pub mod metadata;
 mod schema;
+mod target_name;
 
 pub use fingerprint::{AlgorithmId, FingerprintError, SchemaFingerprint, canonical_bytes_v1};
 pub use metadata::{TableAttribute, TableMetadata};
 pub use schema::Schema;
+pub use target_name::TargetName;

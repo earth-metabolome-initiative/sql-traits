@@ -15,6 +15,7 @@ use sqlparser::ast::{Action, Grantee};
 
 use crate::{
     errors::LookupError,
+    structs::TargetName,
     traits::{DatabaseLike, Metadata},
 };
 
@@ -112,6 +113,111 @@ pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     where
         Self: 'db;
 
+    /// Returns whether the grant applies to every role.
+    ///
+    /// `TO PUBLIC` reaches the model in two spellings, and this reader folds
+    /// both: the parser records a dedicated public grantee for the keyword,
+    /// and hands back an ordinary unquoted `PUBLIC` name instead for dialects
+    /// that reserve the word. Neither is safe to spot from [`Self::grantees`]
+    /// without knowing that, and the second is indistinguishable there from a
+    /// role somebody created called `public`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE docs (id INT);
+    /// CREATE ROLE reader;
+    /// GRANT SELECT ON docs TO PUBLIC;
+    /// GRANT INSERT ON docs TO reader;
+    /// ",
+    /// )?;
+    /// let grants: Vec<_> = db.table_grants().collect();
+    /// assert_eq!(grants.iter().filter(|grant| grant.applies_to_public()).count(), 1);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn applies_to_public(&self) -> bool;
+
+    /// Returns the table names the grant wrote, exactly as written.
+    ///
+    /// A grant states its target in one of two ways, and only one of this
+    /// reader and [`Self::target_schema_names`] ever yields: either the grant
+    /// lists tables (`GRANT SELECT ON users, app.posts TO reader`), or it
+    /// covers a whole schema (`GRANT SELECT ON ALL TABLES IN SCHEMA public TO
+    /// reader`). A grant on anything else (a view, a function, a sequence)
+    /// yields from neither, which is what
+    /// [`TableGrantLike::tables`](crate::traits::TableGrantLike::tables)
+    /// already reports for those forms.
+    ///
+    /// Unlike that resolving reader this applies no resolution and cannot
+    /// fail, so a caller with its own resolution rules can read the targets
+    /// and resolve them itself.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// CREATE TABLE users (id INT);
+    /// CREATE TABLE app.posts (id INT);
+    /// CREATE ROLE reader;
+    /// GRANT SELECT ON users, app.posts TO reader;
+    /// ",
+    /// )?;
+    /// let grant = db.table_grants().next().unwrap();
+    /// let targets: Vec<_> = grant.target_table_names().collect();
+    /// assert_eq!(targets[0].name(), "users");
+    /// assert_eq!(targets[0].schema(), None);
+    /// assert_eq!(targets[1].name(), "posts");
+    /// assert_eq!(targets[1].schema(), Some("app"));
+    /// assert!(grant.target_schema_names().next().is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_table_names(&self) -> impl Iterator<Item = TargetName<'_>>;
+
+    /// Returns the schema names of an `ALL TABLES IN SCHEMA` grant, exactly as
+    /// written.
+    ///
+    /// Each yielded name is the schema itself, so
+    /// [`TargetName::name`](crate::structs::TargetName::name) is the schema
+    /// and [`TargetName::schema`](crate::structs::TargetName::schema) is the
+    /// catalog qualifier when the SQL wrote one. Every other grant form yields
+    /// nothing, see [`Self::target_table_names`].
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE public.users (id INT);
+    /// CREATE ROLE reader;
+    /// GRANT SELECT ON ALL TABLES IN SCHEMA public TO reader;
+    /// ",
+    /// )?;
+    /// let grant = db.table_grants().next().unwrap();
+    /// let schemas: Vec<_> = grant.target_schema_names().collect();
+    /// assert_eq!(schemas.len(), 1);
+    /// assert_eq!(schemas[0].name(), "public");
+    /// assert!(grant.target_table_names().next().is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_schema_names(&self) -> impl Iterator<Item = TargetName<'_>>;
+
     /// Returns whether this grant includes the `WITH GRANT OPTION`.
     ///
     /// When `WITH GRANT OPTION` is specified, the grantee can grant
@@ -175,6 +281,12 @@ pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
 
     /// Returns whether this grant applies to a specific role.
     ///
+    /// A grant that applies to every role applies to this one: whenever
+    /// [`Self::applies_to_public`] answers `true`, so does this, for every
+    /// role. An implementation that recognises `PUBLIC` in one reader and not
+    /// the other reports a grant as not applying to a role it does apply to,
+    /// so both must share a single notion of what "everyone" means.
+    ///
     /// # Arguments
     ///
     /// * `role` - The role to check against.
@@ -227,6 +339,18 @@ impl<T: GrantLike> GrantLike for &T {
         Self: 'db,
     {
         (*self).grantees(database)
+    }
+
+    fn applies_to_public(&self) -> bool {
+        (*self).applies_to_public()
+    }
+
+    fn target_table_names(&self) -> impl Iterator<Item = TargetName<'_>> {
+        (*self).target_table_names()
+    }
+
+    fn target_schema_names(&self) -> impl Iterator<Item = TargetName<'_>> {
+        (*self).target_schema_names()
     }
 
     fn with_grant_option(&self) -> bool {

@@ -8,6 +8,7 @@ use crate::{
     errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableAttribute, metadata::IndexMetadata},
     traits::{DatabaseLike, IndexLike, Metadata, TableLike},
+    utils::object_name::{object_name_last_part, schema_from_object_name},
 };
 
 impl Metadata for TableAttribute<CreateTable, CreateIndex> {
@@ -26,8 +27,31 @@ impl IndexLike for TableAttribute<CreateTable, CreateIndex> {
     }
 
     #[inline]
-    fn name(&self) -> Option<&sqlparser::ast::ObjectName> {
-        self.attribute().name.as_ref()
+    fn name(&self) -> Option<&str> {
+        self.attribute().name.as_ref().and_then(object_name_last_part).map(|(name, _)| name)
+    }
+
+    #[inline]
+    fn name_is_quoted(&self) -> bool {
+        self.attribute()
+            .name
+            .as_ref()
+            .and_then(object_name_last_part)
+            .is_some_and(|(_, quoted)| quoted)
+    }
+
+    #[inline]
+    fn schema(&self) -> Option<&str> {
+        self.attribute().name.as_ref().and_then(schema_from_object_name).map(|(schema, _)| schema)
+    }
+
+    #[inline]
+    fn schema_is_quoted(&self) -> bool {
+        self.attribute()
+            .name
+            .as_ref()
+            .and_then(schema_from_object_name)
+            .is_some_and(|(_, quoted)| quoted)
     }
 
     #[inline]

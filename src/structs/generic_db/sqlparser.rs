@@ -45,7 +45,7 @@ use crate::{
     traits::{ColumnLike, FunctionLike, TableLike},
     utils::{
         columns_in_expression,
-        identifier_resolution::identifiers_match,
+        identifier_resolution::{identifiers_match, is_public_pseudo_role},
         last_str,
         object_name::{
             object_name_identifiers, object_name_last_part, resolve_table_object_name_in_iter,
@@ -1347,7 +1347,7 @@ fn grantee_role_ident(grantee: &Grantee) -> Option<&Ident> {
     };
     let grantee_ident = object_name_last_identifier(grantee_name)?;
 
-    if grantee_ident.quote_style.is_none() && grantee_ident.value.eq_ignore_ascii_case("PUBLIC") {
+    if is_public_pseudo_role(grantee_ident.value.as_str(), grantee_ident.quote_style.is_some()) {
         return None;
     }
 
@@ -1365,7 +1365,7 @@ fn policy_role_ident(owner: &Owner) -> Option<&Ident> {
         return None;
     };
 
-    if role_ident.quote_style.is_none() && role_ident.value.eq_ignore_ascii_case("PUBLIC") {
+    if is_public_pseudo_role(role_ident.value.as_str(), role_ident.quote_style.is_some()) {
         return None;
     }
 
@@ -5408,8 +5408,8 @@ mod tests {
 
             assert_eq!(db.indexes().count(), 0);
 
-            // A unique constraint viewed as an `IndexLike` exposes no
-            // `ObjectName` name accessor; its index name is an `Ident`.
+            // `UNIQUE (name)` declares no name, so the constraint viewed as an
+            // `IndexLike` is anonymous.
             let table = db.table(None, "t").expect("table should exist");
             for ui in table.unique_indices(&db).expect("unique indices") {
                 assert!(IndexLike::name(ui).is_none());
@@ -6719,7 +6719,7 @@ mod tests {
             let indices: Vec<_> = table.indices(&db).expect("indices").collect();
             assert_eq!(indices.len(), 1);
             for index in indices {
-                assert_eq!(index.name().map(last_str), Some("t_o_idx"));
+                assert_eq!(index.name(), Some("t_o_idx"));
                 assert!(
                     db.index_metadata(index).is_some(),
                     "re-seated indexes must stay findable in the database"

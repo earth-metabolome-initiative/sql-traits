@@ -18,6 +18,7 @@ use sqlparser::ast::{Ident, ObjectName, ObjectNamePart};
 
 use crate::{
     errors::LookupError,
+    structs::TargetName,
     traits::{DatabaseLike, TableLike},
     utils::identifier_resolution::identifiers_match,
 };
@@ -56,6 +57,20 @@ pub(crate) fn schema_from_object_name(object_name: &ObjectName) -> Option<(&str,
     } else {
         None
     }
+}
+
+/// Reads an object name as an unresolved [`TargetName`], taking the last part
+/// as the name and the second-to-last (if any) as its qualifier.
+///
+/// Returns `None` only for a name with no parts, which sqlparser does not
+/// produce.
+pub(crate) fn target_name_from_object_name(object_name: &ObjectName) -> Option<TargetName<'_>> {
+    let (name, quoted) = object_name_last_part(object_name)?;
+    let target = TargetName::new(name, quoted);
+    Some(match schema_from_object_name(object_name) {
+        Some((schema, schema_quoted)) => target.with_schema(schema, schema_quoted),
+        None => target,
+    })
 }
 
 /// Returns whether a table matches an object name using lenient part matching:

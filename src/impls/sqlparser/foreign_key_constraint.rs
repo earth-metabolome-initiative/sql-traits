@@ -9,7 +9,11 @@ use crate::{
     errors::LookupError,
     structs::{ParserDB, TableAttribute},
     traits::{ForeignKeyLike, Metadata, database::DatabaseLike, table::TableLike},
-    utils::{identifier_resolution::identifiers_match, object_name::object_name_last_part},
+    utils::{
+        identifier_resolution::identifiers_match,
+        last_str,
+        object_name::{object_name_last_part, schema_from_object_name},
+    },
 };
 
 impl Metadata for TableAttribute<CreateTable, ForeignKeyConstraint> {
@@ -58,6 +62,26 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
                 )
             })
             .ok_or_else(|| LookupError::TableNotFound { object_name: foreign_table.to_string() })
+    }
+
+    #[inline]
+    fn referenced_table_name(&self) -> &str {
+        last_str(&self.attribute().foreign_table)
+    }
+
+    #[inline]
+    fn referenced_table_name_is_quoted(&self) -> bool {
+        object_name_last_part(&self.attribute().foreign_table).is_some_and(|(_, quoted)| quoted)
+    }
+
+    #[inline]
+    fn referenced_table_schema(&self) -> Option<&str> {
+        schema_from_object_name(&self.attribute().foreign_table).map(|(schema, _)| schema)
+    }
+
+    #[inline]
+    fn referenced_table_schema_is_quoted(&self) -> bool {
+        schema_from_object_name(&self.attribute().foreign_table).is_some_and(|(_, quoted)| quoted)
     }
 
     #[inline]

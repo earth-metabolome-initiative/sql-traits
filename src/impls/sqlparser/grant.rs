@@ -14,14 +14,16 @@ use sqlparser::ast::{
 
 use crate::{
     errors::LookupError,
-    structs::ParserDB,
+    structs::{ParserDB, TargetName},
     traits::{
         ColumnGrantLike, ColumnLike, DatabaseLike, GrantLike, Metadata, RoleLike, TableGrantLike,
         TableLike,
     },
     utils::{
-        identifier_resolution::identifiers_match,
-        object_name::{object_name_last_part, table_matches_object_name},
+        identifier_resolution::{identifiers_match, is_public_pseudo_role},
+        object_name::{
+            object_name_last_part, table_matches_object_name, target_name_from_object_name,
+        },
     },
 };
 
@@ -61,8 +63,21 @@ fn role_matches_ident(role: &CreateRole, lookup_name: &str, lookup_quoted: bool)
     })
 }
 
-fn grantee_matches_role(grantee: &Grantee, role: &CreateRole) -> bool {
+/// Returns whether a grantee names the `PUBLIC` pseudo-role, in either
+/// spelling the parser produces: the dedicated grantee type for the keyword,
+/// and a bare unquoted `PUBLIC` identifier for dialects that reserve it.
+fn grantee_is_public(grantee: &Grantee) -> bool {
     if grantee.grantee_type == GranteesType::Public {
+        return true;
+    }
+
+    matches!(&grantee.name, Some(GranteeName::ObjectName(name))
+        if object_name_last_part(name)
+            .is_some_and(|(value, quoted)| is_public_pseudo_role(value, quoted)))
+}
+
+fn grantee_matches_role(grantee: &Grantee, role: &CreateRole) -> bool {
+    if grantee_is_public(grantee) {
         return true;
     }
 
@@ -445,6 +460,26 @@ impl GrantLike for Grant {
         Self: 'db,
     {
         self.grantees.iter()
+    }
+
+    fn applies_to_public(&self) -> bool {
+        self.grantees.iter().any(grantee_is_public)
+    }
+
+    fn target_table_names(&self) -> impl Iterator<Item = TargetName<'_>> {
+        let names: &[ObjectName] = match &self.objects {
+            Some(GrantObjects::Tables(tables)) => tables,
+            _ => &[],
+        };
+        names.iter().filter_map(target_name_from_object_name)
+    }
+
+    fn target_schema_names(&self) -> impl Iterator<Item = TargetName<'_>> {
+        let names: &[ObjectName] = match &self.objects {
+            Some(GrantObjects::AllTablesInSchema { schemas }) => schemas,
+            _ => &[],
+        };
+        names.iter().filter_map(target_name_from_object_name)
     }
 
     fn with_grant_option(&self) -> bool {
