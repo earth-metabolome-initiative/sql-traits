@@ -63,6 +63,11 @@ where
         self.timezone.as_deref()
     }
 
+    #[inline]
+    fn search_path(&self) -> impl Iterator<Item = (&str, bool)> {
+        self.search_path.iter().map(|(name, quoted)| (name.as_str(), *quoted))
+    }
+
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table> {
         self.tables.iter().map(|(table, _)| table.as_ref()).find(|table| {
             stored_identifier_matches_lookup(

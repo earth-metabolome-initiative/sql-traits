@@ -1,7 +1,7 @@
 //! Implementations for [`ParserDB`] - a database schema parsed from SQL text.
 
 use alloc::{
-    borrow::ToOwned,
+    borrow::{Cow, ToOwned},
     boxed::Box,
     collections::BTreeSet,
     string::{String, ToString},
@@ -19,16 +19,16 @@ use sql_docs::SqlDoc;
 use sqlparser::parser::ParserError;
 use sqlparser::{
     ast::{
-        Action, AlterColumnOperation, AlterPolicy, AlterPolicyOperation, AlterSchema,
-        AlterSchemaOperation, AlterTableOperation, CheckConstraint, ColumnDef, ColumnOption,
-        ColumnOptionDef, CreateFunction, CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole,
-        CreateTable, CreateTrigger, DataType, DropBehavior, ExactNumberInfo, Expr,
-        ForeignKeyConstraint, FunctionReturnType, GeneratedAs, Grant, GrantObjects, Grantee,
-        GranteeName, GranteesType, Ident, IndexColumn, MySQLColumnPosition, ObjectName,
-        ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Owner, Privileges, Query,
-        RenameTableNameKind, SchemaName, Statement, TableConstraint, TimezoneInfo, TriggerEvent,
-        UniqueConstraint, Value, ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut,
-        visit_relations,
+        Action, AlterColumnOperation, AlterIndexOperation, AlterPolicy, AlterPolicyOperation,
+        AlterRoleOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation, ArgMode,
+        CheckConstraint, ColumnDef, ColumnOption, ColumnOptionDef, CreateFunction,
+        CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger,
+        DataType, DropBehavior, ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionReturnType,
+        GeneratedAs, Grant, GrantObjects, Grantee, GranteeName, GranteesType, Ident, IndexColumn,
+        MySQLColumnPosition, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr,
+        OrderByOptions, Owner, Privileges, Query, RenameTableNameKind, SchemaName, Statement,
+        TableConstraint, TimezoneInfo, TriggerEvent, UniqueConstraint, Value, ValueWithSpan, Visit,
+        VisitMut, Visitor, VisitorMut, visit_relations,
     },
     dialect::Dialect,
     parser::Parser,
@@ -42,14 +42,15 @@ use crate::{
         GenericDB, Schema, TableAttribute, TableMetadata,
         metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
     },
-    traits::{ColumnLike, FunctionLike, TableLike},
+    traits::{ColumnLike, FunctionLike, IndexLike, TableLike},
     utils::{
         columns_in_expression,
         identifier_resolution::{identifiers_match, is_public_pseudo_role},
-        last_str,
+        last_str, normalize_postgres_type_cow, normalize_sqlparser_type,
         object_name::{
             object_name_identifiers, object_name_last_part, resolve_table_object_name_in_iter,
-            resolve_table_object_name_with_implicit_public_in_iter,
+            resolve_table_object_name_on_search_path_in_iter, schema_from_object_name,
+            table_matches_object_name,
         },
     },
 };
@@ -570,13 +571,17 @@ impl ParserDBBuilder {
         )
     }
 
+    /// Resolves a table the input has created so far, honouring the search
+    /// path the input has set, so every statement reaching for a bare name
+    /// answers alike.
     fn resolve_table_object_name(
         &self,
         object_name: &ObjectName,
     ) -> Result<Option<&CreateTable>, LookupError> {
-        resolve_table_object_name_in_iter(
+        resolve_table_object_name_on_search_path_in_iter(
             self.tables().iter().map(|(table, _)| table.as_ref()),
             object_name,
+            self.search_path(),
         )
     }
 }
@@ -1327,6 +1332,55 @@ fn idents_match(left: &Ident, right: &Ident) -> bool {
     )
 }
 
+/// Returns whether two object names carry the same final identifier under
+/// PostgreSQL folding.
+///
+/// A qualifier is left out of the comparison: what scopes the name is decided
+/// by the caller, since a trigger is scoped by its table and an index by the
+/// schema of the table it is on rather than by anything the name spells.
+fn object_names_match(left: &ObjectName, right: &ObjectName) -> bool {
+    match (object_name_last_part(left), object_name_last_part(right)) {
+        (Some((left, left_quoted)), Some((right, right_quoted))) => {
+            identifiers_match(left, left_quoted, right, right_quoted)
+        }
+        _ => false,
+    }
+}
+
+/// Returns the argument types that make up a function's identity.
+///
+/// An `OUT` parameter describes the result rather than the call, so PostgreSQL
+/// leaves it out and reads `f(int)` and `f(int, OUT o int)` as one function.
+/// Aliases fold, so `integer` and `int4` are one type while `varchar` and
+/// `text` are two.
+fn function_argument_types(args: Option<&[OperateFunctionArg]>) -> Vec<Cow<'_, str>> {
+    args.unwrap_or_default()
+        .iter()
+        .filter(|argument| argument.mode != Some(ArgMode::Out))
+        .map(|argument| normalize_postgres_type_cow(normalize_sqlparser_type(&argument.data_type)))
+        .collect()
+}
+
+/// Returns whether two functions are the same function to PostgreSQL, which
+/// identifies one by its schema, its name and the types it takes, and not by
+/// what it returns.
+fn function_signatures_match(
+    left: &ObjectName,
+    left_args: Option<&[OperateFunctionArg]>,
+    right: &ObjectName,
+    right_args: Option<&[OperateFunctionArg]>,
+) -> bool {
+    if !object_names_match(left, right)
+        || !schema_qualifiers_match(schema_from_object_name(left), schema_from_object_name(right))
+    {
+        return false;
+    }
+    let left_types = function_argument_types(left_args);
+    let right_types = function_argument_types(right_args);
+    left_types.len() == right_types.len()
+        && left_types.iter().zip(&right_types).all(|(left, right)| left.eq_ignore_ascii_case(right))
+}
+
 fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
     role.names.iter().any(|role_name| {
         object_name_last_identifier(role_name)
@@ -1402,16 +1456,128 @@ fn validate_policy_roles(
     Ok(())
 }
 
-/// Returns whether two table references carried by policy statements name the
-/// same table.
+/// Enforces [`AccessResolution::ClosedWorld`] on a role named as an owner.
 ///
-/// A policy name is unique per table rather than per database, so an
-/// `ALTER POLICY` is resolved by both. The two statements need not spell the
-/// table the same way, and an unqualified name means schema `public`, which is
-/// the allowance
-/// [`ParserDB::resolve_table_object_name_with_implicit_public`] already makes
-/// when resolving a policy's own target.
-fn policy_tables_match(left: &ObjectName, right: &ObjectName) -> bool {
+/// The database refuses `ALTER TABLE ... OWNER TO`, `ALTER SCHEMA ... OWNER TO`
+/// and `CREATE SCHEMA ... AUTHORIZATION` when the role is absent, so the
+/// default refuses them too. The setting excuses them for the same reason it
+/// excuses a grantee: a dump emits `ALTER SCHEMA app OWNER TO appowner` while
+/// creating no role at all.
+fn validate_owner_role_ident(
+    builder: &ParserDBBuilder,
+    role_ident: &Ident,
+    object_name: &str,
+) -> Result<(), crate::errors::Error> {
+    if builder.roles().iter().any(|(role, ())| role_matches_lookup_ident(role, role_ident)) {
+        return Ok(());
+    }
+
+    Err(crate::errors::Error::RoleNotFoundForOwner {
+        role_name: role_ident.value.clone(),
+        object_name: object_name.to_string(),
+    })
+}
+
+/// Enforces the same rule on an `OWNER TO` clause, which may name one of the
+/// keyword pseudo-roles instead of a role, and those name no role to find.
+fn validate_owner_role(
+    builder: &ParserDBBuilder,
+    owner: &Owner,
+    object_name: &str,
+) -> Result<(), crate::errors::Error> {
+    let Owner::Ident(role_ident) = owner else {
+        return Ok(());
+    };
+    validate_owner_role_ident(builder, role_ident, object_name)
+}
+
+/// Returns the column names of an index column list, or `None` when any entry
+/// is an expression rather than a plain column.
+///
+/// An expression index cannot back a foreign key, so a key it would describe is
+/// simply not a candidate.
+fn plain_key_columns(columns: &[IndexColumn]) -> Option<Vec<&Ident>> {
+    columns
+        .iter()
+        .map(|column| {
+            match &column.column.expr {
+                Expr::Identifier(ident) => Some(ident),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Returns whether two column lists name the same set of columns.
+fn key_columns_match(left: &[&Ident], right: &[&Ident]) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|wanted| right.iter().any(|have| idents_match(wanted, have)))
+}
+
+/// Collects every set of columns on `table` that a foreign key may point at:
+/// its primary key and each of its unique constraints, in both the inline and
+/// the table-constraint spelling.
+///
+/// A `CREATE UNIQUE INDEX` counts too, and lives in the builder rather than on
+/// the node, so it is gathered separately by the caller.
+fn declared_candidate_keys(table: &CreateTable) -> Vec<Vec<&Ident>> {
+    let mut keys: Vec<Vec<&Ident>> = Vec::new();
+
+    for column in &table.columns {
+        if column.options.iter().any(|option| {
+            matches!(option.option, ColumnOption::PrimaryKey(_) | ColumnOption::Unique(_))
+        }) {
+            keys.push(vec![&column.name]);
+        }
+    }
+
+    for constraint in &table.constraints {
+        let columns = match constraint {
+            TableConstraint::PrimaryKey(pk) => &pk.columns,
+            TableConstraint::Unique(unique) => &unique.columns,
+            _ => continue,
+        };
+        if let Some(key) = plain_key_columns(columns) {
+            keys.push(key);
+        }
+    }
+
+    keys
+}
+
+/// Returns whether the primary key of `table` exists, which is what a foreign
+/// key naming no columns points at.
+fn has_primary_key(table: &CreateTable) -> bool {
+    table.columns.iter().any(|column| {
+        column.options.iter().any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)))
+    }) || table.constraints.iter().any(|c| matches!(c, TableConstraint::PrimaryKey(_)))
+}
+
+/// Reads one entry of a `SET search_path` value list as a schema name and its
+/// quoting.
+///
+/// PostgreSQL accepts both a bare identifier and a single-quoted string, and
+/// neither is a quoted identifier in the case-sensitivity sense. Anything else,
+/// such as an expression, names no schema and is skipped.
+fn search_path_entry(value: &Expr) -> Option<(String, bool)> {
+    match value {
+        Expr::Identifier(ident) => Some((ident.value.clone(), ident.quote_style.is_some())),
+        Expr::Value(ValueWithSpan { value: Value::SingleQuotedString(name), .. }) => {
+            Some((name.clone(), false))
+        }
+        _ => None,
+    }
+}
+
+/// Returns whether two table references name the same table.
+///
+/// A policy name and a trigger name are unique per table rather than per
+/// database, so the statements that create, alter or drop one are resolved by
+/// both. Two statements need not spell the table the same way, and an
+/// unqualified name means schema `public`, which is the allowance
+/// [`ParserDB::resolve_table_object_name_on_search_path`] already makes when
+/// resolving such a target.
+fn target_tables_match(left: &ObjectName, right: &ObjectName) -> bool {
     let (Ok((left_schema, left_table)), Ok((right_schema, right_table))) =
         (object_name_identifiers(left), object_name_identifiers(right))
     else {
@@ -1435,7 +1601,7 @@ fn policy_tables_match(left: &ObjectName, right: &ObjectName) -> bool {
 ///
 /// The default schema is exempt, since no dump emits a statement creating it,
 /// which is the same allowance
-/// [`ParserDB::resolve_table_object_name_with_implicit_public`] makes when
+/// [`ParserDB::resolve_table_object_name_on_search_path`] makes when
 /// resolving a name against it.
 fn validate_table_schema(
     builder: &ParserDBBuilder,
@@ -1461,6 +1627,186 @@ fn validate_table_schema(
         schema_name: schema_name.to_string(),
         table_name: create_table.table_name().to_string(),
     })
+}
+
+/// Checks that a table declares no column name twice.
+///
+/// PostgreSQL folds an unquoted identifier, so `a` and `A` are one column while
+/// `a` and `"A"` are two.
+fn validate_distinct_columns(create_table: &CreateTable) -> Result<(), crate::errors::Error> {
+    for (position, column) in create_table.columns.iter().enumerate() {
+        let repeated = create_table.columns[..position].iter().any(|earlier| {
+            identifiers_match(
+                earlier.name.value.as_str(),
+                earlier.name.quote_style.is_some(),
+                column.name.value.as_str(),
+                column.name.quote_style.is_some(),
+            )
+        });
+        if repeated {
+            return Err(crate::errors::Error::ColumnAlreadyExists {
+                table_name: create_table.table_name().to_string(),
+                column_name: column.name.value.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// A schema qualifier together with whether it was quoted.
+type SchemaQualifier<'a> = Option<(&'a str, bool)>;
+
+/// Returns the schema qualifier of a table, if it carries one.
+fn table_schema_qualifier(table: &CreateTable) -> SchemaQualifier<'_> {
+    table.table_schema().map(|schema| (schema, table.table_schema_is_quoted()))
+}
+
+/// Returns whether two qualifiers name the same schema, reading a missing one
+/// as `public`, which is the allowance the table store already makes when it
+/// refuses a lookup ambiguity.
+fn schema_qualifiers_match(left: SchemaQualifier<'_>, right: SchemaQualifier<'_>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some((left, left_quoted)), Some((right, right_quoted))) => {
+            identifiers_match(left, left_quoted, right, right_quoted)
+        }
+        (Some((schema, quoted)), None) | (None, Some((schema, quoted))) => {
+            identifiers_match(schema, quoted, "public", false)
+        }
+    }
+}
+
+/// Returns the name a `UNIQUE` or `PRIMARY KEY` column option was declared
+/// with, which PostgreSQL gives to the index behind it.
+///
+/// sqlparser keeps the name on the option rather than inside the constraint it
+/// wraps, so the inline spelling has to be read here while the table-constraint
+/// spelling carries its own.
+fn column_constraint_index_name(option: &ColumnOptionDef) -> Option<&Ident> {
+    matches!(option.option, ColumnOption::Unique(_) | ColumnOption::PrimaryKey(_))
+        .then_some(option.name.as_ref())
+        .flatten()
+}
+
+/// Every name a table node puts into the relation pool of its schema: its own,
+/// and the name of each `UNIQUE` or `PRIMARY KEY` constraint, whose backing
+/// index PostgreSQL creates under that name.
+fn relation_names_of(create_table: &CreateTable) -> Vec<(ObjectKind, &Ident)> {
+    let mut names = Vec::new();
+    if let Some(ObjectNamePart::Identifier(table_name)) = create_table.name.0.last() {
+        names.push((ObjectKind::Table, table_name));
+    }
+    let inline = create_table
+        .columns
+        .iter()
+        .flat_map(|column| column.options.iter())
+        .filter_map(column_constraint_index_name);
+    let declared = create_table.constraints.iter().filter_map(|constraint| {
+        match constraint {
+            TableConstraint::Unique(unique) => unique.name.as_ref().or(unique.index_name.as_ref()),
+            TableConstraint::PrimaryKey(primary_key) => {
+                primary_key.name.as_ref().or(primary_key.index_name.as_ref())
+            }
+            _ => None,
+        }
+    });
+    names.extend(inline.chain(declared).map(|name| (ObjectKind::UniqueIndex, name)));
+    names
+}
+
+/// Returns whether an index holds `name` in `schema`. An index takes its schema
+/// from the table it is on.
+fn index_holds_name<A>(
+    index: &TableAttribute<CreateTable, A>,
+    name: &Ident,
+    schema: SchemaQualifier<'_>,
+) -> bool
+where
+    TableAttribute<CreateTable, A>: IndexLike,
+{
+    IndexLike::name(index).is_some_and(|candidate| {
+        identifiers_match(
+            candidate,
+            index.name_is_quoted(),
+            name.value.as_str(),
+            name.quote_style.is_some(),
+        )
+    }) && schema_qualifiers_match(table_schema_qualifier(index.table()), schema)
+}
+
+/// Returns the kind of index already holding `name` in `schema`, if any,
+/// whether it came from a `CREATE INDEX` or from a named `UNIQUE` or
+/// `PRIMARY KEY` constraint.
+fn index_name_holder(
+    builder: &ParserDBBuilder,
+    name: &Ident,
+    schema: SchemaQualifier<'_>,
+) -> Option<ObjectKind> {
+    if builder.indices().iter().any(|(index, _)| index_holds_name(index, name, schema)) {
+        return Some(ObjectKind::Index);
+    }
+    builder
+        .unique_indices()
+        .iter()
+        .any(|(index, _)| index_holds_name(index, name, schema))
+        .then_some(ObjectKind::UniqueIndex)
+}
+
+/// Returns the kind of relation already holding `name` in `schema`, if any.
+///
+/// Tables in a schema and indexes on them share one pool of names. A table the
+/// caller is about to replace has to be out of the stores before this is asked.
+fn relation_name_holder(
+    builder: &ParserDBBuilder,
+    name: &Ident,
+    schema: SchemaQualifier<'_>,
+) -> Option<ObjectKind> {
+    let table = builder.tables().iter().any(|(table, _)| {
+        identifiers_match(
+            table.table_name(),
+            table.table_name_is_quoted(),
+            name.value.as_str(),
+            name.quote_style.is_some(),
+        ) && schema_qualifiers_match(table_schema_qualifier(table), schema)
+    });
+    if table {
+        return Some(ObjectKind::Table);
+    }
+    index_name_holder(builder, name, schema)
+}
+
+/// Checks that nothing in the schema of a table node already holds a name the
+/// node introduces, neither the table name itself nor a constraint-backed index
+/// name, and that the node does not repeat one of its own.
+///
+/// One table name against another is left to the builder, which refuses it as a
+/// lookup ambiguity and names both spellings, so it is not asked for here.
+fn validate_relation_names(
+    builder: &ParserDBBuilder,
+    create_table: &CreateTable,
+) -> Result<(), crate::errors::Error> {
+    let schema = table_schema_qualifier(create_table);
+    let introduced = relation_names_of(create_table);
+
+    for (position, (object_kind, name)) in introduced.iter().enumerate() {
+        let against_stores = match object_kind {
+            ObjectKind::Table => index_name_holder(builder, name, schema),
+            _ => relation_name_holder(builder, name, schema),
+        };
+        let conflicting_kind = introduced[..position]
+            .iter()
+            .find(|(_, earlier)| idents_match(earlier, name))
+            .map(|(earlier_kind, _)| *earlier_kind)
+            .or(against_stores);
+        if let Some(conflicting_kind) = conflicting_kind {
+            return Err(crate::errors::Error::RelationNameAlreadyTaken {
+                object_kind: *object_kind,
+                conflicting_kind,
+                object_name: name.value.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Checks that every plain column an index names is declared by its table.
@@ -1499,14 +1845,29 @@ fn validate_index_columns(
     Ok(())
 }
 
-/// Enforces [`AccessResolution::ClosedWorld`] on one `GRANT`: every grantee
-/// names a role, and every table target names a table, that the input has
-/// created up to this statement.
-fn validate_grant_against_builder(
+/// Enforces [`AccessResolution::ClosedWorld`] on one `GRANT` or `REVOKE`: every
+/// table target names a table, and every grantee names a role, that the input
+/// has created up to this statement.
+///
+/// The two statements carry the same targets and the database answers for them
+/// alike, reporting an absent table before an absent role, which is the order
+/// here.
+fn validate_access_targets_against_builder(
     builder: &ParserDBBuilder,
-    grant: &Grant,
+    grantees: &[Grantee],
+    objects: Option<&GrantObjects>,
 ) -> Result<(), crate::errors::Error> {
-    for grantee in &grant.grantees {
+    if let Some(GrantObjects::Tables(tables)) = objects {
+        for table_obj in tables {
+            if builder.resolve_table_object_name(table_obj)?.is_none() {
+                return Err(crate::errors::Error::TableNotFoundForGrant {
+                    table_name: last_str(table_obj).to_string(),
+                });
+            }
+        }
+    }
+
+    for grantee in grantees {
         let Some(grantee_ident) = grantee_role_ident(grantee) else {
             continue;
         };
@@ -1517,16 +1878,6 @@ fn validate_grant_against_builder(
             return Err(crate::errors::Error::RoleNotFoundForGrant {
                 role_name: grantee_ident.value.clone(),
             });
-        }
-    }
-
-    if let Some(GrantObjects::Tables(tables)) = &grant.objects {
-        for table_obj in tables {
-            if builder.resolve_table_object_name(table_obj)?.is_none() {
-                return Err(crate::errors::Error::TableNotFoundForGrant {
-                    table_name: last_str(table_obj).to_string(),
-                });
-            }
         }
     }
 
@@ -1561,17 +1912,45 @@ fn table_constraint_has_name(constraint: &TableConstraint, name: &Ident) -> bool
     })
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct RevokeStoreApplication {
-    matched_any: bool,
-    has_unsupported_column_scoped_revoke: bool,
+/// Rewrites every grantee naming `previous` so that it names `replacement`.
+///
+/// A grant in PostgreSQL holds the role itself rather than its spelling, so it
+/// survives a rename. Grants are the references `DROP ROLE` refuses to strand,
+/// so they are the ones a rename carries along.
+fn rename_grantee_role(grants: &mut [(Arc<Grant>, ())], previous: &Ident, replacement: &Ident) {
+    let names_previous = |grantee: &Grantee| {
+        matches!(
+            &grantee.name,
+            Some(GranteeName::ObjectName(name))
+                if object_name_last_identifier(name)
+                    .is_some_and(|ident| idents_match(ident, previous))
+        )
+    };
+
+    for (grant, ()) in grants {
+        if !grant.grantees.iter().any(names_previous) {
+            continue;
+        }
+        for grantee in &mut Arc::make_mut(grant).grantees {
+            if names_previous(grantee) {
+                grantee.name =
+                    Some(GranteeName::ObjectName(ObjectName(vec![ObjectNamePart::Identifier(
+                        replacement.clone(),
+                    )])));
+            }
+        }
+    }
 }
 
+/// Subtracts a revoke from a grant store, reporting whether it asked for
+/// something this model cannot represent.
+///
+/// A revoke that matches no grant is a no-op, as it is in the database, so
+/// nothing is reported for it.
 fn apply_revoke_to_grant_store(
     grants: &mut Vec<(Arc<Grant>, ())>,
     revoke: &sqlparser::ast::Revoke,
-) -> RevokeStoreApplication {
-    let mut matched_any = false;
+) -> bool {
     let mut has_unsupported_column_scoped_revoke = false;
     let mut updated_grants = Vec::with_capacity(grants.len());
     let original_grants = core::mem::take(grants);
@@ -1600,7 +1979,6 @@ fn apply_revoke_to_grant_store(
             updated_grants.push((grant, ()));
             continue;
         }
-        matched_any = true;
 
         // Preserve the original storage entry when revoke matched but did not
         // change the targeted grantee's privileges (e.g. ALL minus action).
@@ -1621,7 +1999,7 @@ fn apply_revoke_to_grant_store(
     }
 
     *grants = updated_grants;
-    RevokeStoreApplication { matched_any, has_unsupported_column_scoped_revoke }
+    has_unsupported_column_scoped_revoke
 }
 
 /// A database schema parsed from SQL text.
@@ -1750,95 +2128,25 @@ impl ParserDB {
         )
     }
 
-    /// Resolves a table from an SQL object name with implicit `public`
-    /// fallback.
+    /// Resolves a table from an SQL object name, trying each schema on the
+    /// database's search path for an unqualified name.
     ///
-    /// For unqualified names, this method first resolves against schema-less
-    /// tables, then against tables in schema `public`.
+    /// A schema-less table is matched first, then the path is walked in order
+    /// and the first schema holding a match wins.
     ///
     /// # Errors
     ///
     /// Returns an error when the object name is malformed for table lookup, or
     /// when lookup is ambiguous.
-    pub fn resolve_table_object_name_with_implicit_public(
+    pub fn resolve_table_object_name_on_search_path(
         &self,
         object_name: &ObjectName,
     ) -> Result<Option<&CreateTable>, LookupError> {
-        resolve_table_object_name_with_implicit_public_in_iter(
+        resolve_table_object_name_on_search_path_in_iter(
             self.tables.iter().map(|(table, _)| table.as_ref()),
             object_name,
+            &self.search_path,
         )
-    }
-
-    /// Checks that every foreign key resolves: the referenced table exists in
-    /// this database and each referenced column exists on it.
-    ///
-    /// Order-insensitive: it runs against the fully ingested database, so
-    /// forward and self-references pass. Targets resolve under the same
-    /// implicit-`public` policy as other object-name lookups. Opt-in, so
-    /// partial schemas still parse; call it after parse to enforce closure.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first unresolved constraint as
-    /// [`ReferencedTableNotFoundForForeignKey`](crate::errors::Error::ReferencedTableNotFoundForForeignKey)
-    /// or
-    /// [`ReferencedColumnNotFoundForForeignKey`](crate::errors::Error::ReferencedColumnNotFoundForForeignKey).
-    /// A malformed target name surfaces as
-    /// [`IdentifierLookupError`](crate::errors::Error::IdentifierLookupError).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use sql_traits::prelude::*;
-    /// use sqlparser::dialect::GenericDialect;
-    ///
-    /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "
-    ///     CREATE TABLE parent (id INT PRIMARY KEY);
-    ///     CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
-    ///     ",
-    /// )?;
-    /// assert!(db.validate_foreign_key_targets().is_ok());
-    ///
-    /// let dangling = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES orders(id));",
-    /// )?;
-    /// assert!(dangling.validate_foreign_key_targets().is_err());
-    /// # Ok::<(), sql_traits::errors::Error>(())
-    /// ```
-    pub fn validate_foreign_key_targets(&self) -> Result<(), crate::errors::Error> {
-        for (fk, ()) in &self.foreign_keys {
-            let constraint = fk.attribute();
-            let host_table = fk.table();
-            let Some(referenced_table) =
-                self.resolve_table_object_name_with_implicit_public(&constraint.foreign_table)?
-            else {
-                return Err(crate::errors::Error::ReferencedTableNotFoundForForeignKey {
-                    referenced_table: constraint.foreign_table.to_string(),
-                    host_table: host_table.name.to_string(),
-                });
-            };
-
-            for referred in &constraint.referred_columns {
-                let column_exists = referenced_table.columns.iter().any(|column| {
-                    identifiers_match(
-                        column.name.value.as_str(),
-                        column.name.quote_style.is_some(),
-                        referred.value.as_str(),
-                        referred.quote_style.is_some(),
-                    )
-                });
-                if !column_exists {
-                    return Err(crate::errors::Error::ReferencedColumnNotFoundForForeignKey {
-                        referenced_column: referred.value.clone(),
-                        referenced_table: referenced_table.name.to_string(),
-                        host_table: host_table.name.to_string(),
-                    });
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Reports the roles and table targets that this database's access control
@@ -2227,13 +2535,25 @@ impl ParserDB {
                         ),
                     );
                 }
+                // The same constraint written inline on the column rather than
+                // as a table constraint, so it takes the same path: both
+                // spellings must resolve their target alike.
                 ColumnOption::ForeignKey(mut foreign_key) => {
                     foreign_key.columns.push(column.attribute().name.clone());
-                    let fk = Arc::new(TableAttribute::new(create_table.clone(), foreign_key));
-                    table_metadata.add_foreign_key(fk.clone());
-                    builder = builder.add_foreign_key(fk, ());
+                    builder = Self::process_foreign_key_table_constraint(
+                        &foreign_key,
+                        create_table,
+                        table_metadata,
+                        builder,
+                    )?;
                 }
                 ColumnOption::Unique(mut unique_constraint) => {
+                    // sqlparser keeps the name of an inline constraint on the
+                    // option rather than inside the constraint, so without this
+                    // the index behind `CONSTRAINT c UNIQUE` would read back
+                    // anonymous while the table-constraint spelling of the same
+                    // thing reads back as `c`.
+                    unique_constraint.name.clone_from(&option.name);
                     unique_constraint.columns.push(IndexColumn {
                         column: OrderByExpr {
                             expr: Expr::Identifier(column.attribute().name.clone()),
@@ -2251,7 +2571,7 @@ impl ParserDB {
                 }
                 ColumnOption::PrimaryKey(_) => {
                     let primary_key_unique_constraint = UniqueConstraint {
-                        name: None,
+                        name: option.name.clone(),
                         index_name: None,
                         index_type_display: sqlparser::ast::KeyOrIndexDisplay::None,
                         index_type: None,
@@ -2311,13 +2631,18 @@ impl ParserDB {
 
         let referenced_table_name = fk.foreign_table.to_string();
 
-        let referenced_table = resolve_table_object_name_in_iter(
+        // An unqualified target resolves through the search path, which carries
+        // `public`, so a bare `parent` reaches `public.parent` as it does in the
+        // database. The table being created is chained in so a table may
+        // reference itself.
+        let referenced_table = resolve_table_object_name_on_search_path_in_iter(
             builder
                 .tables()
                 .iter()
                 .map(|(t, _)| t.as_ref())
                 .chain(core::iter::once(create_table.as_ref())),
             &fk.foreign_table,
+            builder.search_path(),
         )?;
         let Some(referenced_table) = referenced_table else {
             return Err(crate::errors::Error::ReferencedTableNotFoundForForeignKey {
@@ -2343,6 +2668,37 @@ impl ParserDB {
                     host_table: create_table.name.to_string(),
                 });
             }
+        }
+
+        // Without a unique key on the far side a child row could match more
+        // than one parent, so PostgreSQL, MySQL and SQLite all refuse it. A
+        // `CREATE UNIQUE INDEX` counts and lives in the builder rather than on
+        // the node, so both sources are gathered.
+        let referred: Vec<&Ident> = fk.referred_columns.iter().collect();
+        let backed = if referred.is_empty() {
+            has_primary_key(referenced_table)
+        } else {
+            let mut candidates = declared_candidate_keys(referenced_table);
+            candidates.extend(builder.indices().iter().filter_map(|(index, _)| {
+                let node = index.attribute();
+                if !node.unique || !table_matches_object_name(referenced_table, &node.table_name) {
+                    return None;
+                }
+                plain_key_columns(&node.columns)
+            }));
+            candidates.iter().any(|candidate| key_columns_match(&referred, candidate))
+        };
+
+        if !backed {
+            return Err(crate::errors::Error::ReferencedColumnsNotUniqueForForeignKey {
+                referenced_columns: referred
+                    .iter()
+                    .map(|ident| ident.value.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                referenced_table: referenced_table_name.clone(),
+                host_table: create_table.name.to_string(),
+            });
         }
 
         let fk_arc = Arc::new(TableAttribute::new(create_table.clone(), fk.clone()));
@@ -2496,6 +2852,8 @@ impl ParserDB {
         mut table_metadata: TableMetadata<CreateTable>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         validate_table_schema(&builder, &create_table)?;
+        validate_distinct_columns(&create_table)?;
+        validate_relation_names(&builder, &create_table)?;
 
         for column in create_table.columns.clone() {
             table_metadata.add_column(Arc::new(TableAttribute::new(create_table.clone(), column)));
@@ -3000,13 +3358,20 @@ impl ParserDB {
             ("user", vec![], DataType::Text),
         ];
 
+        // Qualified the way PostgreSQL holds them, in `pg_catalog` rather than
+        // in the schema a `CREATE FUNCTION` lands in. A user function that
+        // shadows a builtin is accepted by the server for exactly that reason,
+        // so without the qualifier the duplicate check would refuse it.
         for (name, args, return_type) in builtins {
             let create_function = CreateFunction {
                 or_alter: false,
                 or_replace: false,
                 temporary: false,
                 if_not_exists: false,
-                name: ObjectName(vec![ObjectNamePart::Identifier(Ident::new(name))]),
+                name: ObjectName(vec![
+                    ObjectNamePart::Identifier(Ident::new("pg_catalog")),
+                    ObjectNamePart::Identifier(Ident::new(name)),
+                ]),
                 args: Some(args),
                 return_type: Some(FunctionReturnType::DataType(return_type)),
                 function_body: Some(CreateFunctionBody::AsBeforeOptions {
@@ -3033,6 +3398,30 @@ impl ParserDB {
         for statement in statements {
             match statement {
                 Statement::CreateFunction(create_function) => {
+                    // Two functions may share a name as long as they take
+                    // different arguments. A `CREATE OR REPLACE` replaces the
+                    // stored node rather than appending a second one, which
+                    // would leave the stale node answering every lookup.
+                    let existing = builder.functions().iter().position(|(existing, ())| {
+                        function_signatures_match(
+                            &existing.name,
+                            existing.args.as_deref(),
+                            &create_function.name,
+                            create_function.args.as_deref(),
+                        )
+                    });
+                    match (existing, create_function.or_replace) {
+                        (Some(_), false) => {
+                            return Err(crate::errors::Error::FunctionAlreadyExists {
+                                function_name: last_str(&create_function.name).to_string(),
+                            });
+                        }
+                        (Some(position), true) => {
+                            builder.functions_mut().remove(position);
+                        }
+                        (None, _) => {}
+                    }
+
                     builder = builder.add_function(Arc::new(create_function), ());
                 }
                 Statement::DropFunction(drop_function) => {
@@ -3045,21 +3434,40 @@ impl ParserDB {
                             });
                         };
 
-                        // Check if function exists
-                        let function_exists = builder.function_arc_vec().iter().any(|f| {
-                            identifiers_match(
-                                f.name(),
-                                f.name_is_quoted(),
-                                function_name,
-                                function_quoted,
-                            )
-                        });
+                        // A statement that spells the argument list names one
+                        // function, and one that omits it names whichever
+                        // function carries the name, so long as only one does.
+                        let matching: Vec<usize> = builder
+                            .functions()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, (function, ()))| {
+                                match &func_desc.args {
+                                    Some(args) => {
+                                        function_signatures_match(
+                                            &function.name,
+                                            function.args.as_deref(),
+                                            &func_desc.name,
+                                            Some(args),
+                                        )
+                                    }
+                                    None => object_names_match(&function.name, &func_desc.name),
+                                }
+                            })
+                            .map(|(position, _)| position)
+                            .collect();
 
-                        if !function_exists {
+                        let Some(&position) = matching.first() else {
                             if drop_function.if_exists {
                                 continue;
                             }
                             return Err(crate::errors::Error::DropFunctionNotFound {
+                                function_name: function_name.to_string(),
+                            });
+                        };
+
+                        if func_desc.args.is_none() && matching.len() > 1 {
+                            return Err(crate::errors::Error::AmbiguousDropFunction {
                                 function_name: function_name.to_string(),
                             });
                         }
@@ -3071,16 +3479,7 @@ impl ParserDB {
                             });
                         }
 
-                        // Remove the function
-                        let functions = builder.functions_mut();
-                        functions.retain(|(f, ())| {
-                            !identifiers_match(
-                                f.name(),
-                                f.name_is_quoted(),
-                                function_name,
-                                function_quoted,
-                            )
-                        });
+                        builder.functions_mut().remove(position);
                     }
                 }
                 Statement::Drop {
@@ -3171,6 +3570,49 @@ impl ParserDB {
                         }
                     }
                 }
+                Statement::AlterIndex {
+                    name,
+                    operation: AlterIndexOperation::RenameIndex { index_name: new_name },
+                } => {
+                    let Some(position) = builder.indices().iter().position(|(index, _)| {
+                        index
+                            .attribute()
+                            .name
+                            .as_ref()
+                            .is_some_and(|stored| object_names_match(stored, &name))
+                    }) else {
+                        return Err(crate::errors::Error::AlterIndexNotFound {
+                            index_name: last_str(&name).to_string(),
+                        });
+                    };
+
+                    let (stored, metadata) = builder.indices()[position].clone();
+                    let schema = table_schema_qualifier(TableAttribute::table(stored.as_ref()));
+                    // The renamed index lands in the same pool the old name
+                    // came out of, so the new name has to be free there.
+                    if let Some(ObjectNamePart::Identifier(new_ident)) = new_name.0.last()
+                        && let Some(conflicting_kind) =
+                            relation_name_holder(&builder, new_ident, schema)
+                    {
+                        return Err(crate::errors::Error::RelationNameAlreadyTaken {
+                            object_kind: ObjectKind::Index,
+                            conflicting_kind,
+                            object_name: new_ident.value.clone(),
+                        });
+                    }
+
+                    let mut renamed = (*stored).clone();
+                    renamed.attribute_mut().name = Some(new_name);
+                    let renamed = Arc::new(renamed);
+
+                    // The same handle sits in the index store and in the
+                    // metadata of the table the index is on, so both take the
+                    // replacement.
+                    builder.indices_mut()[position] = (renamed.clone(), metadata);
+                    for (_, table_metadata) in builder.tables_mut() {
+                        table_metadata.replace_index(&stored, &renamed);
+                    }
+                }
                 Statement::CreateTrigger(create_trigger) => {
                     let table_name = last_str(&create_trigger.table_name);
                     let table_exists =
@@ -3209,31 +3651,61 @@ impl ParserDB {
                         }
                     }
 
+                    // A trigger name is unique per table, so the same name on
+                    // another table is fine and the match takes both. A
+                    // `CREATE OR REPLACE` replaces the stored node rather than
+                    // appending a second one, which would leave the stale node
+                    // answering every lookup.
+                    let existing = builder.triggers().iter().position(|(existing, ())| {
+                        object_names_match(&existing.name, &create_trigger.name)
+                            && target_tables_match(&existing.table_name, &create_trigger.table_name)
+                    });
+                    match (existing, create_trigger.or_replace) {
+                        (Some(_), false) => {
+                            return Err(crate::errors::Error::TriggerAlreadyExists {
+                                trigger_name: last_str(&create_trigger.name).to_string(),
+                                table_name: table_name.to_string(),
+                            });
+                        }
+                        (Some(position), true) => {
+                            builder.triggers_mut().remove(position);
+                        }
+                        (None, _) => {}
+                    }
+
                     builder = builder.add_trigger(Arc::new(create_trigger), ());
                 }
                 Statement::DropTrigger(drop_trigger) => {
                     let trigger_name = last_str(&drop_trigger.trigger_name);
 
-                    // Find the trigger
-                    let trigger_exists =
-                        builder.triggers().iter().any(|(t, ())| last_str(&t.name) == trigger_name);
+                    // A trigger belongs to the table it was created on, so the
+                    // statement names both and both have to match. Dropping by
+                    // name alone reached a trigger of the same name on another
+                    // table, which the database refuses to do.
+                    let matches = |trigger: &CreateTrigger| {
+                        object_names_match(&trigger.name, &drop_trigger.trigger_name)
+                            && drop_trigger.table_name.as_ref().is_none_or(|table_name| {
+                                target_tables_match(&trigger.table_name, table_name)
+                            })
+                    };
 
-                    if !trigger_exists {
+                    let Some(position) =
+                        builder.triggers().iter().position(|(trigger, ())| matches(trigger))
+                    else {
                         if drop_trigger.if_exists {
                             continue;
                         }
                         return Err(crate::errors::Error::DropTriggerNotFound {
                             trigger_name: trigger_name.to_string(),
                         });
-                    }
+                    };
 
-                    // Remove the trigger
-                    builder.triggers_mut().retain(|(t, ())| last_str(&t.name) != trigger_name);
+                    builder.triggers_mut().remove(position);
                 }
                 Statement::DropPolicy(drop_policy) => {
                     let Some(index) = builder.policies().iter().position(|(policy, _)| {
                         idents_match(&policy.name, &drop_policy.name)
-                            && policy_tables_match(&policy.table_name, &drop_policy.table_name)
+                            && target_tables_match(&policy.table_name, &drop_policy.table_name)
                     }) else {
                         if drop_policy.if_exists {
                             continue;
@@ -3287,6 +3759,47 @@ impl ParserDB {
                             .roles_mut()
                             .retain(|(r, ())| !role_matches_lookup_ident(r, role_ident));
                     }
+                }
+                Statement::AlterRole {
+                    name,
+                    operation: AlterRoleOperation::RenameRole { role_name: new_name },
+                } => {
+                    let Some(position) = builder
+                        .roles()
+                        .iter()
+                        .position(|(role, ())| role_matches_lookup_ident(role, &name))
+                    else {
+                        return Err(crate::errors::Error::AlterRoleNotFound {
+                            role_name: name.value.clone(),
+                        });
+                    };
+
+                    if builder
+                        .roles()
+                        .iter()
+                        .any(|(role, ())| role_matches_lookup_ident(role, &new_name))
+                    {
+                        return Err(crate::errors::Error::RoleAlreadyExists {
+                            role_name: new_name.value.clone(),
+                        });
+                    }
+
+                    let (role, ()) = &mut builder.roles_mut()[position];
+                    for stored in &mut Arc::make_mut(role).names {
+                        if object_name_last_identifier(stored)
+                            .is_some_and(|stored| idents_match(stored, &name))
+                        {
+                            *stored =
+                                ObjectName(vec![ObjectNamePart::Identifier(new_name.clone())]);
+                        }
+                    }
+
+                    // A grant survives a rename in PostgreSQL because it holds
+                    // the role itself rather than its spelling. Grants are the
+                    // references `DROP ROLE` refuses to strand, so they are the
+                    // ones a rename carries along.
+                    rename_grantee_role(builder.table_grants_mut(), &name, &new_name);
+                    rename_grantee_role(builder.column_grants_mut(), &name, &new_name);
                 }
                 Statement::Drop {
                     object_type: sqlparser::ast::ObjectType::Schema,
@@ -3375,12 +3888,35 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateIndex(create_index) => {
+                    let if_not_exists = create_index.if_not_exists;
                     let (index, metadata) = Self::process_create_index(create_index, &builder)?;
                     let resolved_table = index.table();
                     let resolved_table_name = resolved_table.table_name().to_string();
                     let resolved_table_quoted = resolved_table.table_name_is_quoted();
                     let resolved_schema_name = resolved_table.table_schema().map(str::to_string);
                     let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
+
+                    // An index takes its schema from its table, and shares one
+                    // pool of names there with tables and with the indexes
+                    // behind named constraints. An unnamed index is named by
+                    // the server and contests nothing.
+                    if let Some(index_name) = index.attribute().name.as_ref()
+                        && let Some(ObjectNamePart::Identifier(index_name)) = index_name.0.last()
+                        && let Some(conflicting_kind) = relation_name_holder(
+                            &builder,
+                            index_name,
+                            table_schema_qualifier(resolved_table),
+                        )
+                    {
+                        if if_not_exists {
+                            continue;
+                        }
+                        return Err(crate::errors::Error::RelationNameAlreadyTaken {
+                            object_kind: ObjectKind::Index,
+                            conflicting_kind,
+                            object_name: index_name.value.clone(),
+                        });
+                    }
 
                     if let Some(entry) = builder.tables_mut().iter_mut().find(|(table, _)| {
                         table_matches_resolved_identity(
@@ -3591,6 +4127,10 @@ impl ParserDB {
                             }
 
                             AlterTableOperation::OwnerTo { new_owner } => {
+                                let role_ident = match &new_owner {
+                                    Owner::Ident(ident) => Some(ident.clone()),
+                                    _ => None,
+                                };
                                 let owner = match new_owner {
                                     Owner::Ident(ident) => Some(ident.value),
                                     // These name whoever runs the statement,
@@ -3607,6 +4147,20 @@ impl ParserDB {
                                     alter_table.if_exists,
                                     |metadata| metadata.set_owner(owner),
                                 )?;
+                                // After the table, because the database reports
+                                // an absent table first, and skipped entirely
+                                // when `IF EXISTS` excused an absent one, since
+                                // the statement then did nothing at all.
+                                if options.access_resolution() == AccessResolution::ClosedWorld
+                                    && let Some(ident) = &role_ident
+                                    && builder.resolve_table_object_name(&alter_table.name)?.is_some()
+                                {
+                                    validate_owner_role_ident(
+                                        &builder,
+                                        ident,
+                                        last_str(&alter_table.name),
+                                    )?;
+                                }
                             }
 
                             // Ignored: each of these changes something the
@@ -3678,6 +4232,21 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateTable(create_table) => {
+                    // `IF NOT EXISTS` skips the statement whole when anything
+                    // in the relation pool of the schema already holds the
+                    // name, an index as much as a table.
+                    if create_table.if_not_exists
+                        && let Some(ObjectNamePart::Identifier(table_name)) =
+                            create_table.name.0.last()
+                        && relation_name_holder(
+                            &builder,
+                            table_name,
+                            table_schema_qualifier(&create_table),
+                        )
+                        .is_some()
+                    {
+                        continue;
+                    }
                     builder = Self::ingest_table_node(
                         builder,
                         Arc::new(create_table),
@@ -3691,6 +4260,32 @@ impl ParserDB {
                             &policy.name.value,
                             policy.to.as_deref().unwrap_or_default(),
                         )?;
+                    }
+
+                    // A policy exists only on its table, so an absent one is
+                    // refused outright, as the database does and as the
+                    // trigger arm above already did. This is not governed by
+                    // the access setting: that excuses an absent role, which a
+                    // dump legitimately omits, and never an absent table.
+                    if builder.resolve_table_object_name(&policy.table_name)?.is_none() {
+                        return Err(crate::errors::Error::TableNotFoundForPolicy {
+                            table_name: last_str(&policy.table_name).to_string(),
+                            policy_name: policy.name.value.clone(),
+                        });
+                    }
+
+                    // A policy name is unique per table, whatever command the
+                    // policy is declared `FOR`. Matched the way `DROP POLICY`
+                    // and `ALTER POLICY` match, so the three agree by
+                    // construction rather than by inspection.
+                    if builder.policies().iter().any(|(existing, _)| {
+                        idents_match(&existing.name, &policy.name)
+                            && target_tables_match(&existing.table_name, &policy.table_name)
+                    }) {
+                        return Err(crate::errors::Error::PolicyAlreadyExists {
+                            policy_name: policy.name.value.clone(),
+                            table_name: last_str(&policy.table_name).to_string(),
+                        });
                     }
 
                     let using_functions = if let Some(using_expr) = &policy.using {
@@ -3715,6 +4310,24 @@ impl ParserDB {
                     builder = builder.add_policy(Arc::new(policy), metadata);
                 }
                 Statement::CreateRole(create_role) => {
+                    // A role name is cluster-wide. Unlike the checks on a role
+                    // a grant or a policy names, this one is ungated: the
+                    // access setting excuses a dump that omits role creation,
+                    // and this statement is the creation.
+                    for role_name in &create_role.names {
+                        let Some(role_ident) = object_name_last_identifier(role_name) else {
+                            continue;
+                        };
+                        if builder
+                            .roles()
+                            .iter()
+                            .any(|(existing, ())| role_matches_lookup_ident(existing, role_ident))
+                        {
+                            return Err(crate::errors::Error::RoleAlreadyExists {
+                                role_name: role_ident.value.clone(),
+                            });
+                        }
+                    }
                     builder = builder.add_role(Arc::new(create_role), ());
                 }
                 Statement::CreateSchema { schema_name, if_not_exists, .. } => {
@@ -3751,6 +4364,17 @@ impl ParserDB {
                         }
                     };
 
+                    if options.access_resolution() == AccessResolution::ClosedWorld {
+                        let authorization_ident = match &schema_name {
+                            SchemaName::Simple(_) => None,
+                            SchemaName::UnnamedAuthorization(auth)
+                            | SchemaName::NamedAuthorization(_, auth) => Some(auth),
+                        };
+                        if let Some(auth) = authorization_ident {
+                            validate_owner_role_ident(&builder, auth, &name)?;
+                        }
+                    }
+
                     // Check if schema already exists
                     let schema_exists = builder
                         .schemas()
@@ -3774,44 +4398,71 @@ impl ParserDB {
                 }
                 Statement::Grant(grant) => {
                     if options.access_resolution() == AccessResolution::ClosedWorld {
-                        validate_grant_against_builder(&builder, &grant)?;
+                        validate_access_targets_against_builder(
+                            &builder,
+                            &grant.grantees,
+                            grant.objects.as_ref(),
+                        )?;
                     }
+
+                    // Ungated: a column list is checked whenever its table
+                    // resolved, since a dump omits roles and never the table
+                    // it grants on.
+                    let tables: Vec<&CreateTable> =
+                        builder.tables().iter().map(|(table, _)| table.as_ref()).collect();
+                    crate::impls::validate_granted_columns(
+                        &grant.privileges,
+                        grant.objects.as_ref(),
+                        &tables,
+                    )?;
 
                     builder = builder.add_table_grant(Arc::new(grant.clone()), ());
                     builder = builder.add_column_grant(Arc::new(grant), ());
                 }
                 Statement::Revoke(revoke) => {
-                    // Apply revoke semantics to both canonical grant stores.
-                    let table_application =
+                    // A revoke names the same targets a grant does and the
+                    // database refuses an absent one just as readily, so the
+                    // two statements are checked alike. What it does not
+                    // refuse is a revoke that matches no grant: subtracting a
+                    // privilege nobody holds simply leaves nothing to hold,
+                    // and `pg_dump` emits one per function whose default
+                    // execute privilege was revoked.
+                    //
+                    // TODO: `REVOKE GRANT OPTION FOR` is unparsed upstream, so
+                    // once it is not, this arm subtracts the whole privilege
+                    // where only the option should go.
+                    if options.access_resolution() == AccessResolution::ClosedWorld {
+                        validate_access_targets_against_builder(
+                            &builder,
+                            &revoke.grantees,
+                            revoke.objects.as_ref(),
+                        )?;
+                    }
+
+                    let tables: Vec<&CreateTable> =
+                        builder.tables().iter().map(|(table, _)| table.as_ref()).collect();
+                    crate::impls::validate_granted_columns(
+                        &revoke.privileges,
+                        revoke.objects.as_ref(),
+                        &tables,
+                    )?;
+
+                    // Applied to both canonical grant stores.
+                    let unsupported_in_tables =
                         apply_revoke_to_grant_store(builder.table_grants_mut(), &revoke);
-                    let column_application =
+                    let unsupported_in_columns =
                         apply_revoke_to_grant_store(builder.column_grants_mut(), &revoke);
 
-                    // We fail fast on revoke shapes that this model cannot
-                    // represent (for example column-subset revoke from a
-                    // table-wide action grant).
-                    if table_application.has_unsupported_column_scoped_revoke
-                        || column_application.has_unsupported_column_scoped_revoke
-                    {
+                    // Shapes this model cannot represent are still refused, for
+                    // example a column-subset revoke against a table-wide
+                    // action grant.
+                    if unsupported_in_tables || unsupported_in_columns {
                         return Err(crate::errors::Error::UnsupportedRevoke {
                             statement: revoke.to_string(),
                             reason: "column-scoped REVOKE against a table-wide action grant is \
                                      not representable in this model"
                                 .to_string(),
                         });
-                    }
-
-                    // An open world cannot tell a revoke of a privilege the
-                    // input never granted (`pg_dump` emits one per function
-                    // whose default execute privilege was revoked) from a
-                    // revoke of a grant it failed to record.
-                    if options.access_resolution() == AccessResolution::ClosedWorld
-                        && !table_application.matched_any
-                        && !column_application.matched_any
-                    {
-                        return Err(crate::errors::Error::RevokeNotFound(format!(
-                            "No matching grant found for REVOKE: {revoke}"
-                        )));
                     }
                 }
                 Statement::Set(sqlparser::ast::Set::SetTimeZone { local, value }) => {
@@ -3827,6 +4478,34 @@ impl ParserDB {
                     // Ignore unsupported SET TIME ZONE expressions (e.g.,
                     // binary ops)
                 }
+                Statement::Set(sqlparser::ast::Set::SingleAssignment {
+                    variable, values, ..
+                }) if object_name_last_part(&variable)
+                    .is_some_and(|(name, _)| name.eq_ignore_ascii_case("search_path")) =>
+                {
+                    // `SET` replaces the path rather than extending it, so
+                    // `public` stops being reachable unless it is listed.
+                    // `TO DEFAULT` restores the starting path, as `RESET` does.
+                    let restores_default = matches!(
+                        values.as_slice(),
+                        [Expr::Identifier(ident)] if ident.quote_style.is_none()
+                            && ident.value.eq_ignore_ascii_case("DEFAULT")
+                    );
+                    let path = if restores_default {
+                        ParserDBBuilder::default_search_path()
+                    } else {
+                        values.iter().filter_map(search_path_entry).collect()
+                    };
+                    builder.set_search_path(path);
+                }
+                Statement::Reset(reset) => {
+                    if let sqlparser::ast::Reset::ConfigurationParameter(name) = &reset.reset
+                        && object_name_last_part(name)
+                            .is_some_and(|(name, _)| name.eq_ignore_ascii_case("search_path"))
+                    {
+                        builder.set_search_path(ParserDBBuilder::default_search_path());
+                    }
+                }
                 Statement::RenameTable(renames) => {
                     for rename in renames {
                         builder = Self::rename_table_checked(
@@ -3840,7 +4519,7 @@ impl ParserDB {
                 Statement::AlterPolicy(AlterPolicy { name, table_name, operation }) => {
                     let Some(index) = builder.policies().iter().position(|(policy, _)| {
                         idents_match(&policy.name, &name)
-                            && policy_tables_match(&policy.table_name, &table_name)
+                            && target_tables_match(&policy.table_name, &table_name)
                     }) else {
                         return Err(crate::errors::Error::AlterPolicyNotFound {
                             policy_name: name.value.clone(),
@@ -3971,6 +4650,9 @@ impl ParserDB {
                                 current_schema_quoted = new_schema_quoted;
                             }
                             AlterSchemaOperation::OwnerTo { owner } => {
+                                if options.access_resolution() == AccessResolution::ClosedWorld {
+                                    validate_owner_role(&builder, owner, &current_schema_name)?;
+                                }
                                 // Update the authorization
                                 let owner_name = match owner {
                                     sqlparser::ast::Owner::Ident(ident) => ident.value.clone(),
@@ -4006,7 +4688,12 @@ impl ParserDB {
                     }
                 }
                 _ => {
-                    // Ignored statements - no schema tracking needed
+                    // Statements this model tracks nothing for.
+                    //
+                    // TODO: `ALTER TRIGGER ... RENAME TO` lands here once
+                    // upstream parses it, and discarding it leaves a freed
+                    // trigger name looking taken. Needs an arm beside
+                    // `AlterIndex`.
                 }
             }
         }
@@ -4540,7 +5227,7 @@ mod tests {
             );
 
             let resolved = db
-                .resolve_table_object_name_with_implicit_public(&object_name(&[("foo", false)]))
+                .resolve_table_object_name_on_search_path(&object_name(&[("foo", false)]))
                 .expect("Lookup should succeed");
             let resolved = resolved.expect("Expected implicit public fallback to resolve");
             assert_eq!(
@@ -4550,7 +5237,7 @@ mod tests {
             );
 
             assert!(
-                db.resolve_table_object_name_with_implicit_public(&object_name(&[("bar", false)]))
+                db.resolve_table_object_name_on_search_path(&object_name(&[("bar", false)]))
                     .expect("Lookup should succeed")
                     .is_none()
             );
@@ -6033,6 +6720,9 @@ mod tests {
             assert_eq!(db.table_grants().count(), 0);
         }
 
+        /// An unquoted `CREATE TABLE T` stores `t`, so a quoted `"T"` reaches
+        /// no table at all and the database says so before it ever looks for a
+        /// grant to subtract.
         #[test]
         fn test_revoke_object_matching_preserves_quoted_identifier_semantics() {
             let sql = r#"
@@ -6043,7 +6733,10 @@ mod tests {
             "#;
             let result = ParserDB::parse::<PostgreSqlDialect>(sql);
 
-            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+            assert!(
+                matches!(&result, Err(Error::TableNotFoundForGrant { table_name }) if table_name == "T"),
+                "got {result:?}"
+            );
         }
 
         #[test]
@@ -6056,7 +6749,10 @@ mod tests {
             "#;
             let result = ParserDB::parse::<PostgreSqlDialect>(sql);
 
-            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+            assert!(
+                matches!(&result, Err(Error::TableNotFoundForGrant { table_name }) if table_name == "t"),
+                "got {result:?}"
+            );
         }
 
         #[test]
@@ -6072,6 +6768,8 @@ mod tests {
             assert_eq!(db.column_grants().count(), 0);
         }
 
+        /// A quoted `"F"` and an unquoted `F` are two different functions, so
+        /// the revoke subtracts nothing and the grant stands.
         #[test]
         fn test_revoke_function_object_matching_preserves_quoted_identifier_semantics() {
             let sql = r#"
@@ -6079,9 +6777,9 @@ mod tests {
                 GRANT EXECUTE ON FUNCTION F() TO my_role;
                 REVOKE EXECUTE ON FUNCTION "F"() FROM my_role;
             "#;
-            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("Failed to parse SQL");
 
-            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+            assert_eq!(db.table_grants().count(), 1, "the grant was left alone");
         }
 
         #[test]
@@ -6091,9 +6789,9 @@ mod tests {
                 GRANT EXECUTE ON FUNCTION "F"() TO my_role;
                 REVOKE EXECUTE ON FUNCTION f() FROM my_role;
             "#;
-            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("Failed to parse SQL");
 
-            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+            assert_eq!(db.table_grants().count(), 1, "the grant was left alone");
         }
 
         // ----------------------------------------------------------------
@@ -6157,7 +6855,8 @@ mod tests {
 
         /// `apply_revoke_to_grant`'s object-mismatch fast-return: revoking
         /// against a different table than the grant covers must leave the
-        /// original grant untouched and itself be a no-op (no error).
+        /// original grant untouched and itself be a no-op (no error), which is
+        /// what this test always said it wanted and now gets.
         #[test]
         fn test_revoke_on_different_table_leaves_original_grant_untouched() {
             let sql = r"
@@ -6167,16 +6866,16 @@ mod tests {
                 GRANT SELECT ON t1 TO r;
                 REVOKE SELECT ON t2 FROM r;
             ";
-            let result = ParserDB::parse::<GenericDialect>(sql);
-            // A REVOKE that matches no grant returns `RevokeNotFound`.
-            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert_eq!(db.table_grants().count(), 1, "the grant on `t1` stands");
         }
 
-        /// `partition_grantees_for_revoke` grantee-mismatch path: revoking
-        /// from a role that doesn't appear as a grantee on the matching
-        /// grant must surface as `RevokeNotFound`.
+        /// `partition_grantees_for_revoke` grantee-mismatch path: revoking from
+        /// a role that holds no such grant subtracts nothing, and the database
+        /// takes no exception to it.
         #[test]
-        fn test_revoke_from_different_grantee_returns_not_found() {
+        fn test_revoke_from_different_grantee_leaves_the_grant_alone() {
             let sql = r"
                 CREATE TABLE t (id INT);
                 CREATE ROLE r1;
@@ -6184,8 +6883,9 @@ mod tests {
                 GRANT SELECT ON t TO r1;
                 REVOKE SELECT ON t FROM r2;
             ";
-            let result = ParserDB::parse::<GenericDialect>(sql);
-            assert!(matches!(result, Err(Error::RevokeNotFound(_))));
+            let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+            assert_eq!(db.table_grants().count(), 1, "the grant to `r1` stands");
         }
 
         /// `columns()` per-column INSERT/UPDATE/REFERENCES arms: a multi-
@@ -6418,18 +7118,39 @@ mod tests {
 
         use super::*;
 
+        /// A foreign key written inline on the column and one written as a
+        /// table constraint are the same constraint, so they take the same
+        /// path and answer alike. The inline spelling used to skip both target
+        /// checks entirely.
         #[test]
-        fn column_option_reference_to_existing_target_validates() {
+        fn both_spellings_refuse_alike() {
+            let inline = "CREATE TABLE child (pid INT REFERENCES parent(id));";
+            let table_level =
+                "CREATE TABLE child (pid INT, FOREIGN KEY (pid) REFERENCES parent(id));";
+
+            for sql in [inline, table_level] {
+                assert!(
+                    matches!(
+                        ParserDB::parse::<GenericDialect>(sql),
+                        Err(Error::ReferencedTableNotFoundForForeignKey { ref referenced_table, .. })
+                            if referenced_table == "parent"
+                    ),
+                    "both spellings must refuse an absent target: {sql}"
+                );
+            }
+        }
+
+        #[test]
+        fn column_option_reference_to_existing_target_is_accepted() {
             let sql = "
                 CREATE TABLE parent (id INT PRIMARY KEY);
                 CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            assert!(db.validate_foreign_key_targets().is_ok());
+            assert!(ParserDB::parse::<GenericDialect>(sql).is_ok());
         }
 
         #[test]
-        fn table_constraint_reference_to_existing_target_validates() {
+        fn table_constraint_reference_to_existing_target_is_accepted() {
             let sql = "
                 CREATE TABLE parent (id INT PRIMARY KEY);
                 CREATE TABLE child (
@@ -6438,17 +7159,15 @@ mod tests {
                     FOREIGN KEY (parent_id) REFERENCES parent(id)
                 );
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            assert!(db.validate_foreign_key_targets().is_ok());
+            assert!(ParserDB::parse::<GenericDialect>(sql).is_ok());
         }
 
         #[test]
-        fn reference_to_missing_table_errors_naming_target_and_host() {
+        fn reference_to_missing_table_is_refused_naming_target_and_host() {
             let sql = "
                 CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES orders(id));
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            match db.validate_foreign_key_targets() {
+            match ParserDB::parse::<GenericDialect>(sql) {
                 Err(Error::ReferencedTableNotFoundForForeignKey {
                     referenced_table,
                     host_table,
@@ -6461,13 +7180,12 @@ mod tests {
         }
 
         #[test]
-        fn reference_to_missing_column_errors_naming_column() {
+        fn reference_to_missing_column_is_refused_naming_column() {
             let sql = "
                 CREATE TABLE parent (id INT PRIMARY KEY);
                 CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(missing));
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            match db.validate_foreign_key_targets() {
+            match ParserDB::parse::<GenericDialect>(sql) {
                 Err(Error::ReferencedColumnNotFoundForForeignKey {
                     referenced_column,
                     referenced_table,
@@ -6494,50 +7212,156 @@ mod tests {
                     parent_id INT REFERENCES public.parent(id)
                 );
             ";
-            let bare_db = ParserDB::parse::<PostgreSqlDialect>(bare).expect("parse");
-            let qualified_db = ParserDB::parse::<PostgreSqlDialect>(qualified).expect("parse");
-            assert!(bare_db.validate_foreign_key_targets().is_ok());
-            assert!(qualified_db.validate_foreign_key_targets().is_ok());
+            assert!(ParserDB::parse::<PostgreSqlDialect>(bare).is_ok());
+            assert!(ParserDB::parse::<PostgreSqlDialect>(qualified).is_ok());
         }
 
+        /// PostgreSQL refuses a reference to a table declared later, so this
+        /// crate does too. Verified against a real server.
         #[test]
-        fn forward_reference_validates() {
+        fn forward_reference_is_refused() {
             let sql = "
                 CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
                 CREATE TABLE parent (id INT PRIMARY KEY);
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            assert!(db.validate_foreign_key_targets().is_ok());
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(sql),
+                Err(Error::ReferencedTableNotFoundForForeignKey { .. })
+            ));
         }
 
+        /// A table may reference itself, which the database accepts, so the
+        /// table being created counts as present while its own constraints are
+        /// resolved.
         #[test]
-        fn self_referential_reference_validates() {
+        fn self_referential_reference_is_accepted() {
             let sql = "
                 CREATE TABLE tree (
                     id INT PRIMARY KEY,
                     parent_id INT REFERENCES tree(id)
                 );
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            assert!(db.validate_foreign_key_targets().is_ok());
+            assert!(ParserDB::parse::<GenericDialect>(sql).is_ok());
         }
 
+        /// The read stops at the first dangling constraint in statement order,
+        /// so the error names that one and not a later one.
         #[test]
-        fn multiple_dangling_constraints_report_deterministic_first_error() {
+        fn the_first_dangling_constraint_in_order_is_the_one_reported() {
             let sql = "
                 CREATE TABLE a (id INT PRIMARY KEY, x INT REFERENCES missing_a(id));
                 CREATE TABLE b (id INT PRIMARY KEY, y INT REFERENCES missing_b(id));
             ";
-            let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let first = db.validate_foreign_key_targets().expect_err("dangling FKs must error");
-            let second = db.validate_foreign_key_targets().expect_err("dangling FKs must error");
-            assert_eq!(format!("{first}"), format!("{second}"));
-            match first {
-                Error::ReferencedTableNotFoundForForeignKey { referenced_table, .. } => {
+            match ParserDB::parse::<GenericDialect>(sql) {
+                Err(Error::ReferencedTableNotFoundForForeignKey { referenced_table, .. }) => {
                     assert_eq!(referenced_table, "missing_a");
                 }
                 other => panic!("expected dangling-table error, got {other:?}"),
             }
+        }
+
+        /// Without a unique key on the far side a child row could match more
+        /// than one parent. PostgreSQL, MySQL 8 and SQLite all refuse it, each
+        /// verified against a running server for the first two.
+        #[test]
+        fn a_target_column_with_nothing_unique_behind_it_is_refused() {
+            let sql = "
+                CREATE TABLE parent (id INT, tag TEXT);
+                CREATE TABLE child (t TEXT REFERENCES parent(tag));
+            ";
+            match ParserDB::parse::<GenericDialect>(sql) {
+                Err(Error::ReferencedColumnsNotUniqueForForeignKey {
+                    referenced_columns,
+                    referenced_table,
+                    host_table,
+                }) => {
+                    assert_eq!(referenced_columns, "tag");
+                    assert_eq!(referenced_table, "parent");
+                    assert_eq!(host_table, "child");
+                }
+                other => panic!("expected a missing-unique-key error, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn every_way_of_declaring_the_key_backs_the_target() {
+            let inline_unique = "
+                CREATE TABLE parent (id INT, tag TEXT UNIQUE);
+                CREATE TABLE child (t TEXT REFERENCES parent(tag));
+            ";
+            let table_unique = "
+                CREATE TABLE parent (id INT, tag TEXT, UNIQUE (tag));
+                CREATE TABLE child (t TEXT REFERENCES parent(tag));
+            ";
+            let primary_key = "
+                CREATE TABLE parent (tag TEXT PRIMARY KEY);
+                CREATE TABLE child (t TEXT REFERENCES parent(tag));
+            ";
+            // A unique index is not on the table node at all, it arrives as its
+            // own statement, and the database accepts it as the backing key.
+            let unique_index = "
+                CREATE TABLE parent (id INT, tag TEXT);
+                CREATE UNIQUE INDEX parent_tag ON parent (tag);
+                CREATE TABLE child (t TEXT REFERENCES parent(tag));
+            ";
+            // A plain index is not enough, which is what MySQL 8 also answers.
+            let plain_index = "
+                CREATE TABLE parent (id INT, tag TEXT);
+                CREATE INDEX parent_tag ON parent (tag);
+                CREATE TABLE child (t TEXT REFERENCES parent(tag));
+            ";
+
+            for sql in [inline_unique, table_unique, primary_key, unique_index] {
+                assert!(ParserDB::parse::<GenericDialect>(sql).is_ok(), "should be backed: {sql}");
+            }
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(plain_index),
+                Err(Error::ReferencedColumnsNotUniqueForForeignKey { .. })
+            ));
+        }
+
+        #[test]
+        fn a_composite_key_is_matched_whole_and_not_in_part() {
+            let whole = "
+                CREATE TABLE parent (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
+                CREATE TABLE child (a INT, b INT, FOREIGN KEY (a, b) REFERENCES parent(id1, id2));
+            ";
+            // Order within the key does not matter, the set does.
+            let reordered = "
+                CREATE TABLE parent (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
+                CREATE TABLE child (a INT, b INT, FOREIGN KEY (a, b) REFERENCES parent(id2, id1));
+            ";
+            let part = "
+                CREATE TABLE parent (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
+                CREATE TABLE child (a INT REFERENCES parent(id1));
+            ";
+
+            assert!(ParserDB::parse::<GenericDialect>(whole).is_ok());
+            assert!(ParserDB::parse::<GenericDialect>(reordered).is_ok());
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(part),
+                Err(Error::ReferencedColumnsNotUniqueForForeignKey { .. })
+            ));
+        }
+
+        /// `REFERENCES parent` with no column list points at the primary key,
+        /// so the target needs one.
+        #[test]
+        fn a_reference_naming_no_column_needs_a_primary_key() {
+            let with_pk = "
+                CREATE TABLE parent (id INT PRIMARY KEY);
+                CREATE TABLE child (pid INT REFERENCES parent);
+            ";
+            let without_pk = "
+                CREATE TABLE parent (id INT UNIQUE);
+                CREATE TABLE child (pid INT REFERENCES parent);
+            ";
+
+            assert!(ParserDB::parse::<GenericDialect>(with_pk).is_ok());
+            assert!(matches!(
+                ParserDB::parse::<GenericDialect>(without_pk),
+                Err(Error::ReferencedColumnsNotUniqueForForeignKey { .. })
+            ));
         }
     }
 
@@ -6591,7 +7415,7 @@ mod tests {
         use sqlparser::dialect::PostgreSqlDialect;
 
         use super::*;
-        use crate::traits::{ColumnLike, IndexLike, PolicyLike};
+        use crate::traits::{ColumnLike, ForeignKeyLike, IndexLike, PolicyLike};
 
         fn parse(sql: &str) -> ParserDB {
             ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse")
@@ -6674,11 +7498,17 @@ mod tests {
         fn added_foreign_key_resolves_a_later_declared_target() {
             let db = parse(
                 "CREATE TABLE t (id uuid NOT NULL, o uuid);
-                 CREATE TABLE u (id uuid NOT NULL);
+                 CREATE TABLE u (id uuid PRIMARY KEY);
                  ALTER TABLE ONLY t ADD CONSTRAINT t_o_fkey FOREIGN KEY (o) REFERENCES u(id);",
             );
             assert_eq!(foreign_key_count(&db, "t"), 1);
-            assert!(db.validate_foreign_key_targets().is_ok());
+            let table = db.table(None, "t").expect("table");
+            let foreign_key = table
+                .foreign_keys(&db)
+                .expect("t is in this database")
+                .next()
+                .expect("the added key");
+            assert_eq!(foreign_key.referenced_table_name(), "u");
         }
 
         #[test]
@@ -6822,7 +7652,7 @@ mod tests {
 
             assert!(matches!(
                 ParserDB::parse::<PostgreSqlDialect>(
-                    "CREATE TABLE u (id uuid NOT NULL);
+                    "CREATE TABLE u (id uuid PRIMARY KEY);
                      CREATE TABLE t (id uuid NOT NULL);
                      ALTER TABLE t ADD CONSTRAINT t_fkey FOREIGN KEY (missing) REFERENCES u(id);",
                 ),

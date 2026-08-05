@@ -266,4 +266,22 @@ impl<T: TableLike> TableMetadata<T> {
     {
         self.indices.retain(f);
     }
+
+    /// Swaps a stored index handle for another, for the parse-time rewrite
+    /// that follows an `ALTER INDEX ... RENAME`.
+    ///
+    /// The same handle sits here and in the index store of the database, so a
+    /// rename that touched only one of the two would leave the table reporting
+    /// the old name.
+    pub(crate) fn replace_index(
+        &mut self,
+        previous: &Arc<<T::DB as DatabaseLike>::Index>,
+        replacement: &Arc<<T::DB as DatabaseLike>::Index>,
+    ) {
+        for index in &mut self.indices {
+            if Arc::ptr_eq(index, previous) {
+                *index = replacement.clone();
+            }
+        }
+    }
 }

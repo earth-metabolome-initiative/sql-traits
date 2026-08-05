@@ -101,53 +101,69 @@ fn a_node_from_a_different_database_is_reported() {
     assert_eq!(foreign_node.columns(&database).err(), absent_table("elsewhere"));
 }
 
+/// A foreign key whose target the database does not hold can no longer be
+/// built from SQL, since a dangling reference is refused as it is read. It is
+/// still reachable the way every other mismatch in this file is: a node from
+/// one database queried against another. The accessor must report it rather
+/// than abort.
 #[test]
 fn a_foreign_key_reporting_an_absent_target_does_not_abort() {
-    let database = ParserDB::parse::<PostgreSqlDialect>(
-        "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));",
-    )
-    .expect("an inline reference to an absent table is not validated at build time");
-    let child = database.table(None, "child").expect("child exists");
-    let foreign_key = child
-        .foreign_keys(&database)
-        .expect("child is in this database")
+    let (_, with_parent) = parse_with_create_table(
+        "CREATE TABLE parent (id INTEGER PRIMARY KEY, child_id INTEGER REFERENCES parent(id));",
+    );
+    let elsewhere = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE unrelated (id INTEGER);")
+        .expect("schema builds");
+
+    let parent = with_parent.table(None, "parent").expect("parent exists");
+    let foreign_key = parent
+        .foreign_keys(&with_parent)
+        .expect("parent is in its own database")
         .next()
-        .expect("child declares a foreign key");
+        .expect("parent declares a foreign key");
 
     assert_eq!(
-        foreign_key.referenced_table(&database).err(),
+        foreign_key.referenced_table(&elsewhere).err(),
         Some(LookupError::TableNotFound { object_name: "parent".to_string() })
     );
 }
 
+/// Same construction for the column side: the target table exists in the other
+/// database but carries no column of that name.
 #[test]
 fn a_foreign_key_naming_an_undeclared_column_does_not_abort() {
-    let database = ParserDB::parse::<PostgreSqlDialect>(
-        "CREATE TABLE parent (id INTEGER PRIMARY KEY);
-         CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(absent));",
-    )
-    .expect("schema builds");
-    let child = database.table(None, "child").expect("child exists");
-    let foreign_key = child
-        .foreign_keys(&database)
-        .expect("child is in this database")
+    let (_, declared) = parse_with_create_table(
+        "CREATE TABLE parent (id INTEGER PRIMARY KEY, other INTEGER REFERENCES parent(id));",
+    );
+    let narrowed = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE parent (absent INTEGER);")
+        .expect("schema builds");
+
+    let parent = declared.table(None, "parent").expect("parent exists");
+    let foreign_key = parent
+        .foreign_keys(&declared)
+        .expect("parent is in its own database")
         .next()
-        .expect("child declares a foreign key");
+        .expect("parent declares a foreign key");
 
     assert_eq!(
-        foreign_key.referenced_columns(&database).err(),
+        foreign_key.referenced_columns(&narrowed).err(),
         Some(LookupError::ColumnNotFound {
             table_name: "parent".to_string(),
-            column_name: "absent".to_string(),
+            column_name: "id".to_string(),
         })
     );
 }
 
+/// A cycle cannot be written as two `CREATE TABLE` statements, because the
+/// first would name a table that does not exist yet and the database refuses
+/// that. It is written the way a real schema writes it, with the constraints
+/// added once both tables are there.
 #[test]
 fn a_foreign_key_cycle_is_reported_rather_than_aborting() {
     let database = ParserDB::parse::<PostgreSqlDialect>(
-        "CREATE TABLE a (id INTEGER PRIMARY KEY, b_id INTEGER REFERENCES b(id));
-         CREATE TABLE b (id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id));",
+        "CREATE TABLE a (id INTEGER PRIMARY KEY, b_id INTEGER);
+         CREATE TABLE b (id INTEGER PRIMARY KEY, a_id INTEGER);
+         ALTER TABLE a ADD CONSTRAINT fa FOREIGN KEY (b_id) REFERENCES b(id);
+         ALTER TABLE b ADD CONSTRAINT fb FOREIGN KEY (a_id) REFERENCES a(id);",
     )
     .expect("schema builds");
 

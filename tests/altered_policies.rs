@@ -342,16 +342,17 @@ fn a_table_name_no_lookup_can_denote_matches_no_policy() {
     );
 }
 
-/// A `CREATE POLICY` naming a table the input never creates is recorded as
-/// written, so the `ALTER POLICY` that follows it is resolved by the names the
-/// two statements spell rather than by a table lookup.
+/// An `ALTER POLICY` is resolved by the names the two statements spell rather
+/// than by comparing resolved tables, and an unqualified name means schema
+/// `public`, so the two spellings below denote the same policy.
 #[test]
-fn a_policy_on_a_table_the_input_never_creates_still_alters() {
+fn a_policy_altered_through_another_spelling_of_its_table_still_alters() {
     let database = parse(
-        "CREATE POLICY docs_sel ON ghost USING (true);
-         ALTER POLICY docs_sel ON ghost USING (false);",
+        "CREATE TABLE public.docs (id uuid PRIMARY KEY);
+         CREATE POLICY docs_sel ON public.docs USING (true);
+         ALTER POLICY docs_sel ON docs USING (false);",
     )
-    .expect("the policy is recorded as written");
+    .expect("both statements denote the same table");
 
     assert_eq!(using(&database, "docs_sel").as_deref(), Some("false"));
 }

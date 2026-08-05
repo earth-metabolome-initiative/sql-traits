@@ -69,15 +69,38 @@ fn the_report_names_the_operation() {
     );
 }
 
-/// A Postgres dump emits an ownership change for every table, so refusing it
-/// would turn away ordinary input. It is recorded instead.
+/// The owner is recorded rather than discarded. The role has to exist, as the
+/// database requires, and a dump that names an owner while creating no role is
+/// covered by the permissive setting exercised below.
 #[test]
 fn an_ownership_change_records_the_owner() {
-    let database = parse("ALTER TABLE t OWNER TO someone").expect("ownership is recorded");
+    let database =
+        parse("CREATE ROLE someone; ALTER TABLE t OWNER TO someone").expect("ownership recorded");
 
     assert_eq!(database.tables().count(), 1);
     let table = database.table(None, "t").expect("t survives");
     assert_eq!(table.columns(&database).expect("t is in this database").count(), 3);
+    assert_eq!(table.owner(&database), Ok(Some("someone")));
+}
+
+/// A Postgres dump emits an ownership change for every table while creating no
+/// role at all, so refusing it by default would turn away ordinary input. The
+/// setting that already excuses a grantee excuses an owner for the same reason.
+#[test]
+fn a_dump_naming_an_owner_it_never_creates_needs_the_permissive_setting() {
+    let sql = format!("{TABLE} ALTER TABLE t OWNER TO someone;");
+
+    assert!(matches!(
+        ParserDB::parse::<PostgreSqlDialect>(&sql),
+        Err(Error::RoleNotFoundForOwner { ref role_name, ref object_name })
+            if role_name == "someone" && object_name == "t"
+    ));
+
+    let database = ParseOptions::default()
+        .with_access_resolution(AccessResolution::OpenWorld)
+        .parse::<PostgreSqlDialect>(&sql)
+        .expect("a dump names owners it does not create");
+    let table = database.table(None, "t").expect("t survives");
     assert_eq!(table.owner(&database), Ok(Some("someone")));
 }
 
@@ -147,7 +170,7 @@ fn vendor_operations_parse_under_their_dialects() {
 /// a reported one must stop the statement wherever it sits.
 #[test]
 fn a_multi_operation_statement_treats_each_operation_on_its_own() {
-    let database = parse("ALTER TABLE t OWNER TO someone, ADD COLUMN x INT")
+    let database = parse("CREATE ROLE someone; ALTER TABLE t OWNER TO someone, ADD COLUMN x INT")
         .expect("ownership is recorded, the column is added");
     let table = database.table(None, "t").expect("t survives");
     assert_eq!(table.columns(&database).expect("t is in this database").count(), 4);

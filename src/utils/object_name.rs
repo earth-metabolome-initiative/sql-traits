@@ -246,17 +246,22 @@ pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
     resolve_table_from_candidates(object_name, &candidates)
 }
 
-/// Resolves a table from an object name, falling back to schema `public` for
-/// unqualified names.
+/// Resolves a table from an object name, trying each schema on `search_path`
+/// in turn for an unqualified name.
+///
+/// A schema-less table is matched first, since this crate models one and
+/// PostgreSQL does not, and the path is then walked in order and the first
+/// schema holding a match wins, which is what the database does.
 ///
 /// # Errors
 ///
 /// Returns an error when the object name is malformed for table lookup, or when
-/// the lookup is ambiguous (including a schema-less table and a `public` table
-/// of the same name).
-pub(crate) fn resolve_table_object_name_with_implicit_public_in_iter<'a, T: TableLike>(
+/// the lookup is ambiguous, including a schema-less table and a table of the
+/// same name on the path.
+pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
     object_name: &ObjectName,
+    search_path: &[(String, bool)],
 ) -> Result<Option<&'a T>, LookupError> {
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
     let table_refs: Vec<&T> = tables.collect();
@@ -272,33 +277,45 @@ pub(crate) fn resolve_table_object_name_with_implicit_public_in_iter<'a, T: Tabl
         .collect();
     let unqualified = resolve_table_from_candidates(object_name, &unqualified_candidates)?;
 
-    let public_candidates: Vec<&T> = table_refs
-        .iter()
-        .copied()
-        .filter(|table| {
-            table.table_schema().is_some_and(|schema_name| {
-                identifiers_match(schema_name, table.table_schema_is_quoted(), "public", false)
-            }) && identifiers_match(
-                table.table_name(),
-                table.table_name_is_quoted(),
-                table_ident.value.as_str(),
-                table_ident.quote_style.is_some(),
-            )
-        })
-        .collect();
-    let public_lookup_name = ObjectName(vec![
-        ObjectNamePart::Identifier(Ident::new("public")),
-        ObjectNamePart::Identifier(table_ident.clone()),
-    ]);
-    let public = resolve_table_from_candidates(&public_lookup_name, &public_candidates)?;
+    let mut on_path = None;
+    for (schema_name, schema_quoted) in search_path {
+        let candidates: Vec<&T> = table_refs
+            .iter()
+            .copied()
+            .filter(|table| {
+                table.table_schema().is_some_and(|table_schema| {
+                    identifiers_match(
+                        table_schema,
+                        table.table_schema_is_quoted(),
+                        schema_name,
+                        *schema_quoted,
+                    )
+                }) && identifiers_match(
+                    table.table_name(),
+                    table.table_name_is_quoted(),
+                    table_ident.value.as_str(),
+                    table_ident.quote_style.is_some(),
+                )
+            })
+            .collect();
+        if candidates.is_empty() {
+            continue;
+        }
+        let lookup_name = ObjectName(vec![
+            ObjectNamePart::Identifier(Ident::new(schema_name.clone())),
+            ObjectNamePart::Identifier(table_ident.clone()),
+        ]);
+        on_path = resolve_table_from_candidates(&lookup_name, &candidates)?;
+        break;
+    }
 
-    match (unqualified, public) {
-        (Some(unqualified), Some(public)) => {
-            if core::ptr::eq(unqualified, public) {
+    match (unqualified, on_path) {
+        (Some(unqualified), Some(on_path)) => {
+            if core::ptr::eq(unqualified, on_path) {
                 Ok(Some(unqualified))
             } else {
                 let mut candidates =
-                    vec![render_table_candidate(unqualified), render_table_candidate(public)];
+                    vec![render_table_candidate(unqualified), render_table_candidate(on_path)];
                 candidates.sort_unstable();
                 candidates.dedup();
                 Err(LookupError::AmbiguousTableLookup {
@@ -327,7 +344,11 @@ pub(crate) fn resolve_object_name<'db, DB: DatabaseLike>(
     object_name: &ObjectName,
     database: &'db DB,
 ) -> Result<Option<&'db DB::Table>, LookupError> {
-    resolve_table_object_name_in_iter(database.tables(), object_name)
+    // The same path the read resolved against, so an accessor never refuses a
+    // target the read accepted.
+    let search_path: Vec<(String, bool)> =
+        database.search_path().map(|(schema, quoted)| (schema.to_string(), quoted)).collect();
+    resolve_table_object_name_on_search_path_in_iter(database.tables(), object_name, &search_path)
 }
 
 /// Resolves an object name that is required to denote an existing base table of
@@ -361,13 +382,19 @@ mod tests {
     use super::{
         object_name_identifiers, object_name_last_part, render_table_candidate,
         resolve_object_name, resolve_table_from_candidates, resolve_table_object_name_in_iter,
-        resolve_table_object_name_with_implicit_public_in_iter, schema_from_object_name,
+        resolve_table_object_name_on_search_path_in_iter, schema_from_object_name,
         table_matches_lookup_idents, table_matches_object_name,
     };
     use crate::{errors::LookupError, prelude::ParserDB, traits::TableLike};
 
     fn ident(value: &str, quoted: bool) -> Ident {
         if quoted { Ident::with_quote('"', value) } else { Ident::new(value) }
+    }
+
+    /// The path a database starts with, which is what these helpers used to
+    /// hardcode.
+    fn default_path() -> Vec<(String, bool)> {
+        vec![("public".to_string(), false)]
     }
 
     /// Builds an `ObjectName` from `(value, quoted)` identifier parts.
@@ -537,18 +564,20 @@ mod tests {
         let tables = fixtures();
 
         // Qualified name delegates to the strict resolver.
-        let scoped = resolve_table_object_name_with_implicit_public_in_iter(
+        let scoped = resolve_table_object_name_on_search_path_in_iter(
             tables.iter(),
             &obj(&[("s", false), ("scoped", false)]),
+            &default_path(),
         )
         .expect("resolves")
         .expect("matches");
         assert_eq!(scoped.table_name(), "scoped");
 
         // Resolved only through the implicit `public` schema.
-        let only_pub = resolve_table_object_name_with_implicit_public_in_iter(
+        let only_pub = resolve_table_object_name_on_search_path_in_iter(
             tables.iter(),
             &obj(&[("only_pub", false)]),
+            &default_path(),
         )
         .expect("resolves")
         .expect("matches");
@@ -556,18 +585,20 @@ mod tests {
 
         // `things` exists both schema-less and in `public`: ambiguous.
         assert!(matches!(
-            resolve_table_object_name_with_implicit_public_in_iter(
+            resolve_table_object_name_on_search_path_in_iter(
                 tables.iter(),
                 &obj(&[("things", false)]),
+                &default_path(),
             ),
             Err(LookupError::AmbiguousTableLookup { .. })
         ));
 
         // No match anywhere.
         assert!(
-            resolve_table_object_name_with_implicit_public_in_iter(
+            resolve_table_object_name_on_search_path_in_iter(
                 tables.iter(),
                 &obj(&[("absent", false)]),
+                &default_path(),
             )
             .unwrap()
             .is_none()

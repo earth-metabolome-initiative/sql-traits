@@ -20,4 +20,6 @@ mod unique_constraint;
 
 pub use dialect::SqlparserDialect;
 pub use grant::apply_revoke_to_grant;
-pub(crate) use grant::{has_unsupported_column_scoped_revoke, partition_grantees_for_revoke};
+pub(crate) use grant::{
+    has_unsupported_column_scoped_revoke, partition_grantees_for_revoke, validate_granted_columns,
+};

@@ -4,12 +4,12 @@
 //! by the same `Grant` struct. This module implements all grant traits
 //! on `Grant` to support both use cases.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use core::mem;
 
 use sqlparser::ast::{
-    Action, CreateRole, Grant, GrantObjects, Grantee, GranteeName, GranteesType, Ident, ObjectName,
-    ObjectNamePart, Privileges, Revoke,
+    Action, CreateRole, CreateTable, Grant, GrantObjects, Grantee, GranteeName, GranteesType,
+    Ident, ObjectName, ObjectNamePart, Privileges, Revoke,
 };
 
 use crate::{
@@ -22,7 +22,8 @@ use crate::{
     utils::{
         identifier_resolution::{identifiers_match, is_public_pseudo_role},
         object_name::{
-            object_name_last_part, table_matches_object_name, target_name_from_object_name,
+            object_name_last_part, resolve_object_name, table_matches_object_name,
+            target_name_from_object_name,
         },
     },
 };
@@ -251,6 +252,61 @@ fn action_columns(action: &Action) -> Option<&[Ident]> {
     }
 }
 
+/// Enforces that every column a grant or a revoke names exists on each table it
+/// applies to.
+///
+/// The database requires the column on every table in the list, and names the
+/// one that lacks it, so this walks them in order and reports the same way.
+/// `ALL TABLES IN SCHEMA` carries no per-table column list to check and the
+/// database accepts a column list beside it, so that form is left alone.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::Error::ColumnNotFoundForGrant`] for the first
+/// column a listed table does not have.
+pub(crate) fn validate_granted_columns(
+    privileges: &Privileges,
+    objects: Option<&GrantObjects>,
+    database_tables: &[&CreateTable],
+) -> Result<(), crate::errors::Error> {
+    let Privileges::Actions(actions) = privileges else {
+        return Ok(());
+    };
+    let Some(GrantObjects::Tables(names)) = objects else {
+        return Ok(());
+    };
+
+    for name in names {
+        let Some(table) =
+            database_tables.iter().copied().find(|table| table_matches_object_name(*table, name))
+        else {
+            // The table did not resolve, which the open world excuses and the
+            // closed world has already refused, so there is nothing to check
+            // the columns against.
+            continue;
+        };
+
+        for column in actions.iter().filter_map(action_columns).flatten() {
+            let known = table.columns.iter().any(|declared| {
+                identifiers_match(
+                    declared.name.value.as_str(),
+                    declared.name.quote_style.is_some(),
+                    column.value.as_str(),
+                    column.quote_style.is_some(),
+                )
+            });
+            if !known {
+                return Err(crate::errors::Error::ColumnNotFoundForGrant {
+                    column_name: column.value.clone(),
+                    table_name: table.name.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn is_column_scoped_action(action: &Action) -> bool {
     matches!(
         action,
@@ -385,6 +441,9 @@ pub fn apply_revoke_to_grant(grant: &Grant, revoke: &Revoke) -> RevokeApplicatio
         return RevokeApplication { matched: false, updated_grant: Some(grant.clone()) };
     }
 
+    // TODO: a role membership variant on `Privileges`, once upstream parses
+    // `GRANT role TO role`, breaks this match on purpose. Give it an arm rather
+    // than a wildcard: membership is neither a table nor a column grant.
     match (&grant.privileges, &revoke.privileges) {
         (_, Privileges::All { .. }) => RevokeApplication { matched: true, updated_grant: None },
         (Privileges::All { .. }, Privileges::Actions(_)) => {
@@ -504,44 +563,51 @@ impl GrantLike for Grant {
     }
 }
 
+/// Resolves each table a grant names through the database's search path, the
+/// same way the read did, so a bare name reaches the same table here as there.
+fn granted_tables<'a>(
+    grant: &'a Grant,
+    database: &'a ParserDB,
+) -> Vec<&'a <ParserDB as DatabaseLike>::Table> {
+    match &grant.objects {
+        Some(GrantObjects::Tables(names)) => {
+            names
+                .iter()
+                .filter_map(|name| resolve_object_name(name, database).ok().flatten())
+                .collect()
+        }
+        Some(GrantObjects::AllTablesInSchema { schemas }) => {
+            database
+                .tables()
+                .filter(|table| {
+                    schemas.iter().any(|schema_name| schema_matches_table(schema_name, *table))
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 impl TableGrantLike for Grant {
     fn tables<'a>(
         &'a self,
         database: &'a Self::DB,
     ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Table> {
-        let direct_tables: Box<dyn Iterator<Item = &<Self::DB as DatabaseLike>::Table> + 'a> =
-            match &self.objects {
-                Some(GrantObjects::Tables(tables)) => {
-                    Box::new(database.tables().filter(move |table| {
-                        tables
-                            .iter()
-                            .any(|table_name| table_matches_object_name(*table, table_name))
-                    }))
-                }
-                Some(GrantObjects::AllTablesInSchema { schemas }) => {
-                    // For ALL TABLES IN SCHEMA, return all tables matching the schema
-                    Box::new(database.tables().filter(move |table| {
-                        schemas.iter().any(|schema_name| schema_matches_table(schema_name, *table))
-                    }))
-                }
-                _ => Box::new(core::iter::empty()),
-            };
-        direct_tables
+        granted_tables(self, database).into_iter()
     }
 
     fn applies_to_table(
         &self,
         table: &<Self::DB as DatabaseLike>::Table,
-        _database: &Self::DB,
+        database: &Self::DB,
     ) -> bool {
         match &self.objects {
-            Some(GrantObjects::Tables(tables)) => {
-                tables.iter().any(|table_name| table_matches_object_name(table, table_name))
-            }
             Some(GrantObjects::AllTablesInSchema { schemas }) => {
                 schemas.iter().any(|schema_name| schema_matches_table(schema_name, table))
             }
-            _ => false,
+            _ => {
+                granted_tables(self, database).iter().any(|granted| core::ptr::eq(*granted, table))
+            }
         }
     }
 }
@@ -587,13 +653,6 @@ impl ColumnGrantLike for Grant {
         &'a self,
         database: &'a Self::DB,
     ) -> Option<&'a <Self::DB as DatabaseLike>::Table> {
-        // For column grants, the table is specified in the objects
-        match &self.objects {
-            Some(GrantObjects::Tables(tables)) => {
-                let table_name = tables.first()?;
-                database.tables().find(|table| table_matches_object_name(*table, table_name))
-            }
-            _ => None,
-        }
+        granted_tables(self, database).into_iter().next()
     }
 }

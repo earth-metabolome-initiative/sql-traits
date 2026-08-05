@@ -150,9 +150,8 @@ pub trait GrantLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     /// lists tables (`GRANT SELECT ON users, app.posts TO reader`), or it
     /// covers a whole schema (`GRANT SELECT ON ALL TABLES IN SCHEMA public TO
     /// reader`). A grant on anything else (a view, a function, a sequence)
-    /// yields from neither, which is what
-    /// [`TableGrantLike::tables`](crate::traits::TableGrantLike::tables)
-    /// already reports for those forms.
+    /// yields from neither, which is what [`TableGrantLike::tables`] already
+    /// reports for those forms.
     ///
     /// Unlike that resolving reader this applies no resolution and cannot
     /// fail, so a caller with its own resolution rules can read the targets

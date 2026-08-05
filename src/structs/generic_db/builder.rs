@@ -119,6 +119,11 @@ where
     table_grants: Vec<(Arc<TG>, TG::Meta)>,
     /// List of column grants in the database.
     column_grants: Vec<(Arc<CG>, CG::Meta)>,
+    /// Schemas an unqualified name is resolved against, in order.
+    ///
+    /// Defaults to `public` alone, and `SET search_path` replaces it wholesale
+    /// rather than extending it, which is what the database does.
+    search_path: Vec<(String, bool)>,
 }
 
 impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
@@ -142,6 +147,21 @@ where
     /// Returns a mutable reference to the tables list.
     pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Arc<T>, T::Meta)> {
         &mut self.tables
+    }
+
+    /// Returns the schemas an unqualified name resolves against, in order.
+    pub(crate) fn search_path(&self) -> &[(String, bool)] {
+        &self.search_path
+    }
+
+    /// Replaces the schemas an unqualified name resolves against.
+    pub(crate) fn set_search_path(&mut self, search_path: Vec<(String, bool)>) {
+        self.search_path = search_path;
+    }
+
+    /// Returns the path a database starts with, and the one `RESET` restores.
+    pub(crate) fn default_search_path() -> Vec<(String, bool)> {
+        alloc::vec![("public".to_string(), false)]
     }
 
     /// Returns a mutable reference to the table grants list.
@@ -177,6 +197,21 @@ where
     /// Returns a slice of foreign key Arc references with their metadata.
     pub(crate) fn foreign_keys(&self) -> &[(Arc<F>, F::Meta)] {
         &self.foreign_keys
+    }
+
+    /// Returns a slice of index Arc references with their metadata.
+    pub(crate) fn indices(&self) -> &[(Arc<I>, I::Meta)] {
+        &self.indices
+    }
+
+    /// Returns a slice of unique index Arc references with their metadata.
+    pub(crate) fn unique_indices(&self) -> &[(Arc<U>, U::Meta)] {
+        &self.unique_indices
+    }
+
+    /// Returns a slice of function Arc references with their metadata.
+    pub(crate) fn functions(&self) -> &[(Arc<Func>, Func::Meta)] {
+        &self.functions
     }
 
     /// Returns a slice of table grant Arc references with their metadata.
@@ -259,6 +294,7 @@ where
             schemas: Vec::new(),
             table_grants: Vec::new(),
             column_grants: Vec::new(),
+            search_path: Self::default_search_path(),
         }
     }
 }
@@ -597,6 +633,7 @@ where
             schemas: builder.schemas,
             table_grants: builder.table_grants,
             column_grants: builder.column_grants,
+            search_path: builder.search_path,
         }
     }
 }

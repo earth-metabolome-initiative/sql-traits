@@ -15,20 +15,18 @@ use crate::{errors::Error, impls::SqlparserDialect, structs::ParserDB};
 /// which a schema dump leaves unresolved for the same reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum AccessResolution {
-    /// Every role and every grant target must be created by the same input.
+    /// Every role and every access target must be created by the same input.
     ///
-    /// A grant naming an absent role or table, a policy applying to an absent
-    /// role, and a revoke matching no recorded grant, each abort the parse.
-    /// This is the default.
+    /// A grant or a revoke naming an absent role or table, and a policy
+    /// applying to an absent role, each abort the parse. This is the default.
     #[default]
     ClosedWorld,
-    /// Grants and policies may name roles, and grants may name tables, that the
-    /// input does not create.
+    /// Grants, revokes and policies may name roles, and grants and revokes may
+    /// name tables, that the input does not create.
     ///
     /// Roles are cluster objects that `pg_dump` does not emit, so a dump of a
     /// schema carrying a single grant or policy has no `CREATE ROLE` to resolve
-    /// against. Under this setting the statement is recorded as written and a
-    /// revoke matching no recorded grant is a no-op. Ask
+    /// against. Under this setting the statement is recorded as written. Ask
     /// [`ParserDB::unresolved_access_references`] what failed to resolve, or
     /// [`ParserDB::validate_access_targets`] to enforce closure once the whole
     /// input is in.
@@ -94,15 +92,17 @@ impl ParseOptions {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// // `pg_dump` emits this for a function whose default execute privilege
-    /// // was revoked, and the dump carries no `GRANT` for it to subtract.
-    /// let sql = "REVOKE ALL ON FUNCTION f() FROM PUBLIC;";
+    /// // `pg_dump` emits a revoke like this for a function whose default
+    /// // execute privilege was withdrawn, naming a role it never creates.
+    /// let sql = "CREATE FUNCTION f() RETURNS integer AS $$ SELECT 1 $$ LANGUAGE sql;
+    ///            REVOKE ALL ON FUNCTION f() FROM app;";
     ///
     /// assert!(ParserDB::parse::<PostgreSqlDialect>(sql).is_err());
     ///
     /// let db = ParseOptions::default()
     ///     .with_access_resolution(AccessResolution::OpenWorld)
     ///     .parse::<PostgreSqlDialect>(sql)?;
+    /// // Nothing granted the privilege here, so subtracting it changes nothing.
     /// assert_eq!(db.table_grants().count(), 0);
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```

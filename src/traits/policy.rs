@@ -80,20 +80,22 @@ pub trait PolicyLike:
     /// # }
     /// ```
     ///
-    /// A policy whose target table does not exist reports an error rather than
-    /// panicking:
+    /// A policy naming a table nothing creates is refused as it is read, so a
+    /// recorded policy always has a target. The failure this reports is a
+    /// policy queried against a database that does not hold it:
     ///
     /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
     /// use sql_traits::{errors::LookupError, prelude::*};
     ///
-    /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE POLICY orphan_policy ON absent_table USING (true);",
+    /// let owned = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE docs (id INT); CREATE POLICY p ON docs USING (true);",
     /// )?;
-    /// let policy = db.policies().next().unwrap();
+    /// let elsewhere = ParserDB::parse::<GenericDialect>("CREATE TABLE other (id INT);")?;
+    /// let policy = owned.policies().next().unwrap();
     /// assert_eq!(
-    ///     policy.table(&db),
-    ///     Err(LookupError::TableNotFound { object_name: "absent_table".to_string() })
+    ///     policy.table(&elsewhere),
+    ///     Err(LookupError::TableNotFound { object_name: "docs".to_string() })
     /// );
     /// # Ok(())
     /// # }
@@ -121,16 +123,17 @@ pub trait PolicyLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE SCHEMA app;
+    /// SET search_path TO app;
     /// CREATE TABLE app.docs (id INT);
     /// CREATE POLICY docs_policy ON docs USING (true);
     /// ",
     /// )?;
     /// let policy = db.policies().next().unwrap();
+    /// // The policy wrote no qualifier, and that is what reads back, even
+    /// // though the target resolves into `app` through the search path.
     /// assert_eq!(policy.target_table_name(), "docs");
     /// assert_eq!(policy.target_table_schema(), None);
-    /// // The unqualified target matches no table, and reading it back does
-    /// // not depend on it resolving.
-    /// assert!(policy.table(&db).is_err());
+    /// assert_eq!(policy.table(&db)?.table_schema(), Some("app"));
     /// # Ok(())
     /// # }
     /// ```
@@ -670,32 +673,31 @@ mod tests {
         assert_eq!(table.policies(&db).expect("policies").count(), 1);
     }
 
+    /// A policy exists only on its table, so one naming a table nothing
+    /// creates is refused as it is read, which is what the database does.
     #[test]
-    fn test_policy_table_reports_absent_target_instead_of_panicking() {
+    fn test_policy_on_an_absent_table_is_refused() {
         let sql = r"CREATE POLICY orphan ON absent_table USING (true);";
-        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let policy = db.policies().next().expect("Policy not found");
-
-        assert_eq!(
-            policy.table(&db).err(),
-            Some(LookupError::TableNotFound { object_name: "absent_table".to_string() })
-        );
+        assert!(matches!(
+            ParserDB::parse::<GenericDialect>(sql),
+            Err(crate::errors::Error::TableNotFoundForPolicy { ref table_name, ref policy_name })
+                if table_name == "absent_table" && policy_name == "orphan"
+        ));
     }
 
     #[test]
-    fn test_policy_table_reports_unquoted_target_as_absent() {
+    fn test_policy_on_an_unquoted_target_does_not_match_a_quoted_table() {
         // PostgreSQL folds the unquoted target to lowercase, so it must not
-        // match a table registered under a quoted mixed-case name.
+        // match a table registered under a quoted mixed-case name, and the
+        // policy is then refused for naming a table that does not exist.
         let sql = r#"
             CREATE TABLE "MyTable" (id INT);
             CREATE POLICY p ON MyTable USING (true);
         "#;
-        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let policy = db.policies().next().expect("Policy not found");
-
-        assert_eq!(
-            policy.table(&db).err(),
-            Some(LookupError::TableNotFound { object_name: "MyTable".to_string() })
-        );
+        assert!(matches!(
+            ParserDB::parse::<GenericDialect>(sql),
+            Err(crate::errors::Error::TableNotFoundForPolicy { ref table_name, .. })
+                if table_name == "MyTable"
+        ));
     }
 }

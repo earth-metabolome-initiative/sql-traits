@@ -15,12 +15,16 @@ fn parse(sql: &str) -> ParserDB {
     ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema builds")
 }
 
-/// The reproduction from the finding that opened this work: the only `docs`
-/// table lives in schema `app`, and the policy names `docs` unqualified.
+/// The scenario from the finding that opened this work, now expressible: the
+/// only `docs` table lives in schema `app`, the schema puts `app` on the search
+/// path, and the policy names `docs` unqualified. The target resolves, and the
+/// reader still hands back the name exactly as the policy wrote it, which is
+/// what a caller applying its own rules needs.
 #[test]
-fn policy_target_reads_back_when_it_does_not_resolve() {
+fn policy_target_reads_back_unqualified_while_resolving_through_the_search_path() {
     let db = parse(
         "CREATE SCHEMA app;
+         SET search_path TO app;
          CREATE TABLE app.docs (id INT);
          CREATE POLICY docs_sel ON docs USING (true);",
     );
@@ -28,12 +32,25 @@ fn policy_target_reads_back_when_it_does_not_resolve() {
 
     assert_eq!(policy.target_table_name(), "docs");
     assert!(!policy.target_table_name_is_quoted());
-    assert_eq!(policy.target_table_schema(), None);
-    assert!(!policy.target_table_schema_is_quoted());
+    assert_eq!(policy.target_table_schema(), None, "the policy wrote no qualifier");
+
+    let table = policy.table(&db).expect("the search path resolves the target");
+    assert_eq!(table.table_schema(), Some("app"), "and it resolves into the schema on the path");
+}
+
+/// Without the schema on the path, the same policy names a table that cannot
+/// be found, and the database refuses it too.
+#[test]
+fn policy_on_a_table_off_the_search_path_is_refused() {
+    let refused = ParserDB::parse::<PostgreSqlDialect>(
+        "CREATE SCHEMA app;
+         CREATE TABLE app.docs (id INT);
+         CREATE POLICY docs_sel ON docs USING (true);",
+    );
 
     assert!(
-        matches!(policy.table(&db), Err(sql_traits::errors::LookupError::TableNotFound { .. })),
-        "the unqualified target must not resolve, or the test proves nothing"
+        matches!(refused, Err(Error::TableNotFoundForPolicy { ref table_name, .. }) if table_name == "docs"),
+        "got {refused:?}"
     );
 }
 

@@ -10,9 +10,8 @@ use crate::{
     structs::{ParserDB, TableAttribute},
     traits::{ForeignKeyLike, Metadata, database::DatabaseLike, table::TableLike},
     utils::{
-        identifier_resolution::identifiers_match,
         last_str,
-        object_name::{object_name_last_part, schema_from_object_name},
+        object_name::{object_name_last_part, resolve_required_table, schema_from_object_name},
     },
 };
 
@@ -39,29 +38,15 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
         self.table()
     }
 
+    /// Resolves through the same path the read resolved against, so the
+    /// accessor never answers with a different table than the one the read
+    /// accepted. Matching on the name alone, ignoring the schema, was the
+    /// previous behaviour and picked whichever same-named table came first.
     fn referenced_table<'db>(
         &self,
         database: &'db Self::DB,
     ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError> {
-        let foreign_table = &self.attribute().foreign_table;
-        let (referenced_name, referenced_quoted) = object_name_last_part(foreign_table)
-            .ok_or_else(|| {
-                LookupError::InvalidObjectName {
-                    object_name: foreign_table.to_string(),
-                    reason: "a foreign key reference must name a table".to_string(),
-                }
-            })?;
-        database
-            .tables()
-            .find(|table: &&<Self::DB as DatabaseLike>::Table| {
-                identifiers_match(
-                    table.table_name(),
-                    table.table_name_is_quoted(),
-                    referenced_name,
-                    referenced_quoted,
-                )
-            })
-            .ok_or_else(|| LookupError::TableNotFound { object_name: foreign_table.to_string() })
+        resolve_required_table(&self.attribute().foreign_table, database)
     }
 
     #[inline]

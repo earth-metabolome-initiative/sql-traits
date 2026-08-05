@@ -14,8 +14,13 @@ fn parse(sql: &str) -> Result<ParserDB, Error> {
     ParserDB::parse::<PostgreSqlDialect>(sql)
 }
 
+/// A dump names the owning role while creating no role at all, which is the
+/// case the permissive setting exists for, so these tests read under it.
 fn db(sql: &str) -> ParserDB {
-    parse(sql).expect("schema builds")
+    ParseOptions::default()
+        .with_access_resolution(AccessResolution::OpenWorld)
+        .parse::<PostgreSqlDialect>(sql)
+        .expect("schema builds")
 }
 
 /// A table with row level security and an owner, reduced to the parts these
@@ -161,25 +166,88 @@ fn an_owner_change_to_an_absent_table_is_reported() {
     .expect("IF EXISTS excuses the absent table");
 }
 
-/// Ownership is not an access grant, so it is not resolved against the roles
-/// the input creates. A dump names an owner and never creates it, and the
-/// closed world that refuses a `GRANT` to an uncreated role would refuse every
-/// such dump.
+/// Ownership follows the same setting as a grant, because it names a role for
+/// the same reason and a dump omits the role for the same reason. The database
+/// refuses an owner it cannot find, so the default does too, and the permissive
+/// setting reads the dump.
 #[test]
-fn an_owner_is_not_resolved_against_the_roles_the_input_creates() {
-    let database = db(DUMP);
-
+fn an_owner_is_resolved_against_the_roles_the_input_creates() {
     assert_eq!(ParseOptions::default().access_resolution(), AccessResolution::ClosedWorld);
-    assert!(database.role("app_owner").is_none(), "nothing created the role");
-    assert_eq!(
-        database.unresolved_access_references().expect("targets are well formed").count(),
-        0,
-        "an owner is not an access reference"
+
+    let refused = parse(DUMP);
+    assert!(
+        matches!(&refused, Err(Error::RoleNotFoundForOwner { role_name, object_name })
+            if role_name == "app_owner" && object_name == "docs"),
+        "got {refused:?}"
     );
+
+    let created = parse(&format!("CREATE ROLE app_owner; {DUMP}")).expect("the role exists");
     assert_eq!(
-        database.table(None, "docs").expect("docs exists").owner(&database),
+        created.table(None, "docs").expect("docs exists").owner(&created),
         Ok(Some("app_owner"))
     );
+
+    let dumped = db(DUMP);
+    assert!(dumped.role("app_owner").is_none(), "nothing created the role");
+    assert_eq!(
+        dumped.table(None, "docs").expect("docs exists").owner(&dumped),
+        Ok(Some("app_owner"))
+    );
+}
+
+/// All three statements that name an owner answer alike: `ALTER TABLE`,
+/// `ALTER SCHEMA` and `CREATE SCHEMA ... AUTHORIZATION`. A real PostgreSQL 16
+/// refuses each of them for an absent role, which is why this crate does.
+#[test]
+fn every_ownership_statement_checks_its_role() {
+    let cases = [
+        ("CREATE TABLE docs (id INT); ALTER TABLE docs OWNER TO ghost;", "docs"),
+        ("CREATE SCHEMA app; ALTER SCHEMA app OWNER TO ghost;", "app"),
+        ("CREATE SCHEMA app AUTHORIZATION ghost;", "app"),
+    ];
+
+    for (sql, owned) in cases {
+        let refused = parse(sql);
+        assert!(
+            matches!(&refused, Err(Error::RoleNotFoundForOwner { role_name, object_name })
+                if role_name == "ghost" && object_name == owned),
+            "{sql} reported {refused:?}"
+        );
+
+        parse(&format!("CREATE ROLE ghost; {sql}")).expect("the role exists");
+
+        ParseOptions::default()
+            .with_access_resolution(AccessResolution::OpenWorld)
+            .parse::<PostgreSqlDialect>(sql)
+            .expect("a dump names owners it never creates");
+    }
+}
+
+/// The keyword owners name whoever runs the statement rather than a role, so
+/// there is no role to look for and nothing to refuse.
+#[test]
+fn a_session_dependent_owner_needs_no_role() {
+    for keyword in ["CURRENT_USER", "CURRENT_ROLE", "SESSION_USER"] {
+        let parsed =
+            parse(&format!("CREATE TABLE docs (id INT); ALTER TABLE docs OWNER TO {keyword};"));
+        assert!(parsed.is_ok(), "{keyword} names no role, got {:?}", parsed.err());
+    }
+}
+
+/// An absent table is reported before the role, matching the order the
+/// database reports them in, and `IF EXISTS` skips the statement whole so the
+/// role is never looked for either.
+#[test]
+fn the_table_is_checked_before_the_role() {
+    let error = parse("CREATE TABLE docs (id INT); ALTER TABLE absent OWNER TO ghost;")
+        .expect_err("absent is never created");
+    assert!(
+        matches!(&error, Error::AlterTableNotFound { table_name } if table_name == "absent"),
+        "got {error:?}"
+    );
+
+    parse("CREATE TABLE docs (id INT); ALTER TABLE IF EXISTS absent OWNER TO ghost;")
+        .expect("IF EXISTS skips the statement, so no role is looked for");
 }
 
 /// The name lives in the database rather than in the table node, so a caller

@@ -466,7 +466,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// For SQL AST-aware lookup, use
     /// [`ParserDB::resolve_table_object_name`](crate::structs::ParserDB::resolve_table_object_name)
     /// or
-    /// [`ParserDB::resolve_table_object_name_with_implicit_public`](crate::structs::ParserDB::resolve_table_object_name_with_implicit_public).
+    /// [`ParserDB::resolve_table_object_name_on_search_path`](crate::structs::ParserDB::resolve_table_object_name_on_search_path).
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
 
     /// Returns the table ID for the given table object according to its
@@ -941,6 +941,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
+    /// CREATE ROLE admin;
     /// CREATE SCHEMA my_schema;
     /// CREATE SCHEMA other_schema AUTHORIZATION admin;
     /// ",
@@ -951,6 +952,33 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # }
     /// ```
     fn schemas(&self) -> impl Iterator<Item = &Self::Schema>;
+
+    /// Returns the schemas an unqualified name resolves against, in order,
+    /// each with whether it was quoted.
+    ///
+    /// This is PostgreSQL's `search_path`. A backend reading a live database
+    /// answers with the session's, and one reading SQL text answers with
+    /// whatever the text last set. The default is `public` alone, which is what
+    /// PostgreSQL falls back to once the entry naming the connected user is
+    /// discounted.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db =
+    ///     ParserDB::parse::<GenericDialect>("CREATE SCHEMA app; SET search_path TO app, public;")?;
+    /// let path: Vec<_> = db.search_path().collect();
+    /// assert_eq!(path, [("app", false), ("public", false)]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn search_path(&self) -> impl Iterator<Item = (&str, bool)> {
+        core::iter::once(("public", false))
+    }
 
     /// Returns the schema with the given name, if it exists.
     ///

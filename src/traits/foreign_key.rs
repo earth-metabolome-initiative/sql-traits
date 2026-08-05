@@ -372,7 +372,7 @@ pub trait ForeignKeyLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
-    /// CREATE TABLE parent_table (id INT, FOREIGN KEY (id) REFERENCES grandparent_table(id));
+    /// CREATE TABLE parent_table (id INT PRIMARY KEY, FOREIGN KEY (id) REFERENCES grandparent_table(id));
     /// CREATE TABLE host_table (
     ///   id INT,
     ///   FOREIGN KEY (id) REFERENCES parent_table(id),
@@ -475,10 +475,10 @@ pub trait ForeignKeyLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
-    /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
+    /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT UNIQUE, PRIMARY KEY (id1, id2));
     /// CREATE TABLE single_fk_table (
-    ///     ref_id INT,
-    ///     FOREIGN KEY (ref_id) REFERENCES referenced_table(id1)
+    ///     ref_name TEXT,
+    ///     FOREIGN KEY (ref_name) REFERENCES referenced_table(name)
     /// );
     /// CREATE TABLE composite_fk_table (
     ///     ref_id1 INT,
@@ -938,7 +938,7 @@ pub trait ForeignKeyLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
-    /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT UNIQUE);
     /// CREATE TABLE pk_ref_table (
     ///     ref_id INT,
     ///     FOREIGN KEY (ref_id) REFERENCES referenced_table(id)
@@ -1183,27 +1183,27 @@ pub trait ForeignKeyLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
-    /// CREATE TABLE referenced_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
+    /// CREATE TABLE referenced_composite_pk_table (id1 INT, id2 INT, name TEXT UNIQUE, PRIMARY KEY (id1, id2));
     /// CREATE TABLE full_ref_table (
     ///     ref_id1 INT,
     ///     ref_id2 INT,
     ///     FOREIGN KEY (ref_id1, ref_id2) REFERENCES referenced_composite_pk_table(id1, id2)
     /// );
-    /// CREATE TABLE partial_ref_table (
-    ///     ref_id1 INT,
-    ///     FOREIGN KEY (ref_id1) REFERENCES referenced_composite_pk_table(id1)
+    /// CREATE TABLE other_key_ref_table (
+    ///     ref_name TEXT,
+    ///     FOREIGN KEY (ref_name) REFERENCES referenced_composite_pk_table(name)
     /// );
     /// ",
     /// )?;
     /// let full_ref_table = db.table(None, "full_ref_table").unwrap();
-    /// let partial_ref_table = db.table(None, "partial_ref_table").unwrap();
+    /// let other_key_ref_table = db.table(None, "other_key_ref_table").unwrap();
     /// let full_fk = full_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
-    /// let partial_fk =
-    ///     partial_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
+    /// let other_key_fk =
+    ///     other_key_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert!(full_fk.includes_referenced_primary_key(&db)?, "FK includes all referenced PK columns");
     /// assert!(
-    ///     !partial_fk.includes_referenced_primary_key(&db)?,
-    ///     "FK does not include all referenced PK columns"
+    ///     !other_key_fk.includes_referenced_primary_key(&db)?,
+    ///     "a FK onto another unique key includes no PK column"
     /// );
     /// # Ok(())
     /// # }
