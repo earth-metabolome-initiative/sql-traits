@@ -124,16 +124,17 @@ fn a_table_name_no_lookup_can_denote_matches_no_policy() {
     );
 }
 
-/// A `CREATE POLICY` naming a table the input never creates is recorded as
-/// written, so the `DROP POLICY` that follows it is resolved by the names the
-/// two statements spell rather than by a table lookup.
+/// A `DROP POLICY` is resolved by the names the two statements spell rather
+/// than by comparing resolved tables, and an unqualified name means schema
+/// `public`, so the two spellings below denote the same policy.
 #[test]
-fn a_policy_on_a_table_the_input_never_creates_still_drops() {
+fn a_policy_dropped_through_another_spelling_of_its_table_still_drops() {
     let database = parse(
-        "CREATE POLICY docs_sel ON ghost USING (true);
-         DROP POLICY docs_sel ON ghost;",
+        "CREATE TABLE public.docs (id uuid PRIMARY KEY);
+         CREATE POLICY docs_sel ON public.docs USING (true);
+         DROP POLICY docs_sel ON docs;",
     )
-    .expect("the policy is recorded as written");
+    .expect("both statements denote the same table");
 
     assert_eq!(database.policies().count(), 0);
 }

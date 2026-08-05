@@ -75,7 +75,7 @@ fn closed_world_still_refuses_every_unresolved_grant_shape() {
             "CREATE TABLE docs (id uuid PRIMARY KEY);
              REVOKE SELECT ON docs FROM app;"
         ),
-        Err(Error::RevokeNotFound(_))
+        Err(Error::RoleNotFoundForGrant { role_name }) if role_name == "app"
     ));
 }
 

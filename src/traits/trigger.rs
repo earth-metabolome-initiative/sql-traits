@@ -141,6 +141,86 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     where
         Self: 'db;
 
+    /// Returns the table name the trigger wrote as its target, exactly as
+    /// written.
+    ///
+    /// Unlike [`Self::table`] this applies no resolution and cannot fail, so a
+    /// caller with its own resolution rules (a search path, a default schema)
+    /// can read the target and resolve it itself.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// CREATE TABLE app.\"MyTable\" (id INT);
+    /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+    /// CREATE TRIGGER my_trigger
+    /// AFTER INSERT ON app.\"MyTable\"
+    /// FOR EACH ROW
+    /// EXECUTE FUNCTION my_function();
+    /// ",
+    /// )?;
+    /// let trigger = db.triggers().next().unwrap();
+    /// assert_eq!(trigger.target_table_name(), "MyTable");
+    /// assert!(trigger.target_table_name_is_quoted());
+    /// assert_eq!(trigger.target_table_schema(), Some("app"));
+    /// assert!(!trigger.target_table_schema_is_quoted());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_table_name(&self) -> &str;
+
+    /// Returns whether the target table identifier was quoted in SQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn target_table_name_is_quoted(&self) -> bool {
+        false
+    }
+
+    /// Returns the schema qualifier the trigger wrote on its target, if any.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE my_table (id INT);
+    /// CREATE FUNCTION my_function() RETURNS TRIGGER AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+    /// CREATE TRIGGER my_trigger
+    /// AFTER INSERT ON my_table
+    /// FOR EACH ROW
+    /// EXECUTE FUNCTION my_function();
+    /// ",
+    /// )?;
+    /// let trigger = db.triggers().next().unwrap();
+    /// assert_eq!(trigger.target_table_name(), "my_table");
+    /// assert_eq!(trigger.target_table_schema(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_table_schema(&self) -> Option<&str>;
+
+    /// Returns whether that schema qualifier was quoted in SQL.
+    ///
+    /// This only matters when [`Self::target_table_schema`] returns `Some`.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn target_table_schema_is_quoted(&self) -> bool {
+        false
+    }
+
     /// Returns the events that fire the trigger.
     ///
     /// # Example
@@ -555,6 +635,22 @@ impl<T: TriggerLike> TriggerLike for &T {
         Self: 'db,
     {
         (*self).table(database)
+    }
+
+    fn target_table_name(&self) -> &str {
+        (*self).target_table_name()
+    }
+
+    fn target_table_name_is_quoted(&self) -> bool {
+        (*self).target_table_name_is_quoted()
+    }
+
+    fn target_table_schema(&self) -> Option<&str> {
+        (*self).target_table_schema()
+    }
+
+    fn target_table_schema_is_quoted(&self) -> bool {
+        (*self).target_table_schema_is_quoted()
     }
 
     fn events(&self) -> &[sqlparser::ast::TriggerEvent] {

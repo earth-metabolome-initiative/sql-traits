@@ -160,6 +160,22 @@ pub enum Error {
         /// Name of the host table containing the foreign key.
         host_table: String,
     },
+    #[error(
+        "No unique constraint on table `{referenced_table}` matches the columns `{referenced_columns}` a foreign key in table `{host_table}` points at."
+    )]
+    /// Error indicating that a foreign key points at columns of the referenced
+    /// table that no primary key, unique constraint or unique index covers.
+    ///
+    /// PostgreSQL, MySQL and SQLite all refuse such a constraint, since without
+    /// a unique key on the far side a row could match more than one parent.
+    ReferencedColumnsNotUniqueForForeignKey {
+        /// Comma-separated names of the referenced columns.
+        referenced_columns: String,
+        /// Name of the referenced table.
+        referenced_table: String,
+        /// Name of the host table containing the foreign key.
+        host_table: String,
+    },
     #[error("Host column `{host_column}` not found in table `{host_table}` for foreign key.")]
     /// Error indicating that a foreign key references a host column that does
     /// not exist.
@@ -176,6 +192,44 @@ pub enum Error {
         table_name: String,
         /// Name of the trigger.
         trigger_name: String,
+    },
+    #[error("Table `{table_name}` not found for policy `{policy_name}`.")]
+    /// Error indicating that a policy names a table that does not exist.
+    ///
+    /// A policy exists only on its table, so the database refuses one whose
+    /// table is absent, and so does this crate.
+    TableNotFoundForPolicy {
+        /// Name of the table the policy is declared on.
+        table_name: String,
+        /// Name of the policy.
+        policy_name: String,
+    },
+    #[error("Role `{role_name}` not found for the owner of `{object_name}`.")]
+    /// Error indicating that an ownership statement names a role that does not
+    /// exist.
+    ///
+    /// Covers `ALTER TABLE ... OWNER TO`, `ALTER SCHEMA ... OWNER TO` and
+    /// `CREATE SCHEMA ... AUTHORIZATION`, all of which the database refuses
+    /// when the role is absent. Like the other role checks this one follows
+    /// [`AccessResolution`](crate::structs::AccessResolution), because a schema
+    /// dump names an owner while creating no role.
+    RoleNotFoundForOwner {
+        /// Name of the role named as the owner.
+        role_name: String,
+        /// Name of the object being owned.
+        object_name: String,
+    },
+    #[error("Column `{column_name}` not found in table `{table_name}` for a grant or revoke.")]
+    /// Error indicating that a column-level grant or revoke names a column the
+    /// table it applies to does not have.
+    ///
+    /// The statement may name several tables, and the database requires the
+    /// column on each of them, so this names the table that lacks it.
+    ColumnNotFoundForGrant {
+        /// Name of the column the grant names.
+        column_name: String,
+        /// Name of the table that does not have it.
+        table_name: String,
     },
     #[error("Table `{table_name}` not found for index `{index_name}`.")]
     /// Error indicating that an index references a table that does not exist.
@@ -225,10 +279,6 @@ pub enum Error {
     /// Wrapper around sql_doc errors
     #[error("Table Doc Error: {0}")]
     TableDocError(#[from] sql_docs::error::DocError),
-    /// Error indicating that no matching grant was found for a REVOKE
-    /// statement.
-    #[error("Revoke not found: {0}")]
-    RevokeNotFound(String),
     /// Error indicating that a REVOKE statement uses semantics we cannot
     /// represent in the current grant model.
     #[error("Unsupported revoke statement `{statement}`: {reason}")]
@@ -238,14 +288,16 @@ pub enum Error {
         /// Human-readable explanation of the unsupported semantics.
         reason: String,
     },
-    #[error("Role `{role_name}` not found for grant.")]
-    /// Error indicating that a grant references a role that does not exist.
+    #[error("Role `{role_name}` not found for a grant or revoke.")]
+    /// Error indicating that a grant or a revoke names a role that does not
+    /// exist.
     RoleNotFoundForGrant {
         /// Name of the undefined role.
         role_name: String,
     },
-    #[error("Table `{table_name}` not found for grant.")]
-    /// Error indicating that a grant references a table that does not exist.
+    #[error("Table `{table_name}` not found for a grant or revoke.")]
+    /// Error indicating that a grant or a revoke names a table that does not
+    /// exist.
     TableNotFoundForGrant {
         /// Name of the undefined table.
         table_name: String,
@@ -384,6 +436,78 @@ pub enum Error {
         /// Name of the schema that already exists.
         schema_name: String,
     },
+    #[error(
+        "{object_kind} `{object_name}` cannot be created: {conflicting_kind} `{object_name}` already uses that name in the same schema."
+    )]
+    /// Error indicating that a statement names an index or a table with a name
+    /// something else in the same schema already holds.
+    ///
+    /// PostgreSQL keeps index names in one pool per schema, shared with table
+    /// names, and a named `UNIQUE` or `PRIMARY KEY` constraint puts the name of
+    /// the index behind it in that pool too. Views and sequences share the pool
+    /// as well, and this crate models neither, so the rule it enforces is the
+    /// part of PostgreSQL's it can see.
+    RelationNameAlreadyTaken {
+        /// Kind of object the statement tried to create.
+        object_kind: ObjectKind,
+        /// Kind of object already holding the name.
+        conflicting_kind: ObjectKind,
+        /// The contested name.
+        object_name: String,
+    },
+    #[error("Policy `{policy_name}` already exists on table `{table_name}`.")]
+    /// Error indicating that a `CREATE POLICY` statement names a policy the
+    /// table already carries. A policy name is unique per table, whatever
+    /// command it is declared `FOR`.
+    PolicyAlreadyExists {
+        /// Name of the policy that already exists.
+        policy_name: String,
+        /// Name of the table carrying it.
+        table_name: String,
+    },
+    #[error("Trigger `{trigger_name}` already exists on table `{table_name}`.")]
+    /// Error indicating that a `CREATE TRIGGER` statement names a trigger the
+    /// table already carries. A trigger name is unique per table, so the same
+    /// name on another table is fine.
+    TriggerAlreadyExists {
+        /// Name of the trigger that already exists.
+        trigger_name: String,
+        /// Name of the table carrying it.
+        table_name: String,
+    },
+    #[error("Role `{role_name}` already exists.")]
+    /// Error indicating that a `CREATE ROLE` statement names a role that
+    /// already exists.
+    ///
+    /// Unlike the checks on a role a grant, a policy or an ownership statement
+    /// *names*, this one is not governed by
+    /// [`AccessResolution`](crate::structs::AccessResolution): that setting
+    /// excuses a dump that omits role creation, and this statement is the
+    /// creation.
+    RoleAlreadyExists {
+        /// Name of the role that already exists.
+        role_name: String,
+    },
+    #[error("Function `{function_name}` already exists with the same argument types.")]
+    /// Error indicating that a `CREATE FUNCTION` statement repeats a signature.
+    ///
+    /// A function is identified by its schema, its name and its argument types
+    /// with `OUT` parameters removed, so two functions may share a name as long
+    /// as they take different arguments. The return type is not part of the
+    /// identity. `CREATE OR REPLACE` replaces the existing function instead.
+    FunctionAlreadyExists {
+        /// Name of the function whose signature is repeated.
+        function_name: String,
+    },
+    #[error(
+        "Function name `{function_name}` is not unique: a `DROP FUNCTION` naming no argument list cannot say which one to drop."
+    )]
+    /// Error indicating that a `DROP FUNCTION` statement omits the argument
+    /// list while the name it gives covers more than one function.
+    AmbiguousDropFunction {
+        /// The name covering more than one function.
+        function_name: String,
+    },
     #[error("Schema `{schema_name}` not found for DROP SCHEMA statement.")]
     /// Error indicating that a DROP SCHEMA statement references a schema
     /// that does not exist.
@@ -411,6 +535,20 @@ pub enum Error {
     AlterPolicyNotFound {
         /// Name of the policy that was not found.
         policy_name: String,
+    },
+    #[error("Index `{index_name}` not found for ALTER INDEX statement.")]
+    /// Error indicating that an ALTER INDEX statement references an index that
+    /// does not exist.
+    AlterIndexNotFound {
+        /// Name of the index that was not found.
+        index_name: String,
+    },
+    #[error("Role `{role_name}` not found for ALTER ROLE statement.")]
+    /// Error indicating that an ALTER ROLE statement references a role that
+    /// does not exist.
+    AlterRoleNotFound {
+        /// Name of the role that was not found.
+        role_name: String,
     },
     #[error("Table `{table_name}` not found for ALTER TABLE statement.")]
     /// Error indicating that an ALTER TABLE statement references a table that

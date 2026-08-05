@@ -152,7 +152,7 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE TABLE parent (id SERIAL, name TEXT, age INT, bigg_id BIGSERIAL);
+    ///     "CREATE TABLE parent (id SERIAL PRIMARY KEY, name TEXT, age INT, bigg_id BIGSERIAL);
     ///     CREATE TABLE child (parent_id INT PRIMARY KEY REFERENCES parent(id), other TEXT);",
     /// )?;
     /// let table = db.table(None, "parent").unwrap();

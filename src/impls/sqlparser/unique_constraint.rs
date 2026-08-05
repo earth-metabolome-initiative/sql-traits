@@ -33,14 +33,23 @@ impl IndexLike for TableAttribute<CreateTable, UniqueConstraint> {
         self.table()
     }
 
-    /// A unique constraint stores its optional index name as an
-    /// [`Ident`](sqlparser::ast::Ident) (`UniqueConstraint::index_name`), not
-    /// an [`ObjectName`](sqlparser::ast::ObjectName), so it is not exposed
-    /// through this accessor. Unique indexes are enumerated via
-    /// [`TableLike::unique_indices`],
-    /// while [`DatabaseLike::indexes`] only yields `CREATE INDEX` indexes.
+    /// PostgreSQL builds the backing index under the constraint name and MySQL
+    /// writes it as an index name directly, so whichever spelling the SQL used
+    /// is this index's name. A constraint declared without one is anonymous.
     #[inline]
-    fn name(&self) -> Option<&sqlparser::ast::ObjectName> {
+    fn name(&self) -> Option<&str> {
+        unique_constraint_name(self.attribute()).map(|name| name.value.as_str())
+    }
+
+    #[inline]
+    fn name_is_quoted(&self) -> bool {
+        unique_constraint_name(self.attribute()).is_some_and(|name| name.quote_style.is_some())
+    }
+
+    /// Always `None`: the parser stores a unique constraint name as a bare
+    /// identifier, which cannot carry a qualifier.
+    #[inline]
+    fn schema(&self) -> Option<&str> {
         None
     }
 

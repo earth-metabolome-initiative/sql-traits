@@ -80,20 +80,22 @@ pub trait PolicyLike:
     /// # }
     /// ```
     ///
-    /// A policy whose target table does not exist reports an error rather than
-    /// panicking:
+    /// A policy naming a table nothing creates is refused as it is read, so a
+    /// recorded policy always has a target. The failure this reports is a
+    /// policy queried against a database that does not hold it:
     ///
     /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
     /// use sql_traits::{errors::LookupError, prelude::*};
     ///
-    /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE POLICY orphan_policy ON absent_table USING (true);",
+    /// let owned = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE docs (id INT); CREATE POLICY p ON docs USING (true);",
     /// )?;
-    /// let policy = db.policies().next().unwrap();
+    /// let elsewhere = ParserDB::parse::<GenericDialect>("CREATE TABLE other (id INT);")?;
+    /// let policy = owned.policies().next().unwrap();
     /// assert_eq!(
-    ///     policy.table(&db),
-    ///     Err(LookupError::TableNotFound { object_name: "absent_table".to_string() })
+    ///     policy.table(&elsewhere),
+    ///     Err(LookupError::TableNotFound { object_name: "docs".to_string() })
     /// );
     /// # Ok(())
     /// # }
@@ -104,6 +106,83 @@ pub trait PolicyLike:
     ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError>
     where
         Self: 'db;
+
+    /// Returns the table name the policy wrote as its target, exactly as
+    /// written.
+    ///
+    /// Unlike [`Self::table`] this applies no resolution and cannot fail, so a
+    /// caller with its own resolution rules (a search path, a default schema)
+    /// can read the target and resolve it itself.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// SET search_path TO app;
+    /// CREATE TABLE app.docs (id INT);
+    /// CREATE POLICY docs_policy ON docs USING (true);
+    /// ",
+    /// )?;
+    /// let policy = db.policies().next().unwrap();
+    /// // The policy wrote no qualifier, and that is what reads back, even
+    /// // though the target resolves into `app` through the search path.
+    /// assert_eq!(policy.target_table_name(), "docs");
+    /// assert_eq!(policy.target_table_schema(), None);
+    /// assert_eq!(policy.table(&db)?.table_schema(), Some("app"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_table_name(&self) -> &str;
+
+    /// Returns whether the target table identifier was quoted in SQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn target_table_name_is_quoted(&self) -> bool {
+        false
+    }
+
+    /// Returns the schema qualifier the policy wrote on its target, if any.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// CREATE TABLE app.\"MyTable\" (id INT);
+    /// CREATE POLICY my_policy ON app.\"MyTable\" USING (id > 0);
+    /// ",
+    /// )?;
+    /// let policy = db.policies().next().unwrap();
+    /// assert_eq!(policy.target_table_schema(), Some("app"));
+    /// assert!(!policy.target_table_schema_is_quoted());
+    /// assert_eq!(policy.target_table_name(), "MyTable");
+    /// assert!(policy.target_table_name_is_quoted());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn target_table_schema(&self) -> Option<&str>;
+
+    /// Returns whether that schema qualifier was quoted in SQL.
+    ///
+    /// This only matters when [`Self::target_table_schema`] returns `Some`.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn target_table_schema_is_quoted(&self) -> bool {
+        false
+    }
 
     /// Returns the command the policy applies to.
     ///
@@ -202,6 +281,45 @@ pub trait PolicyLike:
     fn roles<'db>(&'db self, database: &'db Self::DB) -> impl Iterator<Item = &'db Owner>
     where
         Self: 'db;
+
+    /// Returns whether the policy applies to every role.
+    ///
+    /// A policy says so in two ways, and this reader folds both: writing
+    /// `TO PUBLIC`, and writing no `TO` clause at all, which PostgreSQL
+    /// defaults to `PUBLIC`. Neither is visible in [`Self::roles`], where
+    /// `PUBLIC` arrives as an ordinary unquoted name and an absent clause
+    /// arrives as an empty iterator, so a caller reading roles alone cannot
+    /// tell "everyone" from a role somebody created called `public`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE ROLE \"PUBLIC\";
+    /// CREATE ROLE reader;
+    /// CREATE TABLE docs (id INT);
+    /// CREATE POLICY spelled ON docs TO PUBLIC USING (true);
+    /// CREATE POLICY implied ON docs USING (true);
+    /// CREATE POLICY named ON docs TO reader USING (true);
+    /// CREATE POLICY quoted ON docs TO \"PUBLIC\" USING (true);
+    /// ",
+    /// )?;
+    /// let table = db.table(None, "docs").unwrap();
+    /// let policy = |name: &str| table.policies(&db).unwrap().find(|p| p.name() == name).unwrap();
+    ///
+    /// assert!(policy("spelled").applies_to_public());
+    /// assert!(policy("implied").applies_to_public());
+    /// assert!(!policy("named").applies_to_public());
+    /// // A quoted name is a role of that exact name, not the pseudo-role.
+    /// assert!(!policy("quoted").applies_to_public());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn applies_to_public(&self) -> bool;
 
     /// Returns the `USING` expression of the policy, if any.
     ///
@@ -338,6 +456,22 @@ where
         (*self).table(database)
     }
 
+    fn target_table_name(&self) -> &str {
+        (*self).target_table_name()
+    }
+
+    fn target_table_name_is_quoted(&self) -> bool {
+        (*self).target_table_name_is_quoted()
+    }
+
+    fn target_table_schema(&self) -> Option<&str> {
+        (*self).target_table_schema()
+    }
+
+    fn target_table_schema_is_quoted(&self) -> bool {
+        (*self).target_table_schema_is_quoted()
+    }
+
     fn command(&self) -> CreatePolicyCommand {
         (*self).command()
     }
@@ -351,6 +485,10 @@ where
         Self: 'db,
     {
         (*self).roles(database)
+    }
+
+    fn applies_to_public(&self) -> bool {
+        (*self).applies_to_public()
     }
 
     fn using_expression<'db>(&'db self, database: &'db Self::DB) -> Option<&'db Expr>
@@ -535,32 +673,31 @@ mod tests {
         assert_eq!(table.policies(&db).expect("policies").count(), 1);
     }
 
+    /// A policy exists only on its table, so one naming a table nothing
+    /// creates is refused as it is read, which is what the database does.
     #[test]
-    fn test_policy_table_reports_absent_target_instead_of_panicking() {
+    fn test_policy_on_an_absent_table_is_refused() {
         let sql = r"CREATE POLICY orphan ON absent_table USING (true);";
-        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let policy = db.policies().next().expect("Policy not found");
-
-        assert_eq!(
-            policy.table(&db).err(),
-            Some(LookupError::TableNotFound { object_name: "absent_table".to_string() })
-        );
+        assert!(matches!(
+            ParserDB::parse::<GenericDialect>(sql),
+            Err(crate::errors::Error::TableNotFoundForPolicy { ref table_name, ref policy_name })
+                if table_name == "absent_table" && policy_name == "orphan"
+        ));
     }
 
     #[test]
-    fn test_policy_table_reports_unquoted_target_as_absent() {
+    fn test_policy_on_an_unquoted_target_does_not_match_a_quoted_table() {
         // PostgreSQL folds the unquoted target to lowercase, so it must not
-        // match a table registered under a quoted mixed-case name.
+        // match a table registered under a quoted mixed-case name, and the
+        // policy is then refused for naming a table that does not exist.
         let sql = r#"
             CREATE TABLE "MyTable" (id INT);
             CREATE POLICY p ON MyTable USING (true);
         "#;
-        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let policy = db.policies().next().expect("Policy not found");
-
-        assert_eq!(
-            policy.table(&db).err(),
-            Some(LookupError::TableNotFound { object_name: "MyTable".to_string() })
-        );
+        assert!(matches!(
+            ParserDB::parse::<GenericDialect>(sql),
+            Err(crate::errors::Error::TableNotFoundForPolicy { ref table_name, .. })
+                if table_name == "MyTable"
+        ));
     }
 }

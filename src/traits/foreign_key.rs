@@ -160,6 +160,88 @@ pub trait ForeignKeyLike:
         database: &'db Self::DB,
     ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError>;
 
+    /// Returns the table name the foreign key wrote in its `REFERENCES`
+    /// clause, exactly as written.
+    ///
+    /// Unlike [`Self::referenced_table`] this applies no resolution and cannot
+    /// fail, so a caller with its own resolution rules (a search path, a
+    /// default schema) can read the target and resolve it itself.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// CREATE TABLE app.\"Docs\" (id INT PRIMARY KEY);
+    /// CREATE TABLE host_table (
+    ///     id INT,
+    ///     FOREIGN KEY (id) REFERENCES app.\"Docs\"(id)
+    /// );
+    /// ",
+    /// )?;
+    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let foreign_key = host_table.foreign_keys(&db)?.next().unwrap();
+    /// assert_eq!(foreign_key.referenced_table_name(), "Docs");
+    /// assert!(foreign_key.referenced_table_name_is_quoted());
+    /// assert_eq!(foreign_key.referenced_table_schema(), Some("app"));
+    /// assert!(!foreign_key.referenced_table_schema_is_quoted());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn referenced_table_name(&self) -> &str;
+
+    /// Returns whether the referenced table identifier was quoted in SQL.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn referenced_table_name_is_quoted(&self) -> bool {
+        false
+    }
+
+    /// Returns the schema qualifier written in the `REFERENCES` clause, if
+    /// any.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE referenced_table (id INT PRIMARY KEY);
+    /// CREATE TABLE host_table (
+    ///     id INT,
+    ///     FOREIGN KEY (id) REFERENCES referenced_table(id)
+    /// );
+    /// ",
+    /// )?;
+    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let foreign_key = host_table.foreign_keys(&db)?.next().unwrap();
+    /// assert_eq!(foreign_key.referenced_table_name(), "referenced_table");
+    /// assert_eq!(foreign_key.referenced_table_schema(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn referenced_table_schema(&self) -> Option<&str>;
+
+    /// Returns whether that schema qualifier was quoted in SQL.
+    ///
+    /// This only matters when [`Self::referenced_table_schema`] returns
+    /// `Some`.
+    ///
+    /// The default `false` folds every identifier to lowercase, so an
+    /// implementation over a source that preserves quoting must override it.
+    #[inline]
+    fn referenced_table_schema_is_quoted(&self) -> bool {
+        false
+    }
+
     /// Returns an iterator over the columns in the host table that are part of
     /// the foreign key.
     ///
@@ -290,7 +372,7 @@ pub trait ForeignKeyLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
     /// CREATE TABLE grandparent_table (id INT PRIMARY KEY);
-    /// CREATE TABLE parent_table (id INT, FOREIGN KEY (id) REFERENCES grandparent_table(id));
+    /// CREATE TABLE parent_table (id INT PRIMARY KEY, FOREIGN KEY (id) REFERENCES grandparent_table(id));
     /// CREATE TABLE host_table (
     ///   id INT,
     ///   FOREIGN KEY (id) REFERENCES parent_table(id),
@@ -393,10 +475,10 @@ pub trait ForeignKeyLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
-    /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
+    /// CREATE TABLE referenced_table (id1 INT, id2 INT, name TEXT UNIQUE, PRIMARY KEY (id1, id2));
     /// CREATE TABLE single_fk_table (
-    ///     ref_id INT,
-    ///     FOREIGN KEY (ref_id) REFERENCES referenced_table(id1)
+    ///     ref_name TEXT,
+    ///     FOREIGN KEY (ref_name) REFERENCES referenced_table(name)
     /// );
     /// CREATE TABLE composite_fk_table (
     ///     ref_id1 INT,
@@ -856,7 +938,7 @@ pub trait ForeignKeyLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
-    /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT);
+    /// CREATE TABLE referenced_table (id INT PRIMARY KEY, name TEXT UNIQUE);
     /// CREATE TABLE pk_ref_table (
     ///     ref_id INT,
     ///     FOREIGN KEY (ref_id) REFERENCES referenced_table(id)
@@ -1101,27 +1183,27 @@ pub trait ForeignKeyLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "
-    /// CREATE TABLE referenced_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
+    /// CREATE TABLE referenced_composite_pk_table (id1 INT, id2 INT, name TEXT UNIQUE, PRIMARY KEY (id1, id2));
     /// CREATE TABLE full_ref_table (
     ///     ref_id1 INT,
     ///     ref_id2 INT,
     ///     FOREIGN KEY (ref_id1, ref_id2) REFERENCES referenced_composite_pk_table(id1, id2)
     /// );
-    /// CREATE TABLE partial_ref_table (
-    ///     ref_id1 INT,
-    ///     FOREIGN KEY (ref_id1) REFERENCES referenced_composite_pk_table(id1)
+    /// CREATE TABLE other_key_ref_table (
+    ///     ref_name TEXT,
+    ///     FOREIGN KEY (ref_name) REFERENCES referenced_composite_pk_table(name)
     /// );
     /// ",
     /// )?;
     /// let full_ref_table = db.table(None, "full_ref_table").unwrap();
-    /// let partial_ref_table = db.table(None, "partial_ref_table").unwrap();
+    /// let other_key_ref_table = db.table(None, "other_key_ref_table").unwrap();
     /// let full_fk = full_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
-    /// let partial_fk =
-    ///     partial_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
+    /// let other_key_fk =
+    ///     other_key_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert!(full_fk.includes_referenced_primary_key(&db)?, "FK includes all referenced PK columns");
     /// assert!(
-    ///     !partial_fk.includes_referenced_primary_key(&db)?,
-    ///     "FK does not include all referenced PK columns"
+    ///     !other_key_fk.includes_referenced_primary_key(&db)?,
+    ///     "a FK onto another unique key includes no PK column"
     /// );
     /// # Ok(())
     /// # }

@@ -77,10 +77,8 @@ fn a_child_foreign_key_follows_the_rename_of_its_parent() {
     )
     .expect("parent exists when the child and the rename land");
 
-    assert!(
-        database.validate_foreign_key_targets().is_ok(),
-        "the child's foreign key names the renamed parent"
-    );
+    // Parsing at all proves the target resolves, since a dangling reference is
+    // refused as it is read. What is worth pinning here is the new name.
 
     let child = database.table(None, "child").expect("child was created");
     let foreign_key =
@@ -109,7 +107,10 @@ fn a_table_constraint_foreign_key_follows_the_rename() {
     )
     .expect("parent exists when the child and the rename land");
 
-    assert!(database.validate_foreign_key_targets().is_ok());
+    let child = database.table(None, "child").expect("child was created");
+    let foreign_key =
+        child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
+    assert_eq!(foreign_key.referenced_table_name(), "parent2");
 }
 
 /// The renamed table's own foreign key back to itself is rewritten in the same
@@ -122,8 +123,10 @@ fn a_self_referential_foreign_key_follows_the_rename() {
     )
     .expect("the self reference resolves against the renamed table");
 
-    assert!(database.validate_foreign_key_targets().is_ok());
     let table = database.table(None, "t2").expect("t2 exists after the rename");
+    let foreign_key =
+        table.foreign_keys(&database).expect("t2 is in this database").next().expect("one key");
+    assert_eq!(foreign_key.referenced_table_name(), "t2");
     assert_eq!(table.foreign_keys(&database).expect("t2 is in this database").count(), 1);
 }
 
@@ -153,7 +156,10 @@ fn a_qualified_table_carries_its_references_within_the_schema() {
     )
     .expect("s.parent exists");
 
-    assert!(database.validate_foreign_key_targets().is_ok());
+    let child = database.table(Some("s"), "child").expect("s.child was created");
+    let foreign_key =
+        child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
+    assert_eq!(foreign_key.referenced_table_name(), "parent2");
     let policy = database.policies().next().expect("the policy survives");
     let table = policy.table(&database).expect("the policy target resolves");
     assert_eq!((table.table_schema(), table.table_name()), (Some("s"), "parent2"));
@@ -174,8 +180,12 @@ fn a_rename_across_schemas_requalifies_its_references() {
 
     let parent = database.table(Some("b"), "parent").expect("the table moved to b");
     assert_eq!(parent.table_schema(), Some("b"));
-    assert!(
-        database.validate_foreign_key_targets().is_ok(),
+    let child = database.table(Some("a"), "child").expect("a.child stayed put");
+    let foreign_key =
+        child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
+    assert_eq!(
+        (foreign_key.referenced_table_schema(), foreign_key.referenced_table_name()),
+        (Some("b"), "parent"),
         "the child's foreign key names the table in its new schema"
     );
 }

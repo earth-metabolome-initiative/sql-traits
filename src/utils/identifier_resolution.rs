@@ -76,6 +76,17 @@ pub fn stored_identifier_matches_lookup(
     identifiers_match(stored_value, stored_quoted, lookup_ident.value(), lookup_ident.is_quoted())
 }
 
+/// Returns whether an identifier names the `PUBLIC` pseudo-role, meaning every
+/// role, rather than a role somebody created.
+///
+/// SQL spells "everyone" as an unquoted `PUBLIC`, which the grammar hands back
+/// as an ordinary identifier. A quoted `"PUBLIC"` is a role of that exact name
+/// and is not the pseudo-role.
+#[must_use]
+pub fn is_public_pseudo_role(value: &str, quoted: bool) -> bool {
+    !quoted && value.eq_ignore_ascii_case("PUBLIC")
+}
+
 /// Normalizes an identifier for comparison and fingerprint encoding.
 ///
 /// Applies the FINGERPRINT_SPEC §7.1 / audit §5 rules:

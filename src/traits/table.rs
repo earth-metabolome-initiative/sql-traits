@@ -3154,6 +3154,7 @@ pub trait TableLike:
     ///
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "
+    /// CREATE ROLE app_owner;
     /// CREATE TABLE docs (id INT);
     /// ALTER TABLE docs OWNER TO app_owner;
     /// CREATE TABLE notes (id INT);

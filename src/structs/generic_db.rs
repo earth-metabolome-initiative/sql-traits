@@ -75,6 +75,8 @@ where
     column_grants: Vec<(Arc<CG>, CG::Meta)>,
     /// List of schemas in the database.
     schemas: Vec<(Arc<S>, S::Meta)>,
+    /// Schemas an unqualified name resolves against, in order.
+    search_path: Vec<(String, bool)>,
 }
 
 impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> Debug
@@ -113,6 +115,7 @@ where
             .field("table_grants", &self.table_grants.len())
             .field("column_grants", &self.column_grants.len())
             .field("schemas", &self.schemas.len())
+            .field("search_path", &self.search_path)
             .finish()
     }
 }
@@ -153,6 +156,7 @@ where
             table_grants: self.table_grants.clone(),
             column_grants: self.column_grants.clone(),
             schemas: self.schemas.clone(),
+            search_path: self.search_path.clone(),
         }
     }
 }

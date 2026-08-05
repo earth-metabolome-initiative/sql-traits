@@ -213,10 +213,8 @@ fn things_on_the_table_go_with_the_column() {
     .expect("an inline foreign key on a sibling column goes with the column");
     let table = inline.table(None, "t").expect("t exists");
     assert_eq!(table.foreign_keys(&inline).expect("t is in this database").count(), 0);
-    assert!(
-        inline.validate_foreign_key_targets().is_ok(),
-        "no foreign key is left naming the dropped column"
-    );
+    // A foreign key left naming the dropped column would have been refused as
+    // the alteration was read, so surviving the parse is the proof.
 
     let inline_check = parse(
         "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT CHECK (b > a));
@@ -261,7 +259,6 @@ fn cascade_takes_the_things_outside_the_table() {
     .expect("CASCADE takes the child's foreign key");
     let child = referencing.table(None, "child").expect("child exists");
     assert_eq!(child.foreign_keys(&referencing).expect("child is in this database").count(), 0);
-    assert!(referencing.validate_foreign_key_targets().is_ok());
     assert_eq!(column_names(&referencing, "parent"), ["id"]);
 
     let policied = parse(
@@ -450,7 +447,6 @@ fn renaming_a_referenced_column_follows_into_the_referencing_table() {
     .expect("key is declared");
 
     assert_eq!(column_names(&database, "parent"), ["id", "renamed"]);
-    assert!(database.validate_foreign_key_targets().is_ok());
 
     let child = database.table(None, "child").expect("child exists");
     let foreign_key = child
@@ -477,7 +473,17 @@ fn a_self_referential_foreign_key_follows_a_column_rename() {
     .expect("id is declared");
 
     assert_eq!(column_names(&database, "t"), ["key", "parent"]);
-    assert!(database.validate_foreign_key_targets().is_ok());
+    let table = database.table(None, "t").expect("t exists");
+    let foreign_key =
+        table.foreign_keys(&database).expect("t is in this database").next().expect("one key");
+    assert_eq!(
+        foreign_key
+            .referenced_columns(&database)
+            .expect("the self reference resolves")
+            .map(|column| column.column_name().to_owned())
+            .collect::<Vec<String>>(),
+        ["key"]
+    );
 }
 
 /// A policy condition may reach another table through a subquery, and that

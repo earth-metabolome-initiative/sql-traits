@@ -6,7 +6,11 @@ use crate::{
     errors::{LookupError, ObjectKind},
     structs::{ParserDB, metadata::PolicyMetadata},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, PolicyLike},
-    utils::object_name::resolve_required_table,
+    utils::{
+        identifier_resolution::is_public_pseudo_role,
+        last_str,
+        object_name::{object_name_last_part, resolve_required_table, schema_from_object_name},
+    },
 };
 
 impl Metadata for CreatePolicy {
@@ -44,6 +48,22 @@ impl PolicyLike for CreatePolicy {
         resolve_required_table(&self.table_name, database)
     }
 
+    fn target_table_name(&self) -> &str {
+        last_str(&self.table_name)
+    }
+
+    fn target_table_name_is_quoted(&self) -> bool {
+        object_name_last_part(&self.table_name).is_some_and(|(_, quoted)| quoted)
+    }
+
+    fn target_table_schema(&self) -> Option<&str> {
+        schema_from_object_name(&self.table_name).map(|(schema, _)| schema)
+    }
+
+    fn target_table_schema_is_quoted(&self) -> bool {
+        schema_from_object_name(&self.table_name).is_some_and(|(_, quoted)| quoted)
+    }
+
     fn command(&self) -> CreatePolicyCommand {
         self.command.unwrap_or(CreatePolicyCommand::All)
     }
@@ -57,6 +77,23 @@ impl PolicyLike for CreatePolicy {
         Self: 'db,
     {
         self.to.iter().flat_map(|roles| roles.iter())
+    }
+
+    fn applies_to_public(&self) -> bool {
+        match &self.to {
+            // No `TO` clause at all, which PostgreSQL defaults to `PUBLIC`.
+            None => true,
+            Some(owners) => {
+                owners.is_empty()
+                    || owners.iter().any(|owner| {
+                        matches!(owner, Owner::Ident(ident)
+                        if is_public_pseudo_role(
+                            ident.value.as_str(),
+                            ident.quote_style.is_some(),
+                        ))
+                    })
+            }
+        }
     }
 
     fn using_expression<'db>(&'db self, _database: &'db Self::DB) -> Option<&'db Expr>

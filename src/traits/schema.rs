@@ -79,7 +79,9 @@ pub trait SchemaLike: Debug + Clone + Ord + Eq + Metadata + Send + Sync {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE SCHEMA my_schema AUTHORIZATION admin;")?;
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "CREATE ROLE admin; CREATE SCHEMA my_schema AUTHORIZATION admin;",
+    /// )?;
     /// let schema = db.schema("my_schema").unwrap();
     /// assert_eq!(schema.authorization(), Some("admin"));
     /// # Ok(())
@@ -129,7 +131,8 @@ mod tests {
 
     #[test]
     fn test_create_schema_with_authorization() {
-        let db = parse_postgres("CREATE SCHEMA my_schema AUTHORIZATION admin;").unwrap();
+        let db = parse_postgres("CREATE ROLE admin; CREATE SCHEMA my_schema AUTHORIZATION admin;")
+            .unwrap();
         let schema = db.schema("my_schema").expect("Schema should exist");
         assert_eq!(schema.name(), "my_schema");
         assert_eq!(schema.authorization(), Some("admin"));
@@ -138,7 +141,7 @@ mod tests {
     #[test]
     fn test_create_schema_authorization_only() {
         // CREATE SCHEMA AUTHORIZATION admin creates schema named "admin"
-        let db = parse_postgres("CREATE SCHEMA AUTHORIZATION admin;").unwrap();
+        let db = parse_postgres("CREATE ROLE admin; CREATE SCHEMA AUTHORIZATION admin;").unwrap();
         let schema = db.schema("admin").expect("Schema should exist");
         assert_eq!(schema.name(), "admin");
         assert_eq!(schema.authorization(), Some("admin"));
@@ -148,6 +151,8 @@ mod tests {
     fn test_create_multiple_schemas() {
         let db = parse_postgres(
             "
+            CREATE ROLE owner_b;
+            CREATE ROLE owner_c;
             CREATE SCHEMA schema_a;
             CREATE SCHEMA schema_b AUTHORIZATION owner_b;
             CREATE SCHEMA AUTHORIZATION owner_c;
@@ -408,6 +413,7 @@ mod tests {
     fn test_alter_schema_owner_to() {
         let db = parse_postgres(
             "
+            CREATE ROLE new_owner;
             CREATE SCHEMA my_schema;
             ALTER SCHEMA my_schema OWNER TO new_owner;
             ",
@@ -422,6 +428,7 @@ mod tests {
     fn test_alter_schema_preserves_authorization_on_rename() {
         let db = parse_postgres(
             "
+            CREATE ROLE admin;
             CREATE SCHEMA old_name AUTHORIZATION admin;
             ALTER SCHEMA old_name RENAME TO new_name;
             ",
@@ -464,7 +471,9 @@ mod tests {
 
         #[test]
         fn test_all_methods() {
-            let db = parse_postgres("CREATE SCHEMA my_schema AUTHORIZATION admin;").unwrap();
+            let db =
+                parse_postgres("CREATE ROLE admin; CREATE SCHEMA my_schema AUTHORIZATION admin;")
+                    .unwrap();
             let schema = db.schema("my_schema").expect("schema");
 
             // Explicitly invoke through the &T blanket impl so tarpaulin

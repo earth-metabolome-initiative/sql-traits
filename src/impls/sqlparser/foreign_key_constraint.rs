@@ -9,7 +9,10 @@ use crate::{
     errors::LookupError,
     structs::{ParserDB, TableAttribute},
     traits::{ForeignKeyLike, Metadata, database::DatabaseLike, table::TableLike},
-    utils::{identifier_resolution::identifiers_match, object_name::object_name_last_part},
+    utils::{
+        last_str,
+        object_name::{object_name_last_part, resolve_required_table, schema_from_object_name},
+    },
 };
 
 impl Metadata for TableAttribute<CreateTable, ForeignKeyConstraint> {
@@ -35,29 +38,35 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
         self.table()
     }
 
+    /// Resolves through the same path the read resolved against, so the
+    /// accessor never answers with a different table than the one the read
+    /// accepted. Matching on the name alone, ignoring the schema, was the
+    /// previous behaviour and picked whichever same-named table came first.
     fn referenced_table<'db>(
         &self,
         database: &'db Self::DB,
     ) -> Result<&'db <Self::DB as DatabaseLike>::Table, LookupError> {
-        let foreign_table = &self.attribute().foreign_table;
-        let (referenced_name, referenced_quoted) = object_name_last_part(foreign_table)
-            .ok_or_else(|| {
-                LookupError::InvalidObjectName {
-                    object_name: foreign_table.to_string(),
-                    reason: "a foreign key reference must name a table".to_string(),
-                }
-            })?;
-        database
-            .tables()
-            .find(|table: &&<Self::DB as DatabaseLike>::Table| {
-                identifiers_match(
-                    table.table_name(),
-                    table.table_name_is_quoted(),
-                    referenced_name,
-                    referenced_quoted,
-                )
-            })
-            .ok_or_else(|| LookupError::TableNotFound { object_name: foreign_table.to_string() })
+        resolve_required_table(&self.attribute().foreign_table, database)
+    }
+
+    #[inline]
+    fn referenced_table_name(&self) -> &str {
+        last_str(&self.attribute().foreign_table)
+    }
+
+    #[inline]
+    fn referenced_table_name_is_quoted(&self) -> bool {
+        object_name_last_part(&self.attribute().foreign_table).is_some_and(|(_, quoted)| quoted)
+    }
+
+    #[inline]
+    fn referenced_table_schema(&self) -> Option<&str> {
+        schema_from_object_name(&self.attribute().foreign_table).map(|(schema, _)| schema)
+    }
+
+    #[inline]
+    fn referenced_table_schema_is_quoted(&self) -> bool {
+        schema_from_object_name(&self.attribute().foreign_table).is_some_and(|(_, quoted)| quoted)
     }
 
     #[inline]
