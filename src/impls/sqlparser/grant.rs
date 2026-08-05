@@ -4,7 +4,7 @@
 //! by the same `Grant` struct. This module implements all grant traits
 //! on `Grant` to support both use cases.
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 use core::mem;
 
 use sqlparser::ast::{
