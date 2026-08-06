@@ -93,4 +93,23 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     pub fn functions(&self) -> impl Iterator<Item = &<U::DB as DatabaseLike>::Function> {
         self.functions.iter().map(core::convert::AsRef::as_ref)
     }
+
+    /// Re-points every cached function still referencing the allocation
+    /// `stale` names at `fresh` instead.
+    ///
+    /// `ALTER FUNCTION` and `CREATE OR REPLACE` both rewrite the
+    /// canonical store, so a cache resolved at constraint creation would
+    /// otherwise keep answering with the superseded node.
+    #[inline]
+    pub fn replace_function(
+        &mut self,
+        stale: &Arc<<U::DB as DatabaseLike>::Function>,
+        fresh: &Arc<<U::DB as DatabaseLike>::Function>,
+    ) {
+        for slot in &mut self.functions {
+            if Arc::ptr_eq(slot, stale) {
+                *slot = Arc::clone(fresh);
+            }
+        }
+    }
 }

@@ -55,4 +55,23 @@ impl<U: PolicyLike> PolicyMetadata<U> {
     pub fn set_check_functions(&mut self, functions: Vec<Arc<<U::DB as DatabaseLike>::Function>>) {
         self.check_functions = functions;
     }
+
+    /// Re-points every cached function still referencing the allocation
+    /// `stale` names at `fresh` instead.
+    ///
+    /// `ALTER FUNCTION` and `CREATE OR REPLACE` both rewrite the
+    /// canonical store, so a cache resolved at policy creation would
+    /// otherwise keep answering with the superseded node.
+    #[inline]
+    pub fn replace_function(
+        &mut self,
+        stale: &Arc<<U::DB as DatabaseLike>::Function>,
+        fresh: &Arc<<U::DB as DatabaseLike>::Function>,
+    ) {
+        for slot in self.using_functions.iter_mut().chain(self.check_functions.iter_mut()) {
+            if Arc::ptr_eq(slot, stale) {
+                *slot = Arc::clone(fresh);
+            }
+        }
+    }
 }

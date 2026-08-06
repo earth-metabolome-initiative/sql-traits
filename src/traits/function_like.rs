@@ -3,6 +3,8 @@
 use alloc::{borrow::Cow, vec::Vec};
 use core::{fmt::Debug, hash::Hash};
 
+use sqlparser::ast::FunctionSecurity;
+
 use crate::{
     traits::{DatabaseLike, Metadata},
     utils::{identifier_resolution::normalize_identifier, normalize_postgres_type_cow},
@@ -169,6 +171,43 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// ```
     fn body(&self) -> Option<&str>;
 
+    /// Returns whether the function runs with the privileges of the user
+    /// that defined it (`SECURITY DEFINER`) or of the user that calls it
+    /// (`SECURITY INVOKER`), which decides who `current_user` names inside
+    /// the body.
+    ///
+    /// PostgreSQL defaults an unstated clause to `SECURITY INVOKER`, and
+    /// this reader folds that default in. A security clause applied later
+    /// by `ALTER FUNCTION` is reflected.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::ast::FunctionSecurity;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE FUNCTION as_owner() RETURNS INT LANGUAGE sql SECURITY DEFINER AS 'SELECT 1';
+    /// CREATE FUNCTION as_caller() RETURNS INT LANGUAGE sql SECURITY INVOKER AS 'SELECT 1';
+    /// CREATE FUNCTION unstated() RETURNS INT AS 'SELECT 1';
+    /// CREATE FUNCTION altered() RETURNS INT AS 'SELECT 1';
+    /// ALTER FUNCTION altered() SECURITY DEFINER;
+    /// ",
+    /// )?;
+    /// let mode = |name: &str| db.function(name).expect("Function should exist").security_mode();
+    /// assert_eq!(mode("as_owner"), FunctionSecurity::Definer);
+    /// assert_eq!(mode("as_caller"), FunctionSecurity::Invoker);
+    /// // PostgreSQL defaults an unstated clause to SECURITY INVOKER.
+    /// assert_eq!(mode("unstated"), FunctionSecurity::Invoker);
+    /// // ALTER FUNCTION updates the stored mode.
+    /// assert_eq!(mode("altered"), FunctionSecurity::Definer);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn security_mode(&self) -> FunctionSecurity;
+
     /// Returns the normalized return type name of the function as a string.
     ///
     /// # Example
@@ -204,9 +243,9 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
 
 #[cfg(test)]
 mod tests {
-    use sqlparser::dialect::GenericDialect;
+    use sqlparser::{ast::FunctionSecurity, dialect::GenericDialect};
 
-    use crate::{prelude::*, traits::DatabaseLike};
+    use crate::{errors::Error, prelude::*, traits::DatabaseLike};
 
     /// Exercises both default-method bodies (`name_is_quoted`,
     /// `normalized_return_type_name`) directly so they're credited
@@ -410,5 +449,238 @@ mod tests {
 
         // other_func should be gone
         assert!(db.function("other_func").is_none());
+    }
+
+    #[test]
+    fn test_alter_function_sets_security_definer() {
+        let sql = r"
+            CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
+            ALTER FUNCTION my_func() SECURITY DEFINER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Definer);
+    }
+
+    #[test]
+    fn test_alter_function_sets_security_invoker() {
+        let sql = r"
+            CREATE FUNCTION my_func() RETURNS INT SECURITY DEFINER AS 'SELECT 1;';
+            ALTER FUNCTION my_func() SECURITY INVOKER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Invoker);
+    }
+
+    #[test]
+    fn test_alter_function_external_security() {
+        // EXTERNAL is a noise word PostgreSQL accepts for SQL conformance.
+        let sql = r"
+            CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
+            ALTER FUNCTION my_func() EXTERNAL SECURITY DEFINER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Definer);
+    }
+
+    #[test]
+    fn test_alter_function_last_security_action_wins() {
+        // PostgreSQL applies the actions of one statement in order, so a
+        // repeated clause leaves the last spelling in force.
+        let sql = r"
+            CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
+            ALTER FUNCTION my_func() SECURITY INVOKER SECURITY DEFINER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Definer);
+    }
+
+    #[test]
+    fn test_alter_function_security_not_found() {
+        let sql = r"
+            ALTER FUNCTION missing_func() SECURITY DEFINER;
+        ";
+        let result = ParserDB::parse::<GenericDialect>(sql);
+
+        assert!(matches!(
+            result,
+            Err(Error::AlterFunctionNotFound { function_name }) if function_name == "missing_func"
+        ));
+    }
+
+    #[test]
+    fn test_alter_function_security_without_args_ambiguous() {
+        let sql = r"
+            CREATE FUNCTION dup_func(x INT) RETURNS INT AS 'SELECT 1;';
+            CREATE FUNCTION dup_func(x TEXT) RETURNS INT AS 'SELECT 2;';
+            ALTER FUNCTION dup_func SECURITY DEFINER;
+        ";
+        let result = ParserDB::parse::<GenericDialect>(sql);
+
+        assert!(matches!(
+            result,
+            Err(Error::AmbiguousAlterFunction { function_name }) if function_name == "dup_func"
+        ));
+    }
+
+    #[test]
+    fn test_alter_function_selects_overload_by_args() {
+        let sql = r"
+            CREATE FUNCTION dup_func(x INT) RETURNS INT AS 'SELECT 1;';
+            CREATE FUNCTION dup_func(x TEXT) RETURNS INT AS 'SELECT 2;';
+            ALTER FUNCTION dup_func(INT) SECURITY DEFINER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+        for f in db.functions().filter(|f| f.name() == "dup_func") {
+            let expected = if f.normalized_argument_type_names(&db) == ["INT"] {
+                FunctionSecurity::Definer
+            } else {
+                FunctionSecurity::Invoker
+            };
+            assert_eq!(f.security_mode(), expected);
+        }
+    }
+
+    #[test]
+    fn test_alter_function_other_clauses_stay_ignored() {
+        // Statements carrying no security clause keep falling through like
+        // the catch-all arm, even when they name a missing function.
+        let sql = r"
+            CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
+            ALTER FUNCTION my_func() IMMUTABLE;
+            ALTER FUNCTION missing_func() COST 100;
+            ALTER FUNCTION missing_func() RENAME TO other_func;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Invoker);
+    }
+
+    #[test]
+    fn test_create_or_replace_replaces_security() {
+        // The replacement node carries no clause, so the default applies:
+        // CREATE OR REPLACE resets the mode rather than merging.
+        let sql = r"
+            CREATE FUNCTION my_func() RETURNS INT SECURITY DEFINER AS 'SELECT 1;';
+            CREATE OR REPLACE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Invoker);
+    }
+
+    #[test]
+    fn test_trigger_function_carries_security_mode() {
+        let sql = r"
+            CREATE TABLE t (id INT);
+            CREATE FUNCTION my_trigger_func() RETURNS TRIGGER SECURITY DEFINER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+            CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION my_trigger_func();
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_trigger_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Definer);
+    }
+
+    #[test]
+    fn test_alter_function_bare_name_single_match() {
+        // PostgreSQL lets the statement omit the argument list when the
+        // name covers exactly one function.
+        let sql = r"
+            CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
+            ALTER FUNCTION my_func SECURITY DEFINER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+        let f = db.function("my_func").expect("function should exist");
+
+        assert_eq!(f.security_mode(), FunctionSecurity::Definer);
+    }
+
+    #[test]
+    fn test_alter_function_security_visible_through_policy() {
+        // Policies cache the function nodes their expressions call, so the
+        // alteration has to reach that cache too, not only the canonical
+        // store.
+        let sql = r"
+            CREATE TABLE t (id INT);
+            CREATE FUNCTION f(x INT) RETURNS BOOLEAN AS 'SELECT true;';
+            CREATE POLICY p ON t USING (f(id));
+            ALTER FUNCTION f(INT) SECURITY DEFINER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+        let table = db.table(None, "t").expect("table should exist");
+        let policy = table.policies(&db).expect("policies").next().expect("policy should exist");
+        let via_policy = policy
+            .using_functions(&db)
+            .expect("using functions")
+            .next()
+            .expect("function should be resolved");
+
+        assert_eq!(via_policy.security_mode(), FunctionSecurity::Definer);
+        assert_eq!(
+            db.function("f").expect("function should exist").security_mode(),
+            FunctionSecurity::Definer
+        );
+    }
+
+    #[test]
+    fn test_alter_function_security_visible_through_check_constraint() {
+        // Check constraints cache resolved function nodes the same way
+        // policies do.
+        let sql = r"
+            CREATE FUNCTION g(x INT) RETURNS BOOLEAN AS 'SELECT true;';
+            CREATE TABLE t (id INT, CHECK (g(id)));
+            ALTER FUNCTION g(INT) SECURITY DEFINER;
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+        let table = db.table(None, "t").expect("table should exist");
+        let check = table.check_constraints(&db).expect("check constraints").next().expect("check");
+        let via_check = check
+            .functions(&db)
+            .expect("check functions")
+            .next()
+            .expect("function should be resolved");
+
+        assert_eq!(via_check.security_mode(), FunctionSecurity::Definer);
+    }
+
+    #[test]
+    fn test_create_or_replace_updates_expression_caches() {
+        // A replacement reaches the caches policies and check constraints
+        // keep, for both policy expressions, like ALTER FUNCTION does.
+        let sql = r"
+            CREATE FUNCTION f(x INT) RETURNS BOOLEAN AS 'SELECT true;';
+            CREATE TABLE t (id INT, CHECK (f(id)));
+            CREATE POLICY p ON t USING (f(id)) WITH CHECK (f(id));
+            CREATE OR REPLACE FUNCTION f(x INT) RETURNS BOOLEAN SECURITY DEFINER AS 'SELECT true;';
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
+
+        let table = db.table(None, "t").expect("table should exist");
+        let policy = table.policies(&db).expect("policies").next().expect("policy should exist");
+        let via_using =
+            policy.using_functions(&db).expect("using functions").next().expect("function");
+        let via_check =
+            policy.check_functions(&db).expect("check functions").next().expect("function");
+        let constraint =
+            table.check_constraints(&db).expect("check constraints").next().expect("check");
+        let via_constraint =
+            constraint.functions(&db).expect("constraint functions").next().expect("function");
+
+        assert_eq!(via_using.security_mode(), FunctionSecurity::Definer);
+        assert_eq!(via_check.security_mode(), FunctionSecurity::Definer);
+        assert_eq!(via_constraint.security_mode(), FunctionSecurity::Definer);
     }
 }

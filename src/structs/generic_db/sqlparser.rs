@@ -19,16 +19,17 @@ use sql_docs::SqlDoc;
 use sqlparser::parser::ParserError;
 use sqlparser::{
     ast::{
-        Action, AlterColumnOperation, AlterIndexOperation, AlterPolicy, AlterPolicyOperation,
-        AlterRoleOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation, ArgMode,
-        CheckConstraint, ColumnDef, ColumnOption, ColumnOptionDef, CreateFunction,
-        CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger,
-        DataType, DropBehavior, ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionReturnType,
-        GeneratedAs, Grant, GrantObjects, Grantee, GranteeName, GranteesType, Ident, IndexColumn,
-        MySQLColumnPosition, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr,
-        OrderByOptions, Owner, Privileges, Query, RenameTableNameKind, SchemaName, Statement,
-        TableConstraint, TimezoneInfo, TriggerEvent, UniqueConstraint, Value, ValueWithSpan, Visit,
-        VisitMut, Visitor, VisitorMut, visit_relations,
+        Action, AlterColumnOperation, AlterFunction, AlterFunctionAction, AlterFunctionOperation,
+        AlterIndexOperation, AlterPolicy, AlterPolicyOperation, AlterRoleOperation, AlterSchema,
+        AlterSchemaOperation, AlterTableOperation, ArgMode, CheckConstraint, ColumnDef,
+        ColumnOption, ColumnOptionDef, CreateFunction, CreateFunctionBody, CreateIndex,
+        CreatePolicy, CreateRole, CreateTable, CreateTrigger, DataType, DropBehavior,
+        ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionReturnType, GeneratedAs, Grant,
+        GrantObjects, Grantee, GranteeName, GranteesType, Ident, IndexColumn, MySQLColumnPosition,
+        ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Owner,
+        Privileges, Query, RenameTableNameKind, SchemaName, Statement, TableConstraint,
+        TimezoneInfo, TriggerEvent, UniqueConstraint, Value, ValueWithSpan, Visit, VisitMut,
+        Visitor, VisitorMut, visit_relations,
     },
     dialect::Dialect,
     parser::Parser,
@@ -3496,19 +3497,32 @@ impl ParserDB {
                             create_function.args.as_deref(),
                         )
                     });
-                    match (existing, create_function.or_replace) {
+                    let replaced = match (existing, create_function.or_replace) {
                         (Some(_), false) => {
                             return Err(crate::errors::Error::FunctionAlreadyExists {
                                 function_name: last_str(&create_function.name).to_string(),
                             });
                         }
-                        (Some(position), true) => {
-                            builder.functions_mut().remove(position);
-                        }
-                        (None, _) => {}
-                    }
+                        (Some(position), true) => Some(builder.functions_mut().remove(position).0),
+                        (None, _) => None,
+                    };
 
-                    builder = builder.add_function(Arc::new(create_function), ());
+                    let fresh = Arc::new(create_function);
+                    builder = builder.add_function(Arc::clone(&fresh), ());
+
+                    // Policies and check constraints cache the function
+                    // nodes their expressions call, so a replacement has to
+                    // reach those caches too. PostgreSQL keeps the same
+                    // pg_proc entry across CREATE OR REPLACE, and dependent
+                    // objects see the new definition.
+                    if let Some(stale) = replaced {
+                        for (_, metadata) in builder.policies_mut() {
+                            metadata.replace_function(&stale, &fresh);
+                        }
+                        for (_, metadata) in builder.check_constraints_mut() {
+                            metadata.replace_function(&stale, &fresh);
+                        }
+                    }
                 }
                 Statement::DropFunction(drop_function) => {
                     for func_desc in &drop_function.func_desc {
@@ -4605,6 +4619,77 @@ impl ParserDB {
                             rename.new_name,
                             false,
                         )?;
+                    }
+                }
+                Statement::AlterFunction(AlterFunction {
+                    function: func_desc, operation, ..
+                }) => {
+                    // Only the security clause changes state this model
+                    // tracks: it is applied to the stored function, held to
+                    // the closed world the way ALTER POLICY is. Every other
+                    // operation and action keeps being ignored the way the
+                    // catch-all arm ignored the whole statement before.
+                    let AlterFunctionOperation::Actions { actions, .. } = operation else {
+                        continue;
+                    };
+                    let Some(security) = actions.into_iter().rev().find_map(|action| {
+                        match action {
+                            AlterFunctionAction::Security { security, .. } => Some(security),
+                            _ => None,
+                        }
+                    }) else {
+                        continue;
+                    };
+
+                    // A statement that spells the argument list names one
+                    // function, and one that omits it names whichever
+                    // function carries the name, so long as only one does.
+                    let matching: Vec<usize> = builder
+                        .functions()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (function, ()))| {
+                            match &func_desc.args {
+                                Some(args) => {
+                                    function_signatures_match(
+                                        &function.name,
+                                        function.args.as_deref(),
+                                        &func_desc.name,
+                                        Some(args),
+                                    )
+                                }
+                                None => object_names_match(&function.name, &func_desc.name),
+                            }
+                        })
+                        .map(|(position, _)| position)
+                        .collect();
+
+                    let Some(&position) = matching.first() else {
+                        return Err(crate::errors::Error::AlterFunctionNotFound {
+                            function_name: last_str(&func_desc.name).to_string(),
+                        });
+                    };
+
+                    if func_desc.args.is_none() && matching.len() > 1 {
+                        return Err(crate::errors::Error::AmbiguousAlterFunction {
+                            function_name: last_str(&func_desc.name).to_string(),
+                        });
+                    }
+
+                    let function_arc = &mut builder.functions_mut()[position].0;
+                    let stale = Arc::clone(function_arc);
+                    Arc::make_mut(function_arc).security = Some(security);
+                    let fresh = Arc::clone(function_arc);
+
+                    // Policies and check constraints cache the function
+                    // nodes their expressions call, resolved at creation
+                    // time, so the rewritten node has to be swapped into
+                    // those caches as well.
+                    for (_, metadata) in builder.policies_mut() {
+                        metadata.replace_function(&stale, &fresh);
+                    }
+                    for (_, metadata) in builder.check_constraints_mut() {
+                        metadata.replace_function(&stale, &fresh);
                     }
                 }
                 Statement::AlterPolicy(AlterPolicy { name, table_name, operation }) => {
