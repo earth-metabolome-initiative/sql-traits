@@ -165,21 +165,37 @@ fn classify_bool(dialect: SqlparserDialect, ty: &DataType) -> TypeMatch {
 
         // MySQL / MariaDB: `TINYINT(1)` is the idiomatic boolean spelling
         // and `BOOL` / `BOOLEAN` expand to it at DDL and driver level.
-        DataType::TinyInt(Some(1)) if dialect.is_mysql_family() => TypeMatch::Yes,
+        // The unsigned variant is also accepted for the same purpose.
+        DataType::TinyInt(Some(1)) | DataType::TinyIntUnsigned(Some(1))
+            if dialect.is_mysql_family() =>
+        {
+            TypeMatch::Yes
+        }
 
         // SQLite: no native boolean, integer-affine columns commonly carry
         // 0/1 booleans by application convention. Report Maybe so callers
         // can distinguish this from a Yes.
         DataType::Integer(_)
+        | DataType::IntegerUnsigned(_)
         | DataType::Int(_)
+        | DataType::IntUnsigned(_)
         | DataType::Int2(_)
+        | DataType::Int2Unsigned(_)
         | DataType::Int4(_)
+        | DataType::Int4Unsigned(_)
         | DataType::Int8(_)
+        | DataType::Int8Unsigned(_)
         | DataType::SmallInt(_)
+        | DataType::SmallIntUnsigned(_)
         | DataType::BigInt(_)
+        | DataType::BigIntUnsigned(_)
         | DataType::TinyInt(_)
+        | DataType::TinyIntUnsigned(_)
         | DataType::MediumInt(_)
+        | DataType::MediumIntUnsigned(_)
         | DataType::Numeric(_)
+        | DataType::Decimal(_)
+        | DataType::Dec(_)
             if dialect.is_sqlite() =>
         {
             TypeMatch::Maybe
@@ -205,10 +221,14 @@ fn classify_uuid(dialect: SqlparserDialect, ty: &DataType) -> TypeMatch {
             }
         }
 
-        // MySQL: no native UUID type. The `CHAR(36)` and `BINARY(16)`
-        // conventions are widespread but ambiguous (`CHAR(36)` legitimately
-        // holds arbitrary 36-char strings). Report Maybe.
-        DataType::Char(spec) | DataType::Character(spec)
+        // MySQL: no native UUID type. CHAR(36), CHARACTER(36), VARCHAR(36),
+        // CHARACTER VARYING(36), and CHAR VARYING(36) are all widespread
+        // but ambiguous conventions. BINARY(16) is also common. Report Maybe.
+        DataType::Char(spec)
+        | DataType::Character(spec)
+        | DataType::Varchar(spec)
+        | DataType::CharacterVarying(spec)
+        | DataType::CharVarying(spec)
             if dialect.is_mysql_family() && char_length(spec.as_ref()) == Some(36) =>
         {
             TypeMatch::Maybe
@@ -370,6 +390,63 @@ mod tests {
         );
     }
 
+    #[test]
+    fn classify_bool_mysql_tinyint_unsigned_1_is_yes() {
+        assert_eq!(
+            classify_bool(SqlparserDialect::MySql, &DataType::TinyIntUnsigned(Some(1))),
+            TypeMatch::Yes,
+        );
+        assert_eq!(
+            classify_bool(SqlparserDialect::Generic, &DataType::TinyIntUnsigned(Some(1))),
+            TypeMatch::Yes,
+        );
+    }
+
+    #[test]
+    fn classify_bool_mysql_tinyint_unsigned_wider_is_no() {
+        assert_eq!(
+            classify_bool(SqlparserDialect::MySql, &DataType::TinyIntUnsigned(Some(2))),
+            TypeMatch::No,
+        );
+        assert_eq!(
+            classify_bool(SqlparserDialect::MySql, &DataType::TinyIntUnsigned(None)),
+            TypeMatch::No,
+        );
+    }
+
+    #[test]
+    fn classify_bool_sqlite_unsigned_integers_are_maybe() {
+        for ty in &[
+            DataType::IntegerUnsigned(None),
+            DataType::IntUnsigned(None),
+            DataType::Int2Unsigned(None),
+            DataType::Int4Unsigned(None),
+            DataType::Int8Unsigned(None),
+            DataType::SmallIntUnsigned(None),
+            DataType::BigIntUnsigned(None),
+            DataType::TinyIntUnsigned(None),
+            DataType::MediumIntUnsigned(None),
+        ] {
+            assert_eq!(
+                classify_bool(SqlparserDialect::SQLite, ty),
+                TypeMatch::Maybe,
+                "expected Maybe for {ty:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn classify_bool_sqlite_decimal_and_dec_are_maybe() {
+        assert_eq!(
+            classify_bool(SqlparserDialect::SQLite, &DataType::Decimal(ExactNumberInfo::None)),
+            TypeMatch::Maybe,
+        );
+        assert_eq!(
+            classify_bool(SqlparserDialect::SQLite, &DataType::Dec(ExactNumberInfo::None)),
+            TypeMatch::Maybe,
+        );
+    }
+
     // ----- is_uuid -------------------------------------------------------
 
     fn custom(name: &str) -> DataType {
@@ -456,6 +533,29 @@ mod tests {
             classify_uuid(SqlparserDialect::SQLite, &DataType::Blob(None)),
             TypeMatch::Maybe,
         );
+    }
+
+    #[test]
+    fn classify_uuid_mysql_varchar_36_is_maybe() {
+        let varchar_36 =
+            DataType::Varchar(Some(CharacterLength::IntegerLength { length: 36, unit: None }));
+        let char_varying_36 = DataType::CharacterVarying(Some(CharacterLength::IntegerLength {
+            length: 36,
+            unit: None,
+        }));
+        let short_spelling_36 =
+            DataType::CharVarying(Some(CharacterLength::IntegerLength { length: 36, unit: None }));
+        assert_eq!(classify_uuid(SqlparserDialect::MySql, &varchar_36), TypeMatch::Maybe);
+        assert_eq!(classify_uuid(SqlparserDialect::MySql, &char_varying_36), TypeMatch::Maybe);
+        assert_eq!(classify_uuid(SqlparserDialect::MySql, &short_spelling_36), TypeMatch::Maybe);
+    }
+
+    #[test]
+    fn classify_uuid_mysql_varchar_other_length_is_no() {
+        let varchar_10 =
+            DataType::Varchar(Some(CharacterLength::IntegerLength { length: 10, unit: None }));
+        assert_eq!(classify_uuid(SqlparserDialect::MySql, &varchar_10), TypeMatch::No);
+        assert_eq!(classify_uuid(SqlparserDialect::MySql, &DataType::Varchar(None)), TypeMatch::No);
     }
 
     // --- GenericDB<..., SqlparserDialect>: Debug / Clone / ::new coverage ---

@@ -22,6 +22,17 @@ use crate::{
     utils::identifier_resolution::identifiers_match,
 };
 
+/// Returns the written identifier of a single object name part.
+///
+/// Both [`ObjectNamePart::Identifier`] and [`ObjectNamePart::Function`] names
+/// are accepted, mirroring how sqlparser models qualified names.
+pub(crate) fn object_name_part_value(part: &ObjectNamePart) -> &str {
+    match part {
+        ObjectNamePart::Identifier(ident) => ident.value.as_str(),
+        ObjectNamePart::Function(function_part) => function_part.name.value.as_str(),
+    }
+}
+
 /// Returns the last identifier part of an object name as `(value, quoted)`.
 ///
 /// Both [`ObjectNamePart::Identifier`] and [`ObjectNamePart::Function`] names
@@ -152,14 +163,11 @@ pub(crate) fn object_name_identifiers(
     if idents.len() == 1 { Ok((None, idents[0])) } else { Ok((Some(idents[0]), idents[1])) }
 }
 
-/// Reads an object name as a [`TargetName`], treating a name with no parts as
-/// unreachable the way [`last_str`](crate::utils::last_str()) does.
-#[expect(
-    clippy::expect_used,
-    reason = "sqlparser guarantees every ObjectName has at least one part"
-)]
+/// Reads an object name as a [`TargetName`], using an empty string for the
+/// name when the parts list is empty. The parser never produces an empty name,
+/// so a caller receiving an empty-string `TargetName` built the name by hand.
 pub(crate) fn target_name_of_object_name(object_name: &ObjectName) -> TargetName<'_> {
-    target_name_from_object_name(object_name).expect("ObjectName has no parts")
+    target_name_from_object_name(object_name).unwrap_or_else(|| TargetName::new("", false))
 }
 
 /// Reads a table's own stored name as a [`TargetName`].
@@ -392,6 +400,7 @@ mod tests {
         resolve_object_name, resolve_table_object_name_in_iter,
         resolve_table_object_name_on_search_path_in_iter, resolve_target_from_candidates,
         schema_from_object_name, table_matches_object_name, table_matches_target,
+        target_name_of_object_name,
     };
     use crate::{errors::LookupError, prelude::ParserDB, structs::TargetName, traits::TableLike};
 
@@ -665,5 +674,14 @@ mod tests {
             .expect("matches");
         assert_eq!(resolved.table_name(), "users");
         assert!(resolve_object_name(&obj(&[("absent", false)]), &db).unwrap().is_none());
+    }
+
+    #[test]
+    fn target_name_of_empty_object_name_returns_empty_str() {
+        let name = ObjectName(vec![]);
+        let result = target_name_of_object_name(&name);
+        assert_eq!(result.name(), "");
+        assert!(!result.name_is_quoted());
+        assert!(result.schema().is_none());
     }
 }

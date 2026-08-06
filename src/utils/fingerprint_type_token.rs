@@ -56,9 +56,15 @@ pub fn canonical_type_token(sql_type: &str) -> String {
     result
 }
 
-/// Attempts to match a trimmed SQL type string (case-insensitive) against
-/// known canonical families. Returns `None` for unknown types.
-fn match_known_type(s: &str) -> Option<&'static str> {
+/// Maps a trimmed SQL type string to its canonical family token
+/// (case-insensitive).
+///
+/// Returns `None` for types that have no defined family.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one flat table of type spellings, matching how the sqlparser type normalizer states the same knowledge"
+)]
+pub(crate) fn match_known_type(s: &str) -> Option<&'static str> {
     // Integer family
     if s.eq_ignore_ascii_case("INT")
         || s.eq_ignore_ascii_case("INTEGER")
@@ -72,6 +78,18 @@ fn match_known_type(s: &str) -> Option<&'static str> {
         || s.eq_ignore_ascii_case("SERIAL")
         || s.eq_ignore_ascii_case("SMALLSERIAL")
         || s.eq_ignore_ascii_case("BIGSERIAL")
+        || s.eq_ignore_ascii_case("HUGEINT")
+        || s.eq_ignore_ascii_case("INT16")
+        || s.eq_ignore_ascii_case("INT32")
+        || s.eq_ignore_ascii_case("INT64")
+        || s.eq_ignore_ascii_case("INT128")
+        || s.eq_ignore_ascii_case("INT256")
+        || s.eq_ignore_ascii_case("UINT8")
+        || s.eq_ignore_ascii_case("UINT16")
+        || s.eq_ignore_ascii_case("UINT32")
+        || s.eq_ignore_ascii_case("UINT64")
+        || s.eq_ignore_ascii_case("UINT128")
+        || s.eq_ignore_ascii_case("UINT256")
     {
         return Some("INT");
     }
@@ -83,6 +101,8 @@ fn match_known_type(s: &str) -> Option<&'static str> {
         || s.eq_ignore_ascii_case("DOUBLE PRECISION")
         || s.eq_ignore_ascii_case("FLOAT4")
         || s.eq_ignore_ascii_case("FLOAT8")
+        || s.eq_ignore_ascii_case("FLOAT32")
+        || s.eq_ignore_ascii_case("FLOAT64")
     {
         return Some("FLOAT");
     }
@@ -111,6 +131,10 @@ fn match_known_type(s: &str) -> Option<&'static str> {
         || s.eq_ignore_ascii_case("NCHAR")
         || s.eq_ignore_ascii_case("CLOB")
         || s.eq_ignore_ascii_case("STRING")
+        || s.eq_ignore_ascii_case("TINYTEXT")
+        || s.eq_ignore_ascii_case("MEDIUMTEXT")
+        || s.eq_ignore_ascii_case("LONGTEXT")
+        || s.eq_ignore_ascii_case("FIXEDSTRING")
     {
         return Some("STRING");
     }
@@ -121,12 +145,15 @@ fn match_known_type(s: &str) -> Option<&'static str> {
         || s.eq_ignore_ascii_case("BINARY")
         || s.eq_ignore_ascii_case("VARBINARY")
         || s.eq_ignore_ascii_case("BYTES")
+        || s.eq_ignore_ascii_case("TINYBLOB")
+        || s.eq_ignore_ascii_case("MEDIUMBLOB")
+        || s.eq_ignore_ascii_case("LONGBLOB")
     {
         return Some("BYTES");
     }
 
     // Date family
-    if s.eq_ignore_ascii_case("DATE") {
+    if s.eq_ignore_ascii_case("DATE") || s.eq_ignore_ascii_case("DATE32") {
         return Some("DATE");
     }
 
@@ -151,6 +178,7 @@ fn match_known_type(s: &str) -> Option<&'static str> {
     if s.eq_ignore_ascii_case("TIMESTAMP")
         || s.eq_ignore_ascii_case("TIMESTAMP WITHOUT TIME ZONE")
         || s.eq_ignore_ascii_case("DATETIME")
+        || s.eq_ignore_ascii_case("DATETIME64")
     {
         return Some("TIMESTAMP");
     }
@@ -198,10 +226,26 @@ mod tests {
     }
 
     #[test]
+    fn test_integer_family_new_tokens() {
+        for ty in &[
+            "HUGEINT", "hugeint", "INT16", "INT32", "INT64", "INT128", "INT256", "UINT8", "uint8",
+            "UINT16", "UINT32", "UINT64", "UINT128", "UINT256",
+        ] {
+            assert_eq!(canonical_type_token(ty), "INT", "failed for {ty}");
+        }
+    }
+
+    #[test]
     fn test_float_family() {
         for ty in &["FLOAT", "REAL", "DOUBLE", "DOUBLE PRECISION", "float4", "float8"] {
             assert_eq!(canonical_type_token(ty), "FLOAT", "failed for {ty}");
         }
+    }
+
+    #[test]
+    fn test_float_family_new_tokens() {
+        assert_eq!(canonical_type_token("FLOAT32"), "FLOAT");
+        assert_eq!(canonical_type_token("float64"), "FLOAT");
     }
 
     #[test]
@@ -236,8 +280,23 @@ mod tests {
     }
 
     #[test]
+    fn test_string_family_new_tokens() {
+        for ty in &["TINYTEXT", "tinytext", "MEDIUMTEXT", "LONGTEXT", "FIXEDSTRING", "fixedstring"]
+        {
+            assert_eq!(canonical_type_token(ty), "STRING", "failed for {ty}");
+        }
+    }
+
+    #[test]
     fn test_bytes_family() {
         for ty in &["BYTEA", "BLOB", "binary", "VARBINARY", "BYTES"] {
+            assert_eq!(canonical_type_token(ty), "BYTES", "failed for {ty}");
+        }
+    }
+
+    #[test]
+    fn test_bytes_family_new_tokens() {
+        for ty in &["TINYBLOB", "tinyblob", "MEDIUMBLOB", "LONGBLOB"] {
             assert_eq!(canonical_type_token(ty), "BYTES", "failed for {ty}");
         }
     }
@@ -246,6 +305,8 @@ mod tests {
     fn test_date() {
         assert_eq!(canonical_type_token("DATE"), "DATE");
         assert_eq!(canonical_type_token("date"), "DATE");
+        assert_eq!(canonical_type_token("DATE32"), "DATE");
+        assert_eq!(canonical_type_token("date32"), "DATE");
     }
 
     #[test]
@@ -260,6 +321,12 @@ mod tests {
         for ty in &["TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE", "DATETIME"] {
             assert_eq!(canonical_type_token(ty), "TIMESTAMP", "failed for {ty}");
         }
+    }
+
+    #[test]
+    fn test_timestamp_family_new_tokens() {
+        assert_eq!(canonical_type_token("DATETIME64"), "TIMESTAMP");
+        assert_eq!(canonical_type_token("datetime64"), "TIMESTAMP");
     }
 
     #[test]
