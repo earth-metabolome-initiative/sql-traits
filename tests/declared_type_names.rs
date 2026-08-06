@@ -136,10 +136,10 @@ fn test_function_declarations_are_answered() {
     for (declared, expected_arguments, expected_return) in [
         ("() RETURNS UUID", vec![], Some("UUID")),
         ("() RETURNS UUID[]", vec![], Some("UUID[]")),
-        ("() RETURNS SETOF UUID", vec![], Some("UUID")),
+        ("() RETURNS SETOF UUID", vec![], Some("SETOF UUID")),
         ("() RETURNS my_type", vec![], Some("my_type")),
         ("() RETURNS app.my_type", vec![], Some("app.my_type")),
-        ("() RETURNS SETOF app.my_type", vec![], Some("app.my_type")),
+        ("() RETURNS SETOF app.my_type", vec![], Some("SETOF app.my_type")),
         ("(a app.my_type) RETURNS UUID", vec!["app.my_type"], Some("UUID")),
         ("() RETURNS TRIGGER", vec![], Some("TRIGGER")),
         ("() RETURNS TABLE(id UUID)", vec![], Some("TABLE")),

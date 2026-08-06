@@ -138,18 +138,55 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT \"Hello, \" || name;';
     /// CREATE FUNCTION do_nothing() AS 'SELECT;';
+    /// CREATE FUNCTION identities() RETURNS SETOF UUID AS 'SELECT id FROM users;';
     /// ",
     /// )?;
     /// let add_one_fn = db.function("add_one").expect("Function should exist");
     /// let greet_fn = db.function("greet").expect("Function should exist");
     /// let do_nothing_fn = db.function("do_nothing").expect("Function should exist");
+    /// let identities_fn = db.function("identities").expect("Function should exist");
     /// assert_eq!(do_nothing_fn.return_type_name(&db), None);
     /// assert_eq!(add_one_fn.return_type_name(&db).as_deref(), Some("INT"));
     /// assert_eq!(greet_fn.return_type_name(&db).as_deref(), Some("TEXT"));
+    /// // A set-returning declaration keeps its marker, the way an array
+    /// // keeps its `[]`.
+    /// assert_eq!(identities_fn.return_type_name(&db).as_deref(), Some("SETOF UUID"));
     /// # Ok(())
     /// # }
     /// ```
     fn return_type_name<'db>(&'db self, database: &'db Self::DB) -> Option<Cow<'db, str>>;
+
+    /// Returns whether the function returns a set of values rather than a
+    /// single value, mirroring `pg_proc.proretset`.
+    ///
+    /// Both `RETURNS SETOF type` and `RETURNS TABLE(...)` declare sets. The
+    /// declared type keeps answering through
+    /// [`return_type_name`](FunctionLike::return_type_name), so this reader
+    /// is the route for cardinality rather than for the element type.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE FUNCTION one_value() RETURNS UUID AS 'SELECT gen_random_uuid();';
+    /// CREATE FUNCTION many_values() RETURNS SETOF UUID AS 'SELECT id FROM users;';
+    /// CREATE FUNCTION many_rows() RETURNS TABLE(id UUID) AS 'SELECT id FROM users;';
+    /// ",
+    /// )?;
+    /// let returns_set = |name: &str| db.function(name).expect("Function should exist").returns_set();
+    /// assert!(!returns_set("one_value"));
+    /// assert!(returns_set("many_values"));
+    /// // A declared row shape is a set: PostgreSQL records it with
+    /// // `pg_proc.proretset = true`, exactly like `SETOF`.
+    /// assert!(returns_set("many_rows"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn returns_set(&self) -> bool;
 
     /// Returns the body of the function.
     ///
@@ -221,14 +258,18 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION add_one(x INT) RETURNS INTEGER AS 'SELECT x + 1;';
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT \"Hello, \" || name;';
     /// CREATE FUNCTION do_nothing() AS 'SELECT;';
+    /// CREATE FUNCTION identities() RETURNS SETOF UUID AS 'SELECT id FROM users;';
     /// ",
     /// )?;
     /// let add_one_fn = db.function("add_one").expect("Function should exist");
     /// let greet_fn = db.function("greet").expect("Function should exist");
     /// let do_nothing_fn = db.function("do_nothing").expect("Function should exist");
+    /// let identities_fn = db.function("identities").expect("Function should exist");
     /// assert_eq!(do_nothing_fn.normalized_return_type_name(&db), None);
     /// assert_eq!(add_one_fn.normalized_return_type_name(&db).as_deref(), Some("INT"));
     /// assert_eq!(greet_fn.normalized_return_type_name(&db).as_deref(), Some("TEXT"));
+    /// // Normalization keeps the SETOF marker.
+    /// assert_eq!(identities_fn.normalized_return_type_name(&db).as_deref(), Some("SETOF UUID"));
     /// # Ok(())
     /// # }
     /// ```
