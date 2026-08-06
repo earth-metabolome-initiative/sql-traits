@@ -381,6 +381,14 @@ pub enum Error {
         /// Name of the table qualified with it.
         table_name: String,
     },
+    #[error("No schema has been selected to create table `{table_name}` in.")]
+    /// Error indicating that a `CREATE TABLE` statement names no schema at a
+    /// point where the search path selects none either, because `SET
+    /// search_path TO ''` emptied it.
+    NoSchemaSelectedForTable {
+        /// Name of the table that named no schema.
+        table_name: String,
+    },
     #[error("Role `{role_name}` not found for policy `{policy_name}`.")]
     /// Error indicating that a `CREATE POLICY` statement applies to a role no
     /// `CREATE ROLE` in the input creates.

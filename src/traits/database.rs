@@ -1010,6 +1010,11 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// PostgreSQL falls back to once the entry naming the connected user is
     /// discounted.
     ///
+    /// The path also decides where a statement creating a permanent table
+    /// without a schema puts it: the first schema on the path that exists, or
+    /// no schema at all when that is the default one, which this model already
+    /// spells without the prefix.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -1020,6 +1025,12 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     ///     ParserDB::parse::<GenericDialect>("CREATE SCHEMA app; SET search_path TO app, public;")?;
     /// let path: Vec<_> = db.search_path().collect();
     /// assert_eq!(path, [("app", false), ("public", false)]);
+    ///
+    /// let created = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE SCHEMA app; SET search_path TO app; CREATE TABLE docs (id INT);",
+    /// )?;
+    /// assert_eq!(created.table(Some("app"), "docs").map(TableLike::table_name), Some("docs"));
+    /// assert!(created.table(None, "docs").is_none());
     /// # Ok(())
     /// # }
     /// ```
