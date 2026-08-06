@@ -478,11 +478,12 @@ mod tests {
     }
 
     #[test]
-    fn two_part_from_name_does_not_match_schemaless_table() {
+    fn two_part_public_name_matches_schemaless_table() {
         let db = schema_db();
-        // `public.users` is a two-part lookup; our `users` is schema-less, so it
-        // does not match and the relation is treated as opaque.
-        assert_eq!(source_name("SELECT id FROM public.users", &db), None);
+        // A schema-less table resides in `public`, so both spellings reach it.
+        assert_eq!(source_name("SELECT id FROM public.users", &db), Some("users".to_string()));
+        // Any other schema stays a miss, and the relation is treated as opaque.
+        assert_eq!(source_name("SELECT id FROM app.users", &db), None);
     }
 
     #[test]

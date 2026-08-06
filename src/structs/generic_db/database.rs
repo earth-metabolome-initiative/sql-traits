@@ -7,7 +7,7 @@ use crate::{
         ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike,
         TableLike, TriggerLike, UniqueIndexLike,
     },
-    utils::identifier_resolution::stored_identifier_matches_lookup,
+    utils::identifier_resolution::{identifiers_match, stored_identifier_matches_lookup},
 };
 
 impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> DatabaseLike
@@ -83,7 +83,14 @@ where
                         lookup_schema,
                     )
                 }
-                _ => false,
+                // A table stored without a schema resides in `public`, and one
+                // stored in `public` answers a lookup that names no schema.
+                (Some(lookup_schema), None) => {
+                    stored_identifier_matches_lookup("public", false, lookup_schema)
+                }
+                (None, Some(table_schema)) => {
+                    identifiers_match(table_schema, table.table_schema_is_quoted(), "public", false)
+                }
             }
         })
     }
