@@ -4,8 +4,8 @@
 use alloc::borrow::Cow;
 
 use sqlparser::ast::{
-    CreateFunction, CreateFunctionBody, Expr, FunctionReturnType, ObjectNamePart, Value,
-    ValueWithSpan,
+    CreateFunction, CreateFunctionBody, Expr, FunctionReturnType, FunctionSecurity, ObjectNamePart,
+    Value, ValueWithSpan,
 };
 
 use crate::{
@@ -77,5 +77,10 @@ impl FunctionLike for CreateFunction {
             }
             _ => None,
         }
+    }
+
+    #[inline]
+    fn security_mode(&self) -> FunctionSecurity {
+        self.security.clone().unwrap_or(FunctionSecurity::Invoker)
     }
 }

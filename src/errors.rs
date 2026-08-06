@@ -544,6 +544,23 @@ pub enum Error {
         /// Name of the policy that was not found.
         policy_name: String,
     },
+    #[error("Function `{function_name}` not found for ALTER FUNCTION statement.")]
+    /// Error indicating that an ALTER FUNCTION statement carrying a security
+    /// clause references a function that does not exist.
+    AlterFunctionNotFound {
+        /// Name of the function that was not found.
+        function_name: String,
+    },
+    #[error(
+        "Function name `{function_name}` is not unique: an `ALTER FUNCTION` naming no argument list cannot say which one to alter."
+    )]
+    /// Error indicating that an `ALTER FUNCTION` statement carrying a security
+    /// clause omits the argument list while the name it gives covers more than
+    /// one function.
+    AmbiguousAlterFunction {
+        /// The name covering more than one function.
+        function_name: String,
+    },
     #[error("Index `{index_name}` not found for ALTER INDEX statement.")]
     /// Error indicating that an ALTER INDEX statement references an index that
     /// does not exist.
