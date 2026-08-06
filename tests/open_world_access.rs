@@ -125,6 +125,49 @@ fn open_world_records_a_grant_on_an_absent_table() {
     ));
 }
 
+/// A grant whose unqualified target the closed world resolves through the
+/// search path is not a dangling reference.
+#[test]
+fn a_path_resolved_grant_target_is_not_reported() {
+    let sql = "CREATE SCHEMA app;
+         SET search_path TO app;
+         CREATE TABLE docs (id INT);
+         CREATE ROLE r;
+         GRANT SELECT ON docs TO r;";
+    ParserDB::parse::<PostgreSqlDialect>(sql).expect("the closed world accepts it");
+
+    let db = open_world().parse::<PostgreSqlDialect>(sql).expect("schema parses");
+    assert_eq!(db.unresolved_access_references().expect("targets are well formed").count(), 0);
+    db.validate_access_targets().expect("nothing is dangling");
+}
+
+/// The validator walks the final path, agreeing with `TableGrantLike::tables`:
+/// a grant stranded by a later path change is reported, because the accessors
+/// cannot resolve it either.
+#[test]
+fn a_grant_stranded_by_a_later_path_change_is_reported() {
+    let sql = "CREATE SCHEMA app;
+         CREATE SCHEMA zzz;
+         SET search_path TO app;
+         CREATE TABLE docs (id INT);
+         CREATE ROLE r;
+         GRANT SELECT ON docs TO r;
+         SET search_path TO zzz;";
+    ParserDB::parse::<PostgreSqlDialect>(sql).expect("the closed world resolved it in the moment");
+
+    let db = open_world().parse::<PostgreSqlDialect>(sql).expect("schema parses");
+    let grant = db.table_grants().next().expect("the grant is recorded");
+    assert_eq!(grant.tables(&db).count(), 0, "the accessors cannot resolve it either");
+
+    let unresolved: Vec<_> =
+        db.unresolved_access_references().expect("targets are well formed").collect();
+    assert!(
+        matches!(unresolved[..], [UnresolvedAccessReference::GrantTable(table)]
+            if table.to_string() == "docs"),
+        "got {unresolved:?}"
+    );
+}
+
 #[test]
 fn open_world_ignores_a_revoke_matching_no_recorded_grant() {
     let db = open_world()

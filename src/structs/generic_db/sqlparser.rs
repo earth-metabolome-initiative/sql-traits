@@ -2250,8 +2250,10 @@ impl ParserDB {
     /// under [`AccessResolution::OpenWorld`], or because a later statement
     /// moved an object out from under a grant that names it. The walk is
     /// order-insensitive, running against the fully ingested database, so a
-    /// grant preceding the `CREATE ROLE` it names resolves. Each distinct
-    /// reference is reported once, in a deterministic order.
+    /// grant preceding the `CREATE ROLE` it names resolves. An unqualified
+    /// table target resolves through the database's search path, the final
+    /// one the input set, which is the same walk the reading accessors apply.
+    /// Each distinct reference is reported once, in a deterministic order.
     ///
     /// # Errors
     ///
@@ -2310,7 +2312,7 @@ impl ParserDB {
 
             if let Some(GrantObjects::Tables(tables)) = &grant.objects {
                 for table_obj in tables {
-                    if self.resolve_table_object_name(table_obj)?.is_none() {
+                    if self.resolve_table_object_name_on_search_path(table_obj)?.is_none() {
                         unresolved.insert(UnresolvedAccessReference::GrantTable(table_obj));
                     }
                 }
@@ -4517,10 +4519,12 @@ impl ParserDB {
                     // it grants on.
                     let tables: Vec<&CreateTable> =
                         builder.tables().iter().map(|(table, _)| table.as_ref()).collect();
+                    let path: Vec<(&str, bool)> = builder.search_path().collect();
                     crate::impls::validate_granted_columns(
                         &grant.privileges,
                         grant.objects.as_ref(),
                         &tables,
+                        &path,
                     )?;
 
                     builder = builder.add_table_grant(Arc::new(grant.clone()), ());
@@ -4548,10 +4552,12 @@ impl ParserDB {
 
                     let tables: Vec<&CreateTable> =
                         builder.tables().iter().map(|(table, _)| table.as_ref()).collect();
+                    let path: Vec<(&str, bool)> = builder.search_path().collect();
                     crate::impls::validate_granted_columns(
                         &revoke.privileges,
                         revoke.objects.as_ref(),
                         &tables,
+                        &path,
                     )?;
 
                     // Applied to both canonical grant stores.

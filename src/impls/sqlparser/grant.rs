@@ -22,7 +22,8 @@ use crate::{
     utils::{
         identifier_resolution::{identifiers_match, is_public_pseudo_role},
         object_name::{
-            object_name_last_part, resolve_object_name, table_matches_object_name,
+            object_name_identifiers, object_name_last_part, resolve_object_name,
+            resolve_table_object_name_on_search_path_in_iter, table_matches_object_name,
             target_name_from_object_name,
         },
     },
@@ -258,16 +259,21 @@ fn action_columns(action: &Action) -> Option<&[Ident]> {
 /// The database requires the column on every table in the list, and names the
 /// one that lacks it, so this walks them in order and reports the same way.
 /// `ALL TABLES IN SCHEMA` carries no per-table column list to check and the
-/// database accepts a column list beside it, so that form is left alone.
+/// database accepts a column list beside it, so that form is left alone. A
+/// one-part or two-part name resolves through `search_path`, and a shape the
+/// strict splitter rejects keeps the lenient last-two-parts matching.
 ///
 /// # Errors
 ///
 /// Returns [`crate::errors::Error::ColumnNotFoundForGrant`] for the first
-/// column a listed table does not have.
+/// column a listed table does not have, and
+/// [`crate::errors::Error::IdentifierLookupError`] when a resolvable name
+/// matches more than one table.
 pub(crate) fn validate_granted_columns(
     privileges: &Privileges,
     objects: Option<&GrantObjects>,
     database_tables: &[&CreateTable],
+    search_path: &[(&str, bool)],
 ) -> Result<(), crate::errors::Error> {
     let Privileges::Actions(actions) = privileges else {
         return Ok(());
@@ -277,9 +283,17 @@ pub(crate) fn validate_granted_columns(
     };
 
     for name in names {
-        let Some(table) =
+        let resolved = if object_name_identifiers(name).is_ok() {
+            resolve_table_object_name_on_search_path_in_iter(
+                database_tables.iter().copied(),
+                name,
+                search_path.iter().copied(),
+            )
+            .map_err(crate::errors::Error::IdentifierLookupError)?
+        } else {
             database_tables.iter().copied().find(|table| table_matches_object_name(*table, name))
-        else {
+        };
+        let Some(table) = resolved else {
             // The table did not resolve, which the open world excuses and the
             // closed world has already refused, so there is nothing to check
             // the columns against.
