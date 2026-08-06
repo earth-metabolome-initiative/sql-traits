@@ -6,7 +6,10 @@ use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 use crate::{
     errors::LookupError,
     traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
-    utils::{identifier_resolution::normalize_identifier, normalize_postgres_type_cow},
+    utils::{
+        fingerprint_type_token::match_known_type, identifier_resolution::normalize_identifier,
+        normalize_postgres_type_cow,
+    },
 };
 
 /// A trait for types that can be treated as SQL columns.
@@ -280,7 +283,11 @@ pub trait ColumnLike:
         normalize_postgres_type_cow(self.data_type(database))
     }
 
-    /// Returns whether the column type is textual.
+    /// Returns whether the column type belongs to the string family.
+    ///
+    /// The family is the one the schema fingerprint records, so a type that
+    /// fingerprints as a string reads as textual here and the two cannot
+    /// drift apart.
     ///
     /// # Arguments
     ///
@@ -290,26 +297,28 @@ pub trait ColumnLike:
     /// # Example
     ///
     /// ```rust
-    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// #  fn main() -> Result<(), sql_traits::errors::Error> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE TABLE my_table (id INT, name TEXT, description VARCHAR);",
+    ///     "CREATE TABLE my_table (id INT, name TEXT, description VARCHAR, note CLOB);",
     /// )?;
     /// let table = db.table(None, "my_table").unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let description_column =
     ///     table.column("description", &db)?.expect("Column 'description' should exist");
+    /// let note_column = table.column("note", &db)?.expect("Column 'note' should exist");
     /// assert!(!id_column.is_textual(&db), "id column should not be textual");
     /// assert!(name_column.is_textual(&db), "name column should be textual");
     /// assert!(description_column.is_textual(&db), "description column should be textual");
+    /// assert!(note_column.is_textual(&db), "note (CLOB) column should be textual");
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
     fn is_textual(&self, database: &Self::DB) -> bool {
-        matches!(self.normalized_data_type(database).as_ref(), "TEXT" | "VARCHAR" | "CHAR")
+        match_known_type(self.normalized_data_type(database).as_ref()) == Some("STRING")
     }
 
     /// Returns whether the column is nullable.
@@ -1370,6 +1379,45 @@ mod tests {
                 <Arc<_> as ColumnLike>::column_doc(&col_arc, &db).expect("column_doc failed"),
                 None
             );
+        }
+    }
+
+    mod is_textual_tests {
+        use super::*;
+
+        fn make_db(sql: &str) -> ParserDB {
+            ParserDB::parse::<GenericDialect>(sql).expect("parse")
+        }
+
+        #[test]
+        fn textual_for_text_and_varchar() {
+            let db = make_db("CREATE TABLE t (a TEXT, b VARCHAR, c CHAR);");
+            let t = db.table(None, "t").unwrap();
+            for col_name in &["a", "b", "c"] {
+                let col = t.column(col_name, &db).unwrap().unwrap();
+                assert!(col.is_textual(&db), "{col_name} should be textual");
+            }
+        }
+
+        #[test]
+        fn textual_for_newly_classified_string_types() {
+            let db =
+                make_db("CREATE TABLE t (a TINYTEXT, b LONGTEXT, c CLOB, d NVARCHAR, e STRING);");
+            let t = db.table(None, "t").unwrap();
+            for col_name in &["a", "b", "c", "d", "e"] {
+                let col = t.column(col_name, &db).unwrap().unwrap();
+                assert!(col.is_textual(&db), "{col_name} should be textual");
+            }
+        }
+
+        #[test]
+        fn not_textual_for_int_bytea_interval() {
+            let db = make_db("CREATE TABLE t (a INT, b BYTEA, c INTERVAL);");
+            let t = db.table(None, "t").unwrap();
+            for col_name in &["a", "b", "c"] {
+                let col = t.column(col_name, &db).unwrap().unwrap();
+                assert!(!col.is_textual(&db), "{col_name} should not be textual");
+            }
         }
     }
 }

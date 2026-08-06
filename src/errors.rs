@@ -17,6 +17,14 @@ pub enum ObjectKind {
     CheckConstraint,
     /// A row level security policy.
     Policy,
+    /// A function declared by a `CREATE FUNCTION` statement.
+    Function,
+    /// A trigger declared by a `CREATE TRIGGER` statement.
+    Trigger,
+    /// A role declared by a `CREATE ROLE` statement.
+    Role,
+    /// A schema declared by a `CREATE SCHEMA` statement.
+    Schema,
 }
 
 impl core::fmt::Display for ObjectKind {
@@ -27,6 +35,10 @@ impl core::fmt::Display for ObjectKind {
             Self::UniqueIndex => "Unique index",
             Self::CheckConstraint => "Check constraint",
             Self::Policy => "Policy",
+            Self::Function => "Function",
+            Self::Trigger => "Trigger",
+            Self::Role => "Role",
+            Self::Schema => "Schema",
         })
     }
 }
@@ -616,6 +628,15 @@ pub enum Error {
     CyclicTableDependencies {
         /// Name of the database whose tables form a cycle.
         catalog_name: String,
+    },
+    #[error("A {object_kind} was declared with no name.")]
+    /// A `CREATE` statement declared an object with no name.
+    ///
+    /// The parser never produces an `ObjectName` with no parts. A caller
+    /// reaching this built the name by hand.
+    UnnamedObject {
+        /// Kind of object the statement tried to create.
+        object_kind: ObjectKind,
     },
 }
 

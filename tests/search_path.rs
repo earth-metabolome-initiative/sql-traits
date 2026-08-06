@@ -15,7 +15,7 @@
 #![allow(clippy::expect_used)]
 
 use sql_traits::{
-    errors::{Error, LookupError},
+    errors::{Error, LookupError, ObjectKind},
     prelude::*,
 };
 use sqlparser::{ast::Statement, dialect::PostgreSqlDialect, parser::Parser};
@@ -288,10 +288,14 @@ fn an_emptied_path_is_refused() {
     assert!(written.table(Some("app"), "docs").is_some());
 }
 
-/// The refusal reads the name of the table it refuses, and a caller assembling
-/// statements by hand rather than parsing them may hand over one with no name.
+/// A name with no parts has no SQL spelling: the dumbest thing a user can
+/// write, `CREATE TABLE "" (id INT)`, still yields one part carrying an empty
+/// identifier. Only Rust code assembling the tree by hand can produce zero
+/// parts, and the result names nothing, renders as nothing and resolves to
+/// nothing, so the model refuses it rather than recording an object that no
+/// later lookup could ever reach.
 #[test]
-fn a_node_with_no_name_is_left_where_it_is() {
+fn a_node_with_no_name_is_refused() {
     let mut statements = Parser::parse_sql(
         &PostgreSqlDialect {},
         "SET search_path TO nope; CREATE TABLE placeholder (id INT);",
@@ -308,8 +312,21 @@ fn a_node_with_no_name_is_left_where_it_is() {
         .expect("the second statement creates a table");
     create_table.name.0.clear();
 
-    let db = ParserDB::from_statements(statements, "db".to_string());
-    assert!(db.is_ok(), "a nameless node was placed rather than passed over: {db:?}");
+    let error = ParserDB::from_statements(statements, "db".to_string())
+        .expect_err("a nameless node is malformed rather than merely unusual");
+    assert!(
+        matches!(&error, Error::UnnamedObject { object_kind: ObjectKind::Table }),
+        "got {error:?}"
+    );
+}
+
+/// A quoted empty identifier is a name, not the absence of one, so it is
+/// recorded like any other awkward spelling.
+#[test]
+fn a_quoted_empty_name_is_still_a_name() {
+    let db = ParserDB::parse::<PostgreSqlDialect>(r#"CREATE TABLE "" (id INT);"#)
+        .expect("one part carrying an empty identifier is a name");
+    assert_eq!(db.tables().count(), 1);
 }
 
 /// Where a table lands follows the path at the moment it is created, so

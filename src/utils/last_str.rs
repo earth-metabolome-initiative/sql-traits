@@ -3,20 +3,15 @@
 
 use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 
-/// Returns a reference to the value at the last value in the provided
+/// Returns a reference to the value at the last part of the provided
 /// `ObjectName`.
 ///
 /// The result is a display name, not a lookup key: it drops any schema
 /// qualifier and the quoting of the identifier. Resolving a name against a
 /// database MUST go through `resolve_object_name` instead, which honours both.
 ///
-/// # Arguments
-///
-/// * `object_name` - The `ObjectName` to extract the last part from.
-///
-/// # Panics
-///
-/// * Panics if the `ObjectName` has no parts.
+/// An empty name returns an empty string. The parser never produces one, so a
+/// caller receiving `""` built the name by hand.
 ///
 /// # Examples
 ///
@@ -32,15 +27,33 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 /// let func_part = ObjectNamePartFunction { name: Ident::new("func"), args: vec![] };
 /// let object_name_func = ObjectName(vec![ObjectNamePart::Function(func_part)]);
 /// assert_eq!(last_str(&object_name_func), "func");
+///
+/// // An empty name returns an empty string.
+/// assert_eq!(last_str(&ObjectName(vec![])), "");
 /// ```
-#[allow(
-    clippy::expect_used,
-    reason = "sqlparser guarantees every ObjectName has at least one part"
-)]
 #[must_use]
 pub fn last_str(object_name: &ObjectName) -> &str {
-    match &object_name.0.last().expect("ObjectName has no parts") {
-        ObjectNamePart::Identifier(ident) => ident.value.as_str(),
-        ObjectNamePart::Function(ObjectNamePartFunction { name, .. }) => name.value.as_str(),
+    match object_name.0.last() {
+        None => "",
+        Some(ObjectNamePart::Identifier(ident)) => ident.value.as_str(),
+        Some(ObjectNamePart::Function(ObjectNamePartFunction { name, .. })) => name.value.as_str(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::ast::{Ident, ObjectName, ObjectNamePart};
+
+    use super::last_str;
+
+    #[test]
+    fn empty_name_returns_empty_str() {
+        assert_eq!(last_str(&ObjectName(vec![])), "");
+    }
+
+    #[test]
+    fn identifier_part_returns_value() {
+        let name = ObjectName(vec![ObjectNamePart::Identifier(Ident::new("foo"))]);
+        assert_eq!(last_str(&name), "foo");
     }
 }

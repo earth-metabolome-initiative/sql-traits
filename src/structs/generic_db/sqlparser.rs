@@ -604,6 +604,20 @@ fn object_name_last_identifier(object_name: &ObjectName) -> Option<&Ident> {
     }
 }
 
+/// Returns an error when an object name carries no parts.
+///
+/// The parser never produces an empty `ObjectName`, so a caller reaching this
+/// branch built the name by hand.
+fn require_named(
+    object_name: &ObjectName,
+    kind: crate::errors::ObjectKind,
+) -> Result<(), crate::errors::Error> {
+    if object_name.0.is_empty() {
+        return Err(crate::errors::Error::UnnamedObject { object_kind: kind });
+    }
+    Ok(())
+}
+
 fn resolve_schema_ident_in_iter<'a>(
     mut schemas: impl Iterator<Item = &'a Schema>,
     ident: &Ident,
@@ -3326,14 +3340,14 @@ impl ParserDB {
     /// Creates a new `ParserDB` from a vector of SQL statements and a catalog
     /// name.
     ///
+    /// A statement the model tracks nothing for is discarded rather than
+    /// refused, so a script carrying `VACUUM` or `START TRANSACTION` builds the
+    /// schema its other statements describe.
+    ///
     /// # Arguments
     ///
     /// * `statements` - A vector of SQL statements to parse.
     /// * `catalog_name` - The name of the database catalog.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an unsupported statement is encountered.
     ///
     /// # Errors
     ///
@@ -3493,6 +3507,7 @@ impl ParserDB {
                     // different arguments. A `CREATE OR REPLACE` replaces the
                     // stored node rather than appending a second one, which
                     // would leave the stale node answering every lookup.
+                    require_named(&create_function.name, crate::errors::ObjectKind::Function)?;
                     let existing = builder.functions().iter().position(|(existing, ())| {
                         function_signatures_match(
                             &existing.name,
@@ -3718,6 +3733,7 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateTrigger(create_trigger) => {
+                    require_named(&create_trigger.name, crate::errors::ObjectKind::Trigger)?;
                     let table_name = last_str(&create_trigger.table_name);
                     let table_exists =
                         builder.resolve_table_object_name(&create_trigger.table_name)?.is_some();
@@ -3992,6 +4008,9 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateIndex(create_index) => {
+                    if let Some(index_name) = create_index.name.as_ref() {
+                        require_named(index_name, crate::errors::ObjectKind::Index)?;
+                    }
                     let if_not_exists = create_index.if_not_exists;
                     let (index, metadata) = Self::process_create_index(create_index, &builder)?;
                     let resolved_table = index.table();
@@ -4336,6 +4355,7 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateTable(mut create_table) => {
+                    require_named(&create_table.name, crate::errors::ObjectKind::Table)?;
                     // Where the table lands is decided before the name is read,
                     // so `IF NOT EXISTS` compares the schema it truly creates
                     // in rather than the one the statement spelled.
@@ -4363,6 +4383,7 @@ impl ParserDB {
                     )?;
                 }
                 Statement::CreatePolicy(policy) => {
+                    require_named(&policy.table_name, crate::errors::ObjectKind::Table)?;
                     if options.access_resolution() == AccessResolution::ClosedWorld {
                         validate_policy_roles(
                             &builder,
@@ -4424,6 +4445,7 @@ impl ParserDB {
                     // access setting excuses a dump that omits role creation,
                     // and this statement is the creation.
                     for role_name in &create_role.names {
+                        require_named(role_name, crate::errors::ObjectKind::Role)?;
                         let Some(role_ident) = object_name_last_identifier(role_name) else {
                             continue;
                         };
@@ -4440,6 +4462,11 @@ impl ParserDB {
                     builder = builder.add_role(Arc::new(create_role), ());
                 }
                 Statement::CreateSchema { schema_name, if_not_exists, .. } => {
+                    if let SchemaName::Simple(name) | SchemaName::NamedAuthorization(name, _) =
+                        &schema_name
+                    {
+                        require_named(name, crate::errors::ObjectKind::Schema)?;
+                    }
                     let (name, quoted, authorization) = match &schema_name {
                         SchemaName::Simple(name) => {
                             let schema_ident = object_name_last_identifier(name);
@@ -5460,6 +5487,108 @@ mod tests {
                     conflicting_table
                 })) if table == "public.t" && conflicting_table == "t"
             ));
+        }
+    }
+
+    mod unnamed_object {
+        use sqlparser::{
+            ast::{ObjectName, SchemaName, Statement},
+            dialect::{GenericDialect, PostgreSqlDialect},
+            parser::Parser,
+        };
+
+        use super::*;
+        use crate::errors::Error;
+
+        fn empty_name() -> ObjectName {
+            ObjectName(vec![])
+        }
+
+        fn parse_generic(sql: &str) -> Statement {
+            Parser::parse_sql(&GenericDialect {}, sql).expect("parse")[0].clone()
+        }
+
+        fn parse_postgres(sql: &str) -> Statement {
+            Parser::parse_sql(&PostgreSqlDialect {}, sql).expect("parse")[0].clone()
+        }
+
+        fn apply(stmt: Statement) -> Result<ParserDB, Error> {
+            ParserDB::from_statements(vec![stmt], "cat".into())
+        }
+
+        #[test]
+        fn create_table_with_empty_name_returns_unnamed_object() {
+            let Statement::CreateTable(mut ct) = parse_generic("CREATE TABLE t (id INT);") else {
+                panic!("expected CreateTable")
+            };
+            ct.name = empty_name();
+            assert!(matches!(apply(Statement::CreateTable(ct)), Err(Error::UnnamedObject { .. })));
+        }
+
+        #[test]
+        fn create_function_with_empty_name_returns_unnamed_object() {
+            let Statement::CreateFunction(mut cf) =
+                parse_postgres("CREATE FUNCTION f() RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;")
+            else {
+                panic!("expected CreateFunction")
+            };
+            cf.name = empty_name();
+            assert!(matches!(
+                apply(Statement::CreateFunction(cf)),
+                Err(Error::UnnamedObject { .. })
+            ));
+        }
+
+        #[test]
+        fn create_trigger_with_empty_name_returns_unnamed_object() {
+            let Statement::CreateTrigger(mut ct) =
+                parse_postgres("CREATE TRIGGER tr BEFORE INSERT ON t EXECUTE FUNCTION f();")
+            else {
+                panic!("expected CreateTrigger")
+            };
+            ct.name = empty_name();
+            assert!(matches!(
+                apply(Statement::CreateTrigger(ct)),
+                Err(Error::UnnamedObject { .. })
+            ));
+        }
+
+        #[test]
+        fn create_policy_with_empty_table_name_returns_unnamed_object() {
+            let Statement::CreatePolicy(mut cp) = parse_postgres("CREATE POLICY pol ON t;") else {
+                panic!("expected CreatePolicy")
+            };
+            cp.table_name = empty_name();
+            assert!(matches!(apply(Statement::CreatePolicy(cp)), Err(Error::UnnamedObject { .. })));
+        }
+
+        #[test]
+        fn create_role_with_empty_name_returns_unnamed_object() {
+            let Statement::CreateRole(mut cr) = parse_postgres("CREATE ROLE r;") else {
+                panic!("expected CreateRole")
+            };
+            cr.names = vec![empty_name()];
+            assert!(matches!(apply(Statement::CreateRole(cr)), Err(Error::UnnamedObject { .. })));
+        }
+
+        #[test]
+        fn create_schema_with_empty_name_returns_unnamed_object() {
+            let mut stmt = parse_postgres("CREATE SCHEMA s;");
+            let Statement::CreateSchema { ref mut schema_name, .. } = stmt else {
+                panic!("expected CreateSchema")
+            };
+            *schema_name = SchemaName::Simple(empty_name());
+            assert!(matches!(apply(stmt), Err(Error::UnnamedObject { .. })));
+        }
+
+        #[test]
+        fn create_index_with_empty_name_returns_unnamed_object() {
+            let Statement::CreateIndex(mut ci) = parse_generic("CREATE INDEX idx ON t (id);")
+            else {
+                panic!("expected CreateIndex")
+            };
+            ci.name = Some(empty_name());
+            assert!(matches!(apply(Statement::CreateIndex(ci)), Err(Error::UnnamedObject { .. })));
         }
     }
 
