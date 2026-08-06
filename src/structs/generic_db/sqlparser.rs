@@ -1597,12 +1597,31 @@ fn target_tables_match(left: &ObjectName, right: &ObjectName) -> bool {
     }
 }
 
-/// Checks that a table qualified with a schema names one the input creates.
+/// Returns the schema the input creates by this name, if it creates one.
+fn declared_schema<'builder>(
+    builder: &'builder ParserDBBuilder,
+    name: &str,
+    quoted: bool,
+) -> Option<&'builder Schema> {
+    builder
+        .schemas()
+        .iter()
+        .map(|(schema, ())| schema.as_ref())
+        .find(|schema| identifiers_match(schema.name(), schema.is_quoted(), name, quoted))
+}
+
+/// Returns whether a schema by this name is one a table may be created in.
 ///
-/// The default schema is exempt, since no dump emits a statement creating it,
-/// which is the same allowance
-/// [`ParserDB::resolve_table_object_name_on_search_path`] makes when
-/// resolving a name against it.
+/// The default schema is exempt from being declared, since no dump emits a
+/// statement creating it, which is the same allowance
+/// [`ParserDB::resolve_table_object_name_on_search_path`] makes when resolving
+/// a name against it.
+fn schema_is_declared(builder: &ParserDBBuilder, name: &str, quoted: bool) -> bool {
+    identifiers_match(name, quoted, "public", false)
+        || declared_schema(builder, name, quoted).is_some()
+}
+
+/// Checks that a table qualified with a schema names one the input creates.
 fn validate_table_schema(
     builder: &ParserDBBuilder,
     create_table: &CreateTable,
@@ -1610,16 +1629,8 @@ fn validate_table_schema(
     let Some(schema_name) = create_table.table_schema() else {
         return Ok(());
     };
-    let quoted = create_table.table_schema_is_quoted();
 
-    if identifiers_match(schema_name, quoted, "public", false) {
-        return Ok(());
-    }
-
-    let declared = builder.schemas().iter().any(|(schema, ())| {
-        identifiers_match(schema.name(), schema.is_quoted(), schema_name, quoted)
-    });
-    if declared {
+    if schema_is_declared(builder, schema_name, create_table.table_schema_is_quoted()) {
         return Ok(());
     }
 
@@ -1627,6 +1638,81 @@ fn validate_table_schema(
         schema_name: schema_name.to_string(),
         table_name: create_table.table_name().to_string(),
     })
+}
+
+/// Records a permanent table created without a schema in the one the search
+/// path selects.
+///
+/// PostgreSQL creates in the first schema on the path that exists, so the walk
+/// passes an entry naming nothing and takes the next. An entry naming the
+/// default schema leaves the name bare, since this model already spells a table
+/// there without the prefix, which is why a bare name and a `public` one
+/// already collide.
+///
+/// A temporary table is left alone. The server puts one in a schema private to
+/// the session rather than on the path, so reading it as the path's would claim
+/// it collides with the permanent table of that name, which is the one thing a
+/// temporary table is guaranteed not to do.
+///
+/// # Errors
+///
+/// Returns [`SchemaNotFoundForTable`](crate::errors::Error::SchemaNotFoundForTable)
+/// when the path names only schemas the input never creates, the refusal a
+/// schema written out in full already gets, and
+/// [`NoSchemaSelectedForTable`](crate::errors::Error::NoSchemaSelectedForTable)
+/// when `SET search_path TO ''` left it naming none at all. A real server
+/// refuses both with one complaint, that no schema has been selected to create
+/// in, and each of these carries whichever name it can.
+fn qualify_on_search_path(
+    builder: &ParserDBBuilder,
+    create_table: &mut CreateTable,
+) -> Result<(), crate::errors::Error> {
+    // A node carrying no name part names nothing the path could place, and a
+    // caller assembling statements by hand rather than parsing them can hand
+    // one over.
+    if create_table.name.0.is_empty()
+        || create_table.temporary
+        || create_table.table_schema().is_some()
+    {
+        return Ok(());
+    }
+
+    // An entry spelled empty names no schema, so it is passed over like one
+    // naming a schema the input never creates.
+    let mut named = None;
+    for (entry, quoted) in builder.search_path().filter(|(entry, _)| !entry.is_empty()) {
+        if identifiers_match(entry, quoted, "public", false) {
+            return Ok(());
+        }
+
+        if let Some(schema) = declared_schema(builder, entry, quoted) {
+            // The catalog spelling wins over the one the path used, since the
+            // two only differ where quoting makes them the same name anyway.
+            let qualifier = if schema.is_quoted() {
+                Ident::with_quote('"', schema.name())
+            } else {
+                Ident::new(schema.name())
+            };
+            create_table.name.0.insert(0, ObjectNamePart::Identifier(qualifier));
+            return Ok(());
+        }
+
+        named.get_or_insert(entry);
+    }
+
+    match named {
+        Some(schema_name) => {
+            Err(crate::errors::Error::SchemaNotFoundForTable {
+                schema_name: schema_name.to_string(),
+                table_name: create_table.table_name().to_string(),
+            })
+        }
+        None => {
+            Err(crate::errors::Error::NoSchemaSelectedForTable {
+                table_name: create_table.table_name().to_string(),
+            })
+        }
+    }
 }
 
 /// Checks that a table declares no column name twice.
@@ -4231,7 +4317,12 @@ impl ParserDB {
                         }
                     }
                 }
-                Statement::CreateTable(create_table) => {
+                Statement::CreateTable(mut create_table) => {
+                    // Where the table lands is decided before the name is read,
+                    // so `IF NOT EXISTS` compares the schema it truly creates
+                    // in rather than the one the statement spelled.
+                    qualify_on_search_path(&builder, &mut create_table)?;
+
                     // `IF NOT EXISTS` skips the statement whole when anything
                     // in the relation pool of the schema already holds the
                     // name, an index as much as a table.
