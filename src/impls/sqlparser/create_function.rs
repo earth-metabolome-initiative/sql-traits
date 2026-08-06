@@ -1,11 +1,11 @@
 //! Implementation of the `FunctionLike` trait for sqlparser's `CreateFunction`
 //! type.
 
-use alloc::borrow::Cow;
+use alloc::{borrow::Cow, format};
 
 use sqlparser::ast::{
-    CreateFunction, CreateFunctionBody, Expr, FunctionReturnType, FunctionSecurity, ObjectNamePart,
-    Value, ValueWithSpan,
+    CreateFunction, CreateFunctionBody, DataType, Expr, FunctionReturnType, FunctionSecurity,
+    ObjectNamePart, Value, ValueWithSpan,
 };
 
 use crate::{
@@ -49,17 +49,31 @@ impl FunctionLike for CreateFunction {
 
     #[inline]
     fn return_type_name<'db>(&'db self, _database: &'db Self::DB) -> Option<Cow<'db, str>> {
-        // `FunctionReturnType` was introduced in sqlparser 0.62: `RETURNS T`
-        // and `RETURNS SETOF T` are distinct variants wrapping a `DataType`.
-        // The canonical type name discards the SETOF marker — semantics here
-        // match the pre-0.62 behavior where `return_type` was `Option<DataType>`.
         self.return_type.as_ref().map(|rt| {
             match rt {
-                FunctionReturnType::DataType(dt) | FunctionReturnType::SetOf(dt) => {
-                    normalize_sqlparser_type(dt)
+                FunctionReturnType::DataType(dt) => normalize_sqlparser_type(dt),
+                // The SETOF marker survives the way an array's `[]` does: whether
+                // the declaration names one value or a set of them is part of the
+                // answer.
+                FunctionReturnType::SetOf(dt) => {
+                    Cow::Owned(format!("SETOF {}", normalize_sqlparser_type(dt)))
                 }
             }
         })
+    }
+
+    #[inline]
+    fn returns_set(&self) -> bool {
+        match &self.return_type {
+            Some(FunctionReturnType::SetOf(_)) => true,
+            // A declared row shape is a set: PostgreSQL records `RETURNS
+            // TABLE (...)` with `pg_proc.proretset = true`, exactly like
+            // `SETOF`, and MSSQL's named-table return declares a table too.
+            Some(FunctionReturnType::DataType(dt)) => {
+                matches!(dt, DataType::Table(_) | DataType::NamedTable { .. })
+            }
+            None => false,
+        }
     }
 
     #[inline]
