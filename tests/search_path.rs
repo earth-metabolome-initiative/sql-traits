@@ -392,3 +392,101 @@ fn a_quoted_schema_keeps_its_case() {
     assert_eq!(docs.table_schema(), written_docs.table_schema());
     assert_eq!(docs.table_schema_is_quoted(), written_docs.table_schema_is_quoted());
 }
+
+/// The downstream finding: a table created bare under a path carrying `public`
+/// resides there, so a later path prefers an earlier schema deterministically
+/// rather than reporting an ambiguity.
+#[test]
+fn a_bare_table_yields_to_an_earlier_schema_on_the_path() {
+    let db = parse(
+        "CREATE SCHEMA aaa;
+         CREATE TABLE aaa.docs (id INT);
+         SET search_path TO public;
+         CREATE TABLE docs (id INT);
+         SET search_path TO aaa, public;
+         CREATE POLICY docs_sel ON docs FOR SELECT USING (true);",
+    );
+    let policy = db.policies().next().expect("the policy exists");
+    assert_eq!(policy.table(&db).expect("resolves").table_schema(), Some("aaa"));
+}
+
+/// With `public` ahead on the path, the bare-created table wins instead.
+#[test]
+fn public_first_on_the_path_wins_instead() {
+    let db = parse(
+        "CREATE SCHEMA aaa;
+         CREATE TABLE aaa.docs (id INT);
+         SET search_path TO public;
+         CREATE TABLE docs (id INT);
+         SET search_path TO public, aaa;
+         CREATE POLICY docs_sel ON docs FOR SELECT USING (true);",
+    );
+    let policy = db.policies().next().expect("the policy exists");
+    assert_eq!(policy.table(&db).expect("resolves").table_schema(), None);
+}
+
+/// A bare name and a `public` one are two spellings of one place, so a lookup
+/// reaches the table through either.
+#[test]
+fn the_default_schema_answers_both_spellings() {
+    let bare = parse("SET search_path TO public; CREATE TABLE docs (id INT);");
+    assert!(bare.table(Some("public"), "docs").is_some());
+    assert!(bare.table(None, "docs").is_some());
+
+    let written = parse("CREATE TABLE public.docs (id INT);");
+    assert!(written.table(Some("public"), "docs").is_some());
+    assert!(written.table(None, "docs").is_some());
+}
+
+/// A bare table resides in `public`, so a path omitting `public` cannot reach
+/// it, which is the refusal a real server gives.
+#[test]
+fn a_bare_table_is_off_a_path_omitting_public() {
+    let refused = ParserDB::parse::<PostgreSqlDialect>(
+        "CREATE SCHEMA app;
+         CREATE TABLE docs (id INT);
+         SET search_path TO app;
+         CREATE POLICY docs_sel ON docs USING (true);",
+    );
+    assert!(
+        matches!(refused, Err(Error::TableNotFoundForPolicy { ref table_name, .. }) if table_name == "docs"),
+        "got {refused:?}"
+    );
+}
+
+/// The server's own default path shape: `"$user"` names no created schema and
+/// is walked past, for creation and for resolution alike.
+#[test]
+fn the_user_entry_is_walked_past() {
+    let db = parse(
+        "SET search_path TO \"$user\", public;
+         CREATE TABLE docs (id INT);
+         CREATE POLICY docs_sel ON docs USING (true);",
+    );
+    let docs = db.table(Some("public"), "docs").expect("created in the default schema");
+    assert_eq!(docs.table_schema(), None, "stored in the bare spelling");
+    let policy = db.policies().next().expect("the policy exists");
+    assert!(core::ptr::eq(policy.table(&db).expect("resolves"), docs));
+}
+
+/// A statement may spell out the default schema a bare create left implicit.
+#[test]
+fn statements_may_qualify_the_default_schema() {
+    let db = parse(
+        "CREATE TABLE docs (id INT);
+         CREATE ROLE r;
+         GRANT SELECT ON public.docs TO r;
+         CREATE INDEX i ON public.docs (id);
+         CREATE POLICY p ON public.docs USING (true);",
+    );
+
+    let docs = db.table(None, "docs").expect("the table exists");
+    let policy = db.policies().next().expect("the policy exists");
+    assert!(core::ptr::eq(policy.table(&db).expect("resolves"), docs));
+
+    let index = db.indexes().next().expect("the index exists");
+    assert_eq!(IndexLike::table(index, &db).table_name(), "docs");
+
+    let grant = db.table_grants().next().expect("the grant exists");
+    assert_eq!(grant.tables(&db).count(), 1);
+}

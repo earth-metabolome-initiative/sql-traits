@@ -412,9 +412,9 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// * `schema` - Optional schema name of the table.
     /// * `table_name` - Name of the table.
     ///
-    /// # Panics
-    ///
-    /// Panics if the table is not found in the database.
+    /// A table stored without a schema resides in the default schema, so
+    /// `Some("public")` reaches it and `None` reaches a table stored in
+    /// `public`.
     ///
     /// # Example
     ///
@@ -427,6 +427,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// CREATE SCHEMA my_schema;
     /// CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);
+    /// CREATE TABLE public.audit (id INT);
     /// ",
     /// )?;
     /// let table_with_schema = db.table(Some("my_schema"), "my_table_with_schema").unwrap();
@@ -436,6 +437,10 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// let table_without_schema = db.table(None, "my_table").unwrap();
     /// assert_eq!(table_without_schema.table_name(), "my_table");
     /// assert_eq!(table_without_schema.table_schema(), None);
+    ///
+    /// // Either spelling of the default schema reaches both tables.
+    /// assert!(db.table(Some("public"), "my_table").is_some());
+    /// assert!(db.table(None, "audit").is_some());
     /// # Ok(())
     /// # }
     /// ```
@@ -474,9 +479,10 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
 
     /// Resolves a name a statement wrote into the table it denotes, applying
-    /// PostgreSQL's rules: an unqualified name is tried against a schema-less
-    /// table first, then against each schema on [`Self::search_path`] in order,
-    /// and quoting decides case sensitivity on both parts.
+    /// PostgreSQL's rules: an unqualified name resolves through the first
+    /// schema on [`Self::search_path`] holding it, a table stored without a
+    /// schema resides in the default schema `public`, and quoting decides case
+    /// sensitivity on both parts.
     ///
     /// This is the counterpart of the readers that hand back a target as
     /// written, such as [`PolicyLike::target_table_name`]. Unlike

@@ -10,7 +10,6 @@
 
 use alloc::{
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 
@@ -78,7 +77,9 @@ pub(crate) fn target_name_from_object_name(object_name: &ObjectName) -> Option<T
 /// schema. Leading parts beyond those are ignored.
 ///
 /// This is the matching style used by grant resolution, where object names may
-/// carry catalog-qualified prefixes.
+/// carry catalog-qualified prefixes. A table stored without a schema resides in
+/// the default schema, so a `public` qualifier reaches it and a table stored in
+/// `public` answers an unqualified name.
 pub(crate) fn table_matches_object_name<T: TableLike>(table: &T, object_name: &ObjectName) -> bool {
     let Some((table_lookup_name, table_lookup_quoted)) = object_name_last_part(object_name) else {
         return false;
@@ -103,7 +104,12 @@ pub(crate) fn table_matches_object_name<T: TableLike>(table: &T, object_name: &O
                 schema_lookup_quoted,
             )
         }
-        _ => false,
+        (Some((schema_lookup, schema_lookup_quoted)), None) => {
+            identifiers_match("public", false, schema_lookup, schema_lookup_quoted)
+        }
+        (None, Some(table_schema)) => {
+            identifiers_match(table_schema, table.table_schema_is_quoted(), "public", false)
+        }
     }
 }
 
@@ -179,8 +185,8 @@ fn target_name_of_idents<'a>(
     }
 }
 
-/// Returns whether a table matches a written target name using strict matching:
-/// an unqualified target matches only schema-less tables.
+/// Returns whether a table matches a written target name, reading a table
+/// stored without a schema as residing in the default schema `public`.
 pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: TargetName<'_>) -> bool {
     if !identifiers_match(
         table.table_name(),
@@ -201,7 +207,12 @@ pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: TargetName<'
                 target.schema_is_quoted(),
             )
         }
-        _ => false,
+        (Some(target_schema), None) => {
+            identifiers_match("public", false, target_schema, target.schema_is_quoted())
+        }
+        (None, Some(table_schema)) => {
+            identifiers_match(table_schema, table.table_schema_is_quoted(), "public", false)
+        }
     }
 }
 
@@ -270,15 +281,16 @@ pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
 /// Resolves a written target name, trying each schema on `search_path` in turn
 /// for an unqualified name.
 ///
-/// A schema-less table is matched first, since this crate models one and
-/// PostgreSQL does not, and the path is then walked in order and the first
-/// schema holding a match wins, which is what the database does.
+/// The path is walked in order and the first schema holding a match wins,
+/// which is what the database does. A table stored without a schema resides in
+/// the default schema, so it is found where `public` sits on the path rather
+/// than ahead of it.
 ///
 /// # Errors
 ///
 /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches more
-/// than one table, including a schema-less table and a table of the same name
-/// on the path.
+/// than one table in the schema that wins, reported under the name the
+/// statement wrote.
 pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
     target: TargetName<'_>,
@@ -289,11 +301,6 @@ pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
     }
 
     let table_refs: Vec<&T> = tables.collect();
-    let unqualified_candidates: Vec<&T> =
-        table_refs.iter().copied().filter(|table| table_matches_target(*table, target)).collect();
-    let unqualified = resolve_target_from_candidates(target, &unqualified_candidates)?;
-
-    let mut on_path = None;
     for (schema_name, schema_quoted) in search_path {
         let qualified = target.with_schema(schema_name, schema_quoted);
         let candidates: Vec<&T> = table_refs
@@ -301,31 +308,14 @@ pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
             .copied()
             .filter(|table| table_matches_target(*table, qualified))
             .collect();
-        if candidates.is_empty() {
-            continue;
+        if !candidates.is_empty() {
+            // Reported under the written name: the entry qualifier is
+            // resolution machinery, not something the statement spelled.
+            return resolve_target_from_candidates(target, &candidates);
         }
-        on_path = resolve_target_from_candidates(qualified, &candidates)?;
-        break;
     }
 
-    match (unqualified, on_path) {
-        (Some(unqualified), Some(on_path)) => {
-            if core::ptr::eq(unqualified, on_path) {
-                Ok(Some(unqualified))
-            } else {
-                let mut candidates =
-                    vec![render_table_candidate(unqualified), render_table_candidate(on_path)];
-                candidates.sort_unstable();
-                candidates.dedup();
-                Err(LookupError::AmbiguousTableLookup {
-                    object_name: target.to_string(),
-                    candidates,
-                })
-            }
-        }
-        (Some(table), None) | (None, Some(table)) => Ok(Some(table)),
-        (None, None) => Ok(None),
-    }
+    Ok(None)
 }
 
 /// Resolves a table from a one-part or two-part object name, honouring
@@ -447,6 +437,7 @@ mod tests {
             create_table("CREATE TABLE s.scoped (id INT)"),
             create_table("CREATE TABLE things (id INT)"),
             create_table("CREATE TABLE public.things (id INT)"),
+            create_table("CREATE TABLE s.users (id INT)"),
             create_table("CREATE TABLE public.only_pub (id INT)"),
             create_table(r#"CREATE TABLE "Bar" (id INT)"#),
             create_table(r#"CREATE TABLE "S"."T" (id INT)"#),
@@ -490,8 +481,11 @@ mod tests {
         assert!(!table_matches_object_name(users, &obj(&[("orders", false)])));
         assert!(table_matches_object_name(users, &obj(&[("users", false)])));
         assert!(table_matches_object_name(scoped, &obj(&[("s", false), ("scoped", false)])));
-        // Schema asymmetry: qualified lookup against a schema-less table.
-        assert!(!table_matches_object_name(users, &obj(&[("s", false), ("users", false)])));
+        // The two spellings of the default schema are one place.
+        assert!(table_matches_object_name(users, &obj(&[("public", false), ("users", false)])));
+        assert!(table_matches_object_name(find(&tables, "only_pub"), &obj(&[("only_pub", false)])));
+        // A non-public qualifier misses a schema-less table.
+        assert!(!table_matches_object_name(users, &obj(&[("nope", false), ("users", false)])));
     }
 
     #[test]
@@ -527,8 +521,21 @@ mod tests {
             scoped,
             TargetName::new("scoped", false).with_schema("s", false)
         ));
-        // Asymmetry: unqualified lookup against a schema-qualified table.
+        // The two spellings of the default schema are one place.
+        assert!(table_matches_target(
+            users,
+            TargetName::new("users", false).with_schema("public", false)
+        ));
+        assert!(table_matches_target(
+            find(&tables, "only_pub"),
+            TargetName::new("only_pub", false)
+        ));
+        // A table in another schema stays unreachable without its qualifier.
         assert!(!table_matches_target(scoped, TargetName::new("scoped", false)));
+        assert!(!table_matches_target(
+            users,
+            TargetName::new("users", false).with_schema("s", false)
+        ));
     }
 
     #[test]
@@ -597,15 +604,46 @@ mod tests {
         .expect("matches");
         assert_eq!(only_pub.table_name(), "only_pub");
 
-        // `things` exists both schema-less and in `public`: ambiguous.
+        // `things` exists both schema-less and in `public`, two tables claiming
+        // one place: ambiguous, reported under the written name.
         assert!(matches!(
             resolve_table_object_name_on_search_path_in_iter(
                 tables.iter(),
                 &obj(&[("things", false)]),
                 default_path(),
             ),
-            Err(LookupError::AmbiguousTableLookup { .. })
+            Err(LookupError::AmbiguousTableLookup { ref object_name, .. }) if object_name == "things"
         ));
+
+        // The first schema on the path holding the name wins.
+        let on_s_first = resolve_table_object_name_on_search_path_in_iter(
+            tables.iter(),
+            &obj(&[("users", false)]),
+            [("s", false), ("public", false)].into_iter(),
+        )
+        .expect("resolves")
+        .expect("matches");
+        assert_eq!(on_s_first.table_schema(), Some("s"));
+
+        let on_public_first = resolve_table_object_name_on_search_path_in_iter(
+            tables.iter(),
+            &obj(&[("users", false)]),
+            [("public", false), ("s", false)].into_iter(),
+        )
+        .expect("resolves")
+        .expect("matches");
+        assert_eq!(on_public_first.table_schema(), None, "the schema-less spelling is public's");
+
+        // A schema-less table is unreachable when `public` is off the path.
+        assert!(
+            resolve_table_object_name_on_search_path_in_iter(
+                tables.iter(),
+                &obj(&[("only_pub", false)]),
+                core::iter::once(("s", false)),
+            )
+            .unwrap()
+            .is_none()
+        );
 
         // No match anywhere.
         assert!(

@@ -2197,9 +2197,10 @@ impl ParserDB {
 
     /// Resolves a table from a one-part or two-part SQL object name.
     ///
-    /// For one-part names, only schema-less tables are considered.
-    /// For two-part names, the first part is treated as schema and the second
-    /// part as table.
+    /// A one-part name reaches a schema-less table or one stored in the
+    /// default schema `public`, two spellings of one place. For two-part
+    /// names, the first part is treated as schema and the second part as
+    /// table.
     ///
     /// # Errors
     ///
@@ -2218,8 +2219,9 @@ impl ParserDB {
     /// Resolves a table from an SQL object name, trying each schema on the
     /// database's search path for an unqualified name.
     ///
-    /// A schema-less table is matched first, then the path is walked in order
-    /// and the first schema holding a match wins.
+    /// The path is walked in order and the first schema holding a match wins.
+    /// A table stored without a schema is found where `public` sits on the
+    /// path.
     ///
     /// # Errors
     ///
@@ -5396,11 +5398,11 @@ mod tests {
                 "#,
             );
 
-            assert!(
-                db.resolve_table_object_name(&object_name(&[("foo", false)]))
-                    .expect("Lookup should succeed")
-                    .is_none()
-            );
+            let strict = db
+                .resolve_table_object_name(&object_name(&[("foo", false)]))
+                .expect("Lookup should succeed")
+                .expect("a bare name reaches the table stored in public");
+            assert_eq!(strict.table_schema(), Some("public"));
 
             let resolved = db
                 .resolve_table_object_name_on_search_path(&object_name(&[("foo", false)]))
