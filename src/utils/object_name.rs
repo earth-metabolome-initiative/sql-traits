@@ -146,60 +146,69 @@ pub(crate) fn object_name_identifiers(
     if idents.len() == 1 { Ok((None, idents[0])) } else { Ok((Some(idents[0]), idents[1])) }
 }
 
-/// Returns whether a table matches the (optional schema, table) identifiers
-/// using strict matching: a one-part lookup matches only schema-less tables.
-pub(crate) fn table_matches_lookup_idents<T: TableLike>(
-    table: &T,
-    schema_ident: Option<&Ident>,
-    table_ident: &Ident,
-) -> bool {
+/// Reads an object name as a [`TargetName`], treating a name with no parts as
+/// unreachable the way [`last_str`](crate::utils::last_str()) does.
+#[expect(
+    clippy::expect_used,
+    reason = "sqlparser guarantees every ObjectName has at least one part"
+)]
+pub(crate) fn target_name_of_object_name(object_name: &ObjectName) -> TargetName<'_> {
+    target_name_from_object_name(object_name).expect("ObjectName has no parts")
+}
+
+/// Reads a table's own stored name as a [`TargetName`].
+pub(crate) fn target_name_of_table<T: TableLike>(table: &T) -> TargetName<'_> {
+    let name = TargetName::new(table.table_name(), table.table_name_is_quoted());
+    match table.table_schema() {
+        Some(schema) => name.with_schema(schema, table.table_schema_is_quoted()),
+        None => name,
+    }
+}
+
+/// Builds a [`TargetName`] from the identifiers a strict table lookup yields.
+fn target_name_of_idents<'a>(
+    schema_ident: Option<&'a Ident>,
+    table_ident: &'a Ident,
+) -> TargetName<'a> {
+    let name = TargetName::new(table_ident.value.as_str(), table_ident.quote_style.is_some());
+    match schema_ident {
+        Some(schema_ident) => {
+            name.with_schema(schema_ident.value.as_str(), schema_ident.quote_style.is_some())
+        }
+        None => name,
+    }
+}
+
+/// Returns whether a table matches a written target name using strict matching:
+/// an unqualified target matches only schema-less tables.
+pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: TargetName<'_>) -> bool {
     if !identifiers_match(
         table.table_name(),
         table.table_name_is_quoted(),
-        table_ident.value.as_str(),
-        table_ident.quote_style.is_some(),
+        target.name(),
+        target.name_is_quoted(),
     ) {
         return false;
     }
 
-    match (schema_ident, table.table_schema()) {
+    match (target.schema(), table.table_schema()) {
         (None, None) => true,
-        (Some(schema_ident), Some(table_schema)) => {
+        (Some(target_schema), Some(table_schema)) => {
             identifiers_match(
                 table_schema,
                 table.table_schema_is_quoted(),
-                schema_ident.value.as_str(),
-                schema_ident.quote_style.is_some(),
+                target_schema,
+                target.schema_is_quoted(),
             )
         }
         _ => false,
     }
 }
 
-fn quoted_identifier(value: &str) -> String {
-    alloc::format!("\"{}\"", value.replace('\"', "\"\""))
-}
-
 /// Renders a table for inclusion in an ambiguity error, quoting parts that were
 /// originally quoted.
 pub(crate) fn render_table_candidate<T: TableLike>(table: &T) -> String {
-    let table_name = if table.table_name_is_quoted() {
-        quoted_identifier(table.table_name())
-    } else {
-        table.table_name().to_string()
-    };
-
-    match table.table_schema() {
-        Some(schema_name) => {
-            let schema_name = if table.table_schema_is_quoted() {
-                quoted_identifier(schema_name)
-            } else {
-                schema_name.to_string()
-            };
-            alloc::format!("{schema_name}.{table_name}")
-        }
-        None => table_name,
-    }
+    target_name_of_table(table).to_string()
 }
 
 /// Resolves a single table from a list of candidate matches.
@@ -208,8 +217,8 @@ pub(crate) fn render_table_candidate<T: TableLike>(table: &T) -> String {
 ///
 /// Returns [`LookupError::AmbiguousTableLookup`] when more than one candidate
 /// matches.
-pub(crate) fn resolve_table_from_candidates<'a, T: TableLike>(
-    object_name: &ObjectName,
+pub(crate) fn resolve_target_from_candidates<'a, T: TableLike>(
+    target: TargetName<'_>,
     candidates: &[&'a T],
 ) -> Result<Option<&'a T>, LookupError> {
     match candidates {
@@ -221,11 +230,26 @@ pub(crate) fn resolve_table_from_candidates<'a, T: TableLike>(
             rendered.sort_unstable();
             rendered.dedup();
             Err(LookupError::AmbiguousTableLookup {
-                object_name: object_name.to_string(),
+                object_name: target.to_string(),
                 candidates: rendered,
             })
         }
     }
+}
+
+/// Resolves a written target name against an iterator of tables, without
+/// consulting any search path.
+///
+/// # Errors
+///
+/// Returns [`LookupError::AmbiguousTableLookup`] when the name matches more
+/// than one table.
+pub(crate) fn resolve_target_in_iter<'a, T: TableLike>(
+    tables: impl Iterator<Item = &'a T>,
+    target: TargetName<'_>,
+) -> Result<Option<&'a T>, LookupError> {
+    let candidates: Vec<&T> = tables.filter(|table| table_matches_target(*table, target)).collect();
+    resolve_target_from_candidates(target, &candidates)
 }
 
 /// Resolves a table from a one-part or two-part object name against an iterator
@@ -240,14 +264,11 @@ pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
     object_name: &ObjectName,
 ) -> Result<Option<&'a T>, LookupError> {
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-    let candidates: Vec<&T> = tables
-        .filter(|table| table_matches_lookup_idents(*table, schema_ident, table_ident))
-        .collect();
-    resolve_table_from_candidates(object_name, &candidates)
+    resolve_target_in_iter(tables, target_name_of_idents(schema_ident, table_ident))
 }
 
-/// Resolves a table from an object name, trying each schema on `search_path`
-/// in turn for an unqualified name.
+/// Resolves a written target name, trying each schema on `search_path` in turn
+/// for an unqualified name.
 ///
 /// A schema-less table is matched first, since this crate models one and
 /// PostgreSQL does not, and the path is then walked in order and the first
@@ -255,57 +276,35 @@ pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
 ///
 /// # Errors
 ///
-/// Returns an error when the object name is malformed for table lookup, or when
-/// the lookup is ambiguous, including a schema-less table and a table of the
-/// same name on the path.
-pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, T: TableLike>(
+/// Returns [`LookupError::AmbiguousTableLookup`] when the name matches more
+/// than one table, including a schema-less table and a table of the same name
+/// on the path.
+pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
-    object_name: &ObjectName,
-    search_path: &[(String, bool)],
+    target: TargetName<'_>,
+    search_path: impl Iterator<Item = (&'path str, bool)>,
 ) -> Result<Option<&'a T>, LookupError> {
-    let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-    let table_refs: Vec<&T> = tables.collect();
-
-    if schema_ident.is_some() {
-        return resolve_table_object_name_in_iter(table_refs.into_iter(), object_name);
+    if target.schema().is_some() {
+        return resolve_target_in_iter(tables, target);
     }
 
-    let unqualified_candidates: Vec<&T> = table_refs
-        .iter()
-        .copied()
-        .filter(|table| table_matches_lookup_idents(*table, None, table_ident))
-        .collect();
-    let unqualified = resolve_table_from_candidates(object_name, &unqualified_candidates)?;
+    let table_refs: Vec<&T> = tables.collect();
+    let unqualified_candidates: Vec<&T> =
+        table_refs.iter().copied().filter(|table| table_matches_target(*table, target)).collect();
+    let unqualified = resolve_target_from_candidates(target, &unqualified_candidates)?;
 
     let mut on_path = None;
     for (schema_name, schema_quoted) in search_path {
+        let qualified = target.with_schema(schema_name, schema_quoted);
         let candidates: Vec<&T> = table_refs
             .iter()
             .copied()
-            .filter(|table| {
-                table.table_schema().is_some_and(|table_schema| {
-                    identifiers_match(
-                        table_schema,
-                        table.table_schema_is_quoted(),
-                        schema_name,
-                        *schema_quoted,
-                    )
-                }) && identifiers_match(
-                    table.table_name(),
-                    table.table_name_is_quoted(),
-                    table_ident.value.as_str(),
-                    table_ident.quote_style.is_some(),
-                )
-            })
+            .filter(|table| table_matches_target(*table, qualified))
             .collect();
         if candidates.is_empty() {
             continue;
         }
-        let lookup_name = ObjectName(vec![
-            ObjectNamePart::Identifier(Ident::new(schema_name.clone())),
-            ObjectNamePart::Identifier(table_ident.clone()),
-        ]);
-        on_path = resolve_table_from_candidates(&lookup_name, &candidates)?;
+        on_path = resolve_target_from_candidates(qualified, &candidates)?;
         break;
     }
 
@@ -319,7 +318,7 @@ pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, T: TableLike>
                 candidates.sort_unstable();
                 candidates.dedup();
                 Err(LookupError::AmbiguousTableLookup {
-                    object_name: object_name.to_string(),
+                    object_name: target.to_string(),
                     candidates,
                 })
             }
@@ -327,6 +326,26 @@ pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, T: TableLike>
         (Some(table), None) | (None, Some(table)) => Ok(Some(table)),
         (None, None) => Ok(None),
     }
+}
+
+/// Resolves a table from a one-part or two-part object name, honouring
+/// `search_path` for an unqualified name.
+///
+/// # Errors
+///
+/// Returns an error when the object name is malformed for table lookup, or when
+/// the lookup is ambiguous.
+pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, 'path, T: TableLike>(
+    tables: impl Iterator<Item = &'a T>,
+    object_name: &ObjectName,
+    search_path: impl Iterator<Item = (&'path str, bool)>,
+) -> Result<Option<&'a T>, LookupError> {
+    let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
+    resolve_target_on_search_path_in_iter(
+        tables,
+        target_name_of_idents(schema_ident, table_ident),
+        search_path,
+    )
 }
 
 /// Resolves a one-part or two-part object name to a base table of `database`.
@@ -344,11 +363,10 @@ pub(crate) fn resolve_object_name<'db, DB: DatabaseLike>(
     object_name: &ObjectName,
     database: &'db DB,
 ) -> Result<Option<&'db DB::Table>, LookupError> {
-    // The same path the read resolved against, so an accessor never refuses a
-    // target the read accepted.
-    let search_path: Vec<(String, bool)> =
-        database.search_path().map(|(schema, quoted)| (schema.to_string(), quoted)).collect();
-    resolve_table_object_name_on_search_path_in_iter(database.tables(), object_name, &search_path)
+    let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
+    // Through the trait method, so a catalog overriding it answers every
+    // accessor the same way it answers a direct lookup.
+    database.resolve_target_table(target_name_of_idents(schema_ident, table_ident))
 }
 
 /// Resolves an object name that is required to denote an existing base table of
@@ -381,11 +399,11 @@ mod tests {
 
     use super::{
         object_name_identifiers, object_name_last_part, render_table_candidate,
-        resolve_object_name, resolve_table_from_candidates, resolve_table_object_name_in_iter,
-        resolve_table_object_name_on_search_path_in_iter, schema_from_object_name,
-        table_matches_lookup_idents, table_matches_object_name,
+        resolve_object_name, resolve_table_object_name_in_iter,
+        resolve_table_object_name_on_search_path_in_iter, resolve_target_from_candidates,
+        schema_from_object_name, table_matches_object_name, table_matches_target,
     };
-    use crate::{errors::LookupError, prelude::ParserDB, traits::TableLike};
+    use crate::{errors::LookupError, prelude::ParserDB, structs::TargetName, traits::TableLike};
 
     fn ident(value: &str, quoted: bool) -> Ident {
         if quoted { Ident::with_quote('"', value) } else { Ident::new(value) }
@@ -393,8 +411,8 @@ mod tests {
 
     /// The path a database starts with, which is what these helpers used to
     /// hardcode.
-    fn default_path() -> Vec<(String, bool)> {
-        vec![("public".to_string(), false)]
+    fn default_path() -> impl Iterator<Item = (&'static str, bool)> {
+        core::iter::once(("public", false))
     }
 
     /// Builds an `ObjectName` from `(value, quoted)` identifier parts.
@@ -498,20 +516,19 @@ mod tests {
     }
 
     #[test]
-    fn table_matches_lookup_idents_cases() {
+    fn table_matches_target_cases() {
         let tables = fixtures();
         let users = find(&tables, "users");
         let scoped = find(&tables, "scoped");
 
-        assert!(table_matches_lookup_idents(users, None, &ident("users", false)));
-        assert!(!table_matches_lookup_idents(users, None, &ident("orders", false)));
-        assert!(table_matches_lookup_idents(
+        assert!(table_matches_target(users, TargetName::new("users", false)));
+        assert!(!table_matches_target(users, TargetName::new("orders", false)));
+        assert!(table_matches_target(
             scoped,
-            Some(&ident("s", false)),
-            &ident("scoped", false)
+            TargetName::new("scoped", false).with_schema("s", false)
         ));
         // Asymmetry: unqualified lookup against a schema-qualified table.
-        assert!(!table_matches_lookup_idents(scoped, None, &ident("scoped", false)));
+        assert!(!table_matches_target(scoped, TargetName::new("scoped", false)));
     }
 
     #[test]
@@ -524,20 +541,17 @@ mod tests {
     }
 
     #[test]
-    fn resolve_table_from_candidates_cases() {
+    fn resolve_target_from_candidates_cases() {
         let tables = fixtures();
         let users = find(&tables, "users");
         let scoped = find(&tables, "scoped");
+        let target = TargetName::new("users", false);
 
         let empty: [&CreateTable; 0] = [];
-        assert!(
-            resolve_table_from_candidates(&obj(&[("users", false)]), &empty).unwrap().is_none()
-        );
-        assert!(
-            resolve_table_from_candidates(&obj(&[("users", false)]), &[users]).unwrap().is_some()
-        );
+        assert!(resolve_target_from_candidates(target, &empty).unwrap().is_none());
+        assert!(resolve_target_from_candidates(target, &[users]).unwrap().is_some());
         assert!(matches!(
-            resolve_table_from_candidates(&obj(&[("users", false)]), &[users, scoped]),
+            resolve_target_from_candidates(target, &[users, scoped]),
             Err(LookupError::AmbiguousTableLookup { .. })
         ));
     }
@@ -567,7 +581,7 @@ mod tests {
         let scoped = resolve_table_object_name_on_search_path_in_iter(
             tables.iter(),
             &obj(&[("s", false), ("scoped", false)]),
-            &default_path(),
+            default_path(),
         )
         .expect("resolves")
         .expect("matches");
@@ -577,7 +591,7 @@ mod tests {
         let only_pub = resolve_table_object_name_on_search_path_in_iter(
             tables.iter(),
             &obj(&[("only_pub", false)]),
-            &default_path(),
+            default_path(),
         )
         .expect("resolves")
         .expect("matches");
@@ -588,7 +602,7 @@ mod tests {
             resolve_table_object_name_on_search_path_in_iter(
                 tables.iter(),
                 &obj(&[("things", false)]),
-                &default_path(),
+                default_path(),
             ),
             Err(LookupError::AmbiguousTableLookup { .. })
         ));
@@ -598,7 +612,7 @@ mod tests {
             resolve_table_object_name_on_search_path_in_iter(
                 tables.iter(),
                 &obj(&[("absent", false)]),
-                &default_path(),
+                default_path(),
             )
             .unwrap()
             .is_none()

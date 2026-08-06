@@ -11,12 +11,16 @@ use geometric_traits::{
 
 use crate::{
     errors::{Error, LookupError},
+    structs::TargetName,
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
         TriggerLike, UniqueIndexLike,
     },
-    utils::identifier_resolution::stored_identifier_matches_lookup,
+    utils::{
+        identifier_resolution::stored_identifier_matches_lookup,
+        object_name::resolve_target_on_search_path_in_iter,
+    },
 };
 
 /// A trait for types that can be treated as SQL databases.
@@ -463,11 +467,55 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # }
     /// ```
     ///
-    /// For SQL AST-aware lookup, use
-    /// [`ParserDB::resolve_table_object_name`](crate::structs::ParserDB::resolve_table_object_name)
-    /// or
+    /// To resolve a name a statement wrote, honouring the search path and
+    /// reporting ambiguity, use [`Self::resolve_target_table`]. To resolve a
+    /// parser node, use
     /// [`ParserDB::resolve_table_object_name_on_search_path`](crate::structs::ParserDB::resolve_table_object_name_on_search_path).
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
+
+    /// Resolves a name a statement wrote into the table it denotes, applying
+    /// PostgreSQL's rules: an unqualified name is tried against a schema-less
+    /// table first, then against each schema on [`Self::search_path`] in order,
+    /// and quoting decides case sensitivity on both parts.
+    ///
+    /// This is the counterpart of the readers that hand back a target as
+    /// written, such as [`PolicyLike::target_table_name`]. Unlike
+    /// [`Self::table`], which matches a single spelling exactly, this walks the
+    /// search path and reports an ambiguous name rather than picking a winner.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches more
+    /// than one table. A name matching none is `Ok(None)`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE SCHEMA app;
+    /// SET search_path TO app;
+    /// CREATE TABLE app.docs (id INT);
+    /// CREATE POLICY docs_policy ON docs USING (true);
+    /// ",
+    /// )?;
+    /// let policy = db.policies().next().unwrap();
+    /// // The policy wrote no qualifier, and the search path carries it into `app`.
+    /// let table = db.resolve_target_table(policy.target_table_name())?.unwrap();
+    /// assert_eq!(table.table_schema(), Some("app"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn resolve_target_table(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::Table>, LookupError> {
+        resolve_target_on_search_path_in_iter(self.tables(), target, self.search_path())
+    }
 
     /// Returns the table ID for the given table object according to its
     /// position in the database's table iterator.

@@ -110,7 +110,7 @@ fn a_table_constraint_foreign_key_follows_the_rename() {
     let child = database.table(None, "child").expect("child was created");
     let foreign_key =
         child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
-    assert_eq!(foreign_key.referenced_table_name(), "parent2");
+    assert_eq!(foreign_key.referenced_table_name().name(), "parent2");
 }
 
 /// The renamed table's own foreign key back to itself is rewritten in the same
@@ -126,7 +126,7 @@ fn a_self_referential_foreign_key_follows_the_rename() {
     let table = database.table(None, "t2").expect("t2 exists after the rename");
     let foreign_key =
         table.foreign_keys(&database).expect("t2 is in this database").next().expect("one key");
-    assert_eq!(foreign_key.referenced_table_name(), "t2");
+    assert_eq!(foreign_key.referenced_table_name().name(), "t2");
     assert_eq!(table.foreign_keys(&database).expect("t2 is in this database").count(), 1);
 }
 
@@ -159,7 +159,7 @@ fn a_qualified_table_carries_its_references_within_the_schema() {
     let child = database.table(Some("s"), "child").expect("s.child was created");
     let foreign_key =
         child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
-    assert_eq!(foreign_key.referenced_table_name(), "parent2");
+    assert_eq!(foreign_key.referenced_table_name().name(), "parent2");
     let policy = database.policies().next().expect("the policy survives");
     let table = policy.table(&database).expect("the policy target resolves");
     assert_eq!((table.table_schema(), table.table_name()), (Some("s"), "parent2"));
@@ -183,8 +183,9 @@ fn a_rename_across_schemas_requalifies_its_references() {
     let child = database.table(Some("a"), "child").expect("a.child stayed put");
     let foreign_key =
         child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
+    let target = foreign_key.referenced_table_name();
     assert_eq!(
-        (foreign_key.referenced_table_schema(), foreign_key.referenced_table_name()),
+        (target.schema(), target.name()),
         (Some("b"), "parent"),
         "the child's foreign key names the table in its new schema"
     );

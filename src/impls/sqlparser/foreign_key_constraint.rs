@@ -7,12 +7,9 @@ use sqlparser::ast::{ConstraintReferenceMatchKind, CreateTable, ForeignKeyConstr
 
 use crate::{
     errors::LookupError,
-    structs::{ParserDB, TableAttribute},
+    structs::{ParserDB, TableAttribute, TargetName},
     traits::{ForeignKeyLike, Metadata, database::DatabaseLike, table::TableLike},
-    utils::{
-        last_str,
-        object_name::{object_name_last_part, resolve_required_table, schema_from_object_name},
-    },
+    utils::object_name::{resolve_required_table, target_name_of_object_name},
 };
 
 impl Metadata for TableAttribute<CreateTable, ForeignKeyConstraint> {
@@ -50,23 +47,8 @@ impl ForeignKeyLike for TableAttribute<CreateTable, ForeignKeyConstraint> {
     }
 
     #[inline]
-    fn referenced_table_name(&self) -> &str {
-        last_str(&self.attribute().foreign_table)
-    }
-
-    #[inline]
-    fn referenced_table_name_is_quoted(&self) -> bool {
-        object_name_last_part(&self.attribute().foreign_table).is_some_and(|(_, quoted)| quoted)
-    }
-
-    #[inline]
-    fn referenced_table_schema(&self) -> Option<&str> {
-        schema_from_object_name(&self.attribute().foreign_table).map(|(schema, _)| schema)
-    }
-
-    #[inline]
-    fn referenced_table_schema_is_quoted(&self) -> bool {
-        schema_from_object_name(&self.attribute().foreign_table).is_some_and(|(_, quoted)| quoted)
+    fn referenced_table_name(&self) -> TargetName<'_> {
+        target_name_of_object_name(&self.attribute().foreign_table)
     }
 
     #[inline]

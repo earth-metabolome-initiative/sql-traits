@@ -30,9 +30,20 @@ fn policy_target_reads_back_unqualified_while_resolving_through_the_search_path(
     );
     let policy = db.policies().next().expect("the policy exists");
 
-    assert_eq!(policy.target_table_name(), "docs");
-    assert!(!policy.target_table_name_is_quoted());
-    assert_eq!(policy.target_table_schema(), None, "the policy wrote no qualifier");
+    let target = policy.target_table_name();
+    assert_eq!(target.name(), "docs");
+    assert!(!target.name_is_quoted());
+    assert_eq!(target.schema(), None, "the policy wrote no qualifier");
+    assert_eq!(target.to_string(), "docs");
+
+    // The catalog resolves the very name the policy wrote, without the caller
+    // reassembling the parts or reaching for the concrete parser node.
+    let resolved = db.resolve_target_table(target).expect("the name is unambiguous");
+    assert_eq!(
+        resolved.expect("the search path finds it").table_schema(),
+        Some("app"),
+        "the generic resolution walks the search path"
+    );
 
     let table = policy.table(&db).expect("the search path resolves the target");
     assert_eq!(table.table_schema(), Some("app"), "and it resolves into the schema on the path");
@@ -63,19 +74,18 @@ fn policy_target_preserves_quoting_and_qualification() {
     );
     let policy = db.policies().next().expect("the policy exists");
 
-    assert_eq!(policy.target_table_name(), "Docs");
-    assert!(policy.target_table_name_is_quoted());
-    assert_eq!(policy.target_table_schema(), Some("App"));
-    assert!(policy.target_table_schema_is_quoted());
+    let target = policy.target_table_name();
+    assert_eq!(target.name(), "Docs");
+    assert!(target.name_is_quoted());
+    assert_eq!(target.schema(), Some("App"));
+    assert!(target.schema_is_quoted());
+    assert_eq!(target.to_string(), "\"App\".\"Docs\"", "and it renders back as SQL text");
 
     // Reading through the blanket implementation for references answers the
     // same, since a caller holding `&&Policy` is the common case behind an
     // iterator.
     let by_reference = &policy;
-    assert_eq!(by_reference.target_table_name(), "Docs");
-    assert!(by_reference.target_table_name_is_quoted());
-    assert_eq!(by_reference.target_table_schema(), Some("App"));
-    assert!(by_reference.target_table_schema_is_quoted());
+    assert_eq!(by_reference.target_table_name(), target);
 }
 
 /// A trigger target that does not resolve cannot reach a built schema, since
@@ -92,13 +102,13 @@ fn trigger_target_reads_back_unqualified() {
     );
     let trigger = db.triggers().next().expect("the trigger exists");
 
-    assert_eq!(trigger.target_table_name(), "docs");
-    assert!(!trigger.target_table_name_is_quoted());
-    assert_eq!(trigger.target_table_schema(), None);
+    let target = trigger.target_table_name();
+    assert_eq!(target.name(), "docs");
+    assert!(!target.name_is_quoted());
+    assert_eq!(target.schema(), None);
 
     let by_reference = &trigger;
-    assert_eq!(by_reference.target_table_name(), "docs");
-    assert_eq!(by_reference.target_table_schema(), None);
+    assert_eq!(by_reference.target_table_name(), target);
 }
 
 /// An unresolvable trigger target is refused outright, unlike the policy above
@@ -130,10 +140,12 @@ fn trigger_target_preserves_quoting_and_qualification() {
     );
     let trigger = db.triggers().next().expect("the trigger exists");
 
-    assert_eq!(trigger.target_table_name(), "Docs");
-    assert!(trigger.target_table_name_is_quoted());
-    assert_eq!(trigger.target_table_schema(), Some("app"));
-    assert!(!trigger.target_table_schema_is_quoted());
+    let target = trigger.target_table_name();
+    assert_eq!(target.name(), "Docs");
+    assert!(target.name_is_quoted());
+    assert_eq!(target.schema(), Some("app"));
+    assert!(!target.schema_is_quoted());
+    assert_eq!(target.to_string(), "app.\"Docs\"");
 }
 
 #[test]
@@ -147,10 +159,12 @@ fn foreign_key_reference_preserves_quoting_and_qualification() {
     let foreign_key =
         notes.foreign_keys(&db).expect("the host table is known").next().expect("one key");
 
-    assert_eq!(foreign_key.referenced_table_name(), "Docs");
-    assert!(foreign_key.referenced_table_name_is_quoted());
-    assert_eq!(foreign_key.referenced_table_schema(), Some("app"));
-    assert!(!foreign_key.referenced_table_schema_is_quoted());
+    let target = foreign_key.referenced_table_name();
+    assert_eq!(target.name(), "Docs");
+    assert!(target.name_is_quoted());
+    assert_eq!(target.schema(), Some("app"));
+    assert!(!target.schema_is_quoted());
+    assert_eq!(target.to_string(), "app.\"Docs\"");
 }
 
 #[test]
@@ -163,9 +177,10 @@ fn foreign_key_reference_reads_back_unqualified() {
     let foreign_key =
         notes.foreign_keys(&db).expect("the host table is known").next().expect("one key");
 
-    assert_eq!(foreign_key.referenced_table_name(), "docs");
-    assert!(!foreign_key.referenced_table_name_is_quoted());
-    assert_eq!(foreign_key.referenced_table_schema(), None);
+    let target = foreign_key.referenced_table_name();
+    assert_eq!(target.name(), "docs");
+    assert!(!target.name_is_quoted());
+    assert_eq!(target.schema(), None);
 }
 
 #[test]
@@ -258,4 +273,47 @@ fn grant_on_a_non_table_object_names_neither() {
 
     assert!(grant.target_table_names().next().is_none());
     assert!(grant.target_schema_names().next().is_none());
+}
+
+/// The point of the whole exercise: a caller can classify every policy in a
+/// schema knowing only that it holds a catalog, with no mention of `ParserDB`
+/// and no reach for a parser node. Reading the target and resolving it are both
+/// trait methods, so this function compiles against any catalog.
+fn policy_targets_by_schema<DB: DatabaseLike>(database: &DB) -> Vec<(String, Option<String>)> {
+    database
+        .policies()
+        .map(|policy| {
+            let target = policy.target_table_name();
+            let schema = database
+                .resolve_target_table(target)
+                .expect("the target is unambiguous")
+                .and_then(|table| table.table_schema().map(ToString::to_string));
+            (target.to_string(), schema)
+        })
+        .collect()
+}
+
+#[test]
+fn a_generic_catalog_resolves_every_policy_target() {
+    let db = parse(
+        "CREATE SCHEMA app;
+         SET search_path TO app;
+         CREATE TABLE app.docs (id INT);
+         CREATE TABLE app.\"Notes\" (id INT);
+         CREATE POLICY docs_sel ON docs USING (true);
+         CREATE POLICY notes_sel ON app.\"Notes\" USING (true);",
+    );
+
+    let mut targets = policy_targets_by_schema(&db);
+    targets.sort();
+
+    assert_eq!(
+        targets,
+        [
+            // Written qualified and quoted, and the quoting survives the round trip.
+            ("app.\"Notes\"".to_string(), Some("app".to_string())),
+            // Written unqualified, carried into `app` by the search path.
+            ("docs".to_string(), Some("app".to_string())),
+        ]
+    );
 }

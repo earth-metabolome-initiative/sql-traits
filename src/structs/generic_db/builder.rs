@@ -14,23 +14,8 @@ use crate::{
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
         TriggerLike, UniqueIndexLike,
     },
-    utils::identifier_resolution::identifiers_match,
+    utils::{identifier_resolution::identifiers_match, object_name::render_table_candidate},
 };
-
-fn format_identifier(value: &str, quoted: bool) -> String {
-    if quoted { format!("\"{}\"", value.replace('\"', "\"\"")) } else { value.to_string() }
-}
-
-fn format_table_lookup_key<T: TableLike>(table: &T) -> String {
-    let table_name = format_identifier(table.table_name(), table.table_name_is_quoted());
-    match table.table_schema() {
-        Some(schema_name) => {
-            let schema_name = format_identifier(schema_name, table.table_schema_is_quoted());
-            format!("{schema_name}.{table_name}")
-        }
-        None => table_name,
-    }
-}
 
 fn table_names_match_semantically<T: TableLike>(left: &T, right: &T) -> bool {
     identifiers_match(
@@ -149,9 +134,10 @@ where
         &mut self.tables
     }
 
-    /// Returns the schemas an unqualified name resolves against, in order.
-    pub(crate) fn search_path(&self) -> &[(String, bool)] {
-        &self.search_path
+    /// Returns the schemas an unqualified name resolves against, in order,
+    /// each with whether it was quoted.
+    pub(crate) fn search_path(&self) -> impl Iterator<Item = (&str, bool)> {
+        self.search_path.iter().map(|(name, quoted)| (name.as_str(), *quoted))
     }
 
     /// Replaces the schemas an unqualified name resolves against.
@@ -324,8 +310,8 @@ where
                 || creates_implicit_public_ambiguity(existing, table)
             {
                 return Err(LookupError::TableLookupConflict {
-                    table: format_table_lookup_key(table),
-                    conflicting_table: format_table_lookup_key(existing),
+                    table: render_table_candidate(table),
+                    conflicting_table: render_table_candidate(existing),
                 });
             }
         }
