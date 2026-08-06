@@ -4,12 +4,11 @@ use sqlparser::ast::{CreatePolicy, CreatePolicyCommand, CreatePolicyType, Expr, 
 
 use crate::{
     errors::{LookupError, ObjectKind},
-    structs::{ParserDB, metadata::PolicyMetadata},
+    structs::{ParserDB, TargetName, metadata::PolicyMetadata},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, PolicyLike},
     utils::{
         identifier_resolution::is_public_pseudo_role,
-        last_str,
-        object_name::{object_name_last_part, resolve_required_table, schema_from_object_name},
+        object_name::{resolve_required_table, target_name_of_object_name},
     },
 };
 
@@ -48,20 +47,8 @@ impl PolicyLike for CreatePolicy {
         resolve_required_table(&self.table_name, database)
     }
 
-    fn target_table_name(&self) -> &str {
-        last_str(&self.table_name)
-    }
-
-    fn target_table_name_is_quoted(&self) -> bool {
-        object_name_last_part(&self.table_name).is_some_and(|(_, quoted)| quoted)
-    }
-
-    fn target_table_schema(&self) -> Option<&str> {
-        schema_from_object_name(&self.table_name).map(|(schema, _)| schema)
-    }
-
-    fn target_table_schema_is_quoted(&self) -> bool {
-        schema_from_object_name(&self.table_name).is_some_and(|(_, quoted)| quoted)
+    fn target_table_name(&self) -> TargetName<'_> {
+        target_name_of_object_name(&self.table_name)
     }
 
     fn command(&self) -> CreatePolicyCommand {

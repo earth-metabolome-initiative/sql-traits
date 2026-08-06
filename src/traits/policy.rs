@@ -6,6 +6,7 @@ use sqlparser::ast::{CreatePolicyCommand, CreatePolicyType, Expr, Owner};
 
 use crate::{
     errors::LookupError,
+    structs::TargetName,
     traits::{DatabaseLike, DocumentationMetadata, Metadata},
 };
 
@@ -111,8 +112,9 @@ pub trait PolicyLike:
     /// written.
     ///
     /// Unlike [`Self::table`] this applies no resolution and cannot fail, so a
-    /// caller with its own resolution rules (a search path, a default schema)
-    /// can read the target and resolve it itself.
+    /// caller with its own resolution rules can read the target and resolve it
+    /// itself. To resolve it the way PostgreSQL does, hand it to
+    /// [`DatabaseLike::resolve_target_table`].
     ///
     /// # Example
     ///
@@ -131,26 +133,16 @@ pub trait PolicyLike:
     /// let policy = db.policies().next().unwrap();
     /// // The policy wrote no qualifier, and that is what reads back, even
     /// // though the target resolves into `app` through the search path.
-    /// assert_eq!(policy.target_table_name(), "docs");
-    /// assert_eq!(policy.target_table_schema(), None);
+    /// let target = policy.target_table_name();
+    /// assert_eq!(target.name(), "docs");
+    /// assert_eq!(target.schema(), None);
     /// assert_eq!(policy.table(&db)?.table_schema(), Some("app"));
     /// # Ok(())
     /// # }
     /// ```
-    fn target_table_name(&self) -> &str;
-
-    /// Returns whether the target table identifier was quoted in SQL.
     ///
-    /// The default `false` folds every identifier to lowercase, so an
-    /// implementation over a source that preserves quoting must override it.
-    #[inline]
-    fn target_table_name_is_quoted(&self) -> bool {
-        false
-    }
-
-    /// Returns the schema qualifier the policy wrote on its target, if any.
-    ///
-    /// # Example
+    /// Quoting is preserved on both parts, so a caller can tell a
+    /// case-sensitive target from a folded one:
     ///
     /// ```rust
     /// # fn main() -> Result<(), sql_traits::errors::Error> {
@@ -164,25 +156,16 @@ pub trait PolicyLike:
     /// ",
     /// )?;
     /// let policy = db.policies().next().unwrap();
-    /// assert_eq!(policy.target_table_schema(), Some("app"));
-    /// assert!(!policy.target_table_schema_is_quoted());
-    /// assert_eq!(policy.target_table_name(), "MyTable");
-    /// assert!(policy.target_table_name_is_quoted());
+    /// let target = policy.target_table_name();
+    /// assert_eq!(target.schema(), Some("app"));
+    /// assert!(!target.schema_is_quoted());
+    /// assert_eq!(target.name(), "MyTable");
+    /// assert!(target.name_is_quoted());
+    /// assert_eq!(target.to_string(), "app.\"MyTable\"");
     /// # Ok(())
     /// # }
     /// ```
-    fn target_table_schema(&self) -> Option<&str>;
-
-    /// Returns whether that schema qualifier was quoted in SQL.
-    ///
-    /// This only matters when [`Self::target_table_schema`] returns `Some`.
-    ///
-    /// The default `false` folds every identifier to lowercase, so an
-    /// implementation over a source that preserves quoting must override it.
-    #[inline]
-    fn target_table_schema_is_quoted(&self) -> bool {
-        false
-    }
+    fn target_table_name(&self) -> TargetName<'_>;
 
     /// Returns the command the policy applies to.
     ///
@@ -456,20 +439,8 @@ where
         (*self).table(database)
     }
 
-    fn target_table_name(&self) -> &str {
+    fn target_table_name(&self) -> TargetName<'_> {
         (*self).target_table_name()
-    }
-
-    fn target_table_name_is_quoted(&self) -> bool {
-        (*self).target_table_name_is_quoted()
-    }
-
-    fn target_table_schema(&self) -> Option<&str> {
-        (*self).target_table_schema()
-    }
-
-    fn target_table_schema_is_quoted(&self) -> bool {
-        (*self).target_table_schema_is_quoted()
     }
 
     fn command(&self) -> CreatePolicyCommand {

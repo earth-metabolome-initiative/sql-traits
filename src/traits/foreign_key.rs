@@ -7,6 +7,7 @@ use sqlparser::ast::ConstraintReferenceMatchKind;
 
 use crate::{
     errors::LookupError,
+    structs::TargetName,
     traits::{ColumnLike, DatabaseLike, IndexLike, Metadata, TableLike},
 };
 
@@ -185,28 +186,17 @@ pub trait ForeignKeyLike:
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().unwrap();
-    /// assert_eq!(foreign_key.referenced_table_name(), "Docs");
-    /// assert!(foreign_key.referenced_table_name_is_quoted());
-    /// assert_eq!(foreign_key.referenced_table_schema(), Some("app"));
-    /// assert!(!foreign_key.referenced_table_schema_is_quoted());
+    /// let target = foreign_key.referenced_table_name();
+    /// assert_eq!(target.name(), "Docs");
+    /// assert!(target.name_is_quoted());
+    /// assert_eq!(target.schema(), Some("app"));
+    /// assert!(!target.schema_is_quoted());
+    /// assert_eq!(target.to_string(), "app.\"Docs\"");
     /// # Ok(())
     /// # }
     /// ```
-    fn referenced_table_name(&self) -> &str;
-
-    /// Returns whether the referenced table identifier was quoted in SQL.
     ///
-    /// The default `false` folds every identifier to lowercase, so an
-    /// implementation over a source that preserves quoting must override it.
-    #[inline]
-    fn referenced_table_name_is_quoted(&self) -> bool {
-        false
-    }
-
-    /// Returns the schema qualifier written in the `REFERENCES` clause, if
-    /// any.
-    ///
-    /// # Example
+    /// An unqualified reference reads back with no qualifier:
     ///
     /// ```rust
     /// # fn main() -> Result<(), sql_traits::errors::Error> {
@@ -223,24 +213,13 @@ pub trait ForeignKeyLike:
     /// )?;
     /// let host_table = db.table(None, "host_table").unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().unwrap();
-    /// assert_eq!(foreign_key.referenced_table_name(), "referenced_table");
-    /// assert_eq!(foreign_key.referenced_table_schema(), None);
+    /// let target = foreign_key.referenced_table_name();
+    /// assert_eq!(target.name(), "referenced_table");
+    /// assert_eq!(target.schema(), None);
     /// # Ok(())
     /// # }
     /// ```
-    fn referenced_table_schema(&self) -> Option<&str>;
-
-    /// Returns whether that schema qualifier was quoted in SQL.
-    ///
-    /// This only matters when [`Self::referenced_table_schema`] returns
-    /// `Some`.
-    ///
-    /// The default `false` folds every identifier to lowercase, so an
-    /// implementation over a source that preserves quoting must override it.
-    #[inline]
-    fn referenced_table_schema_is_quoted(&self) -> bool {
-        false
-    }
+    fn referenced_table_name(&self) -> TargetName<'_>;
 
     /// Returns an iterator over the columns in the host table that are part of
     /// the foreign key.

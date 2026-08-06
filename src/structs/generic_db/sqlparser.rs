@@ -2145,7 +2145,7 @@ impl ParserDB {
         resolve_table_object_name_on_search_path_in_iter(
             self.tables.iter().map(|(table, _)| table.as_ref()),
             object_name,
-            &self.search_path,
+            self.search_path.iter().map(|(name, quoted)| (name.as_str(), *quoted)),
         )
     }
 
@@ -7508,7 +7508,7 @@ mod tests {
                 .expect("t is in this database")
                 .next()
                 .expect("the added key");
-            assert_eq!(foreign_key.referenced_table_name(), "u");
+            assert_eq!(foreign_key.referenced_table_name().name(), "u");
         }
 
         #[test]
