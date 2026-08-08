@@ -3,13 +3,13 @@
 
 use alloc::{string::ToString, vec::Vec};
 
-use ::sqlparser::ast::{CreateTable, Ident, ObjectNamePart};
+use ::sqlparser::ast::{CreateTable, Expr, Ident, ObjectNamePart};
 use sql_docs::docs::TableDoc;
 
 use crate::{
     errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableMetadata},
-    traits::{DatabaseLike, DocumentationMetadata, Metadata, TableLike},
+    traits::{DatabaseLike, DocumentationMetadata, Metadata, PartitionStrategy, TableLike},
     utils::last_str,
 };
 
@@ -33,6 +33,33 @@ fn table_metadata<'db>(
     database
         .table_metadata(table)
         .ok_or_else(|| ObjectKind::Table.not_in_database(&table.name.to_string()))
+}
+
+/// Reads the strategy off a `PARTITION BY` clause.
+///
+/// PostgreSQL takes one of three words there and parses the clause as a call,
+/// so `RANGE (id)` arrives as a call to `RANGE`, whatever the case and quoting
+/// of the word. Other dialects put an expression of their own in the same
+/// field, and BigQuery's `PARTITION BY DATE(ts)` describes how one ordinary
+/// table is laid out rather than a hierarchy of them, so anything else here
+/// answers [`None`].
+fn declared_strategy(clause: &Expr) -> Option<PartitionStrategy> {
+    let Expr::Function(function) = clause else {
+        return None;
+    };
+    let [ObjectNamePart::Identifier(strategy)] = function.name.0.as_slice() else {
+        return None;
+    };
+    let strategy = strategy.value.as_str();
+    if strategy.eq_ignore_ascii_case("range") {
+        Some(PartitionStrategy::Range)
+    } else if strategy.eq_ignore_ascii_case("list") {
+        Some(PartitionStrategy::List)
+    } else if strategy.eq_ignore_ascii_case("hash") {
+        Some(PartitionStrategy::Hash)
+    } else {
+        None
+    }
 }
 
 impl TableLike for CreateTable {
@@ -117,12 +144,31 @@ impl TableLike for CreateTable {
         // list is read off the node rather than the metadata.
         self.require_in_database(database)?;
         let mut parents = Vec::new();
-        for name in self.inherits.iter().flatten().chain(self.partition_of.iter()) {
+        for name in self.inherits.iter().flatten() {
             if let Some(parent) = database.resolve_table_object_name(name)? {
                 parents.push(parent);
             }
         }
         Ok(parents.into_iter())
+    }
+
+    fn partition_root<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        self.require_in_database(database)?;
+        match &self.partition_of {
+            Some(root) => database.resolve_table_object_name(root),
+            None => Ok(None),
+        }
+    }
+
+    #[inline]
+    fn partition_strategy(&self) -> Option<PartitionStrategy> {
+        declared_strategy(self.partition_by.as_deref()?)
     }
 
     fn primary_key_columns<'db>(

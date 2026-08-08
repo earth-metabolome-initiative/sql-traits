@@ -12,7 +12,7 @@ pub mod index;
 pub use database::DatabaseLike;
 pub use dialect::DialectLike;
 pub use index::IndexLike;
-pub use table::TableLike;
+pub use table::{PartitionStrategy, TableLike};
 pub use type_match::{TypeMatch, TypeMatchLike};
 pub mod check_constraint;
 pub use check_constraint::CheckConstraintLike;
