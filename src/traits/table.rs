@@ -1158,6 +1158,20 @@ pub trait TableLike:
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// assert!(table.is_primary_key_column(&db, id_column)?);
     /// assert!(!table.is_primary_key_column(&db, name_column)?);
+    ///
+    /// // Every column of a composite key is one of its columns.
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE pair (a INT, b INT, c INT, PRIMARY KEY (a, b));
+    /// ",
+    /// )?;
+    /// let pair = db.table(None, "pair").unwrap();
+    /// for name in ["a", "b"] {
+    ///     let column = pair.column(name, &db)?.expect("column exists");
+    ///     assert!(pair.is_primary_key_column(&db, column)?);
+    /// }
+    /// let c = pair.column("c", &db)?.expect("column exists");
+    /// assert!(!pair.is_primary_key_column(&db, c)?);
     /// # Ok(())
     /// # }
     /// ```
@@ -1166,8 +1180,10 @@ pub trait TableLike:
         database: &Self::DB,
         column: &<Self::DB as DatabaseLike>::Column,
     ) -> Result<bool, LookupError> {
-        Ok(self.primary_key_columns(database)?.all(|col| col == column)
-            && self.has_primary_key(database)?)
+        // Any of the key's columns, not all of them: asking `all` answered
+        // false for every column of a composite key, and true for a table with
+        // no key at all, which is what the emptiness guard was covering up.
+        Ok(self.primary_key_columns(database)?.any(|col| col == column))
     }
 
     /// Returns whether the table has a primary key.
