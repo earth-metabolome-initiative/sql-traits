@@ -27,6 +27,15 @@ pub struct TableMetadata<T: TableLike> {
     /// as names rather than handles because replacing the table node rebuilds
     /// every column, and the distinction has to survive that.
     inherited_column_names: Vec<String>,
+    /// The rendering of each table constraint the table receives from a parent
+    /// rather than declaring itself.
+    ///
+    /// Mirrors `pg_constraint.conislocal`: a constraint the child also declares
+    /// is local and so absent here, which is what spares it when the parent
+    /// drops its own. How many parents still pass one down is not held, because
+    /// it follows from their nodes and is read when it is asked for. Held as
+    /// renderings for the same reason the columns above are held as names.
+    inherited_constraints: Vec<String>,
     /// Whether Row Level Security is enabled for the table.
     rls_enabled: bool,
     /// Whether Row Level Security is forced for the table (applies to table
@@ -48,6 +57,7 @@ impl<T: TableLike> Default for TableMetadata<T> {
             foreign_keys: Vec::new(),
             primary_key: Vec::new(),
             inherited_column_names: Vec::new(),
+            inherited_constraints: Vec::new(),
             rls_enabled: false,
             rls_forced: false,
             owner: None,
@@ -154,6 +164,21 @@ impl<T: TableLike> TableMetadata<T> {
     #[inline]
     pub fn set_inherited_column_names(&mut self, inherited_column_names: Vec<String>) {
         self.inherited_column_names = inherited_column_names;
+    }
+
+    /// Returns the rendering of each table constraint the table takes from a
+    /// parent.
+    #[must_use]
+    #[inline]
+    pub fn inherited_constraints(&self) -> &[String] {
+        &self.inherited_constraints
+    }
+
+    /// Records the rendering of each table constraint the table takes from a
+    /// parent.
+    #[inline]
+    pub fn set_inherited_constraints(&mut self, inherited_constraints: Vec<String>) {
+        self.inherited_constraints = inherited_constraints;
     }
 
     /// Returns an iterator over the check constraints of the table.

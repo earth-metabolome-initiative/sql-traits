@@ -43,6 +43,33 @@ impl core::fmt::Display for ObjectKind {
     }
 }
 
+/// A change to a table that PostgreSQL refuses to keep from the tables below.
+///
+/// `ONLY` asks for the named table alone, and PostgreSQL grants that only when
+/// what is asked for can be undone one table at a time. Adding is not one of
+/// those, because a table below would then be missing something its parent
+/// declares, and neither is renaming, because the two would disagree on what
+/// the column is called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InheritedChange {
+    /// `ALTER TABLE ONLY ... ADD CONSTRAINT`.
+    AddConstraint,
+    /// `ALTER TABLE ONLY ... ADD COLUMN`.
+    AddColumn,
+    /// `ALTER TABLE ONLY ... RENAME COLUMN`.
+    RenameColumn,
+}
+
+impl core::fmt::Display for InheritedChange {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::AddConstraint => "add a constraint to",
+            Self::AddColumn => "add a column to",
+            Self::RenameColumn => "rename a column of",
+        })
+    }
+}
+
 impl ObjectKind {
     /// Reports an object of this kind that the queried database does not hold,
     /// identified by its own `name`.
@@ -185,6 +212,28 @@ pub enum Error {
         table_name: String,
         /// Name of the inherited column.
         column_name: String,
+    },
+    #[error(
+        "Cannot drop constraint `{constraint_name}` of table `{table_name}` because it is inherited."
+    )]
+    /// Error indicating that a table tried to drop a constraint it receives
+    /// from a parent, which only the parent can drop.
+    InheritedConstraintNotDroppable {
+        /// Name of the table the statement names.
+        table_name: String,
+        /// Name of the inherited constraint.
+        constraint_name: String,
+    },
+    #[error(
+        "`ONLY` cannot be used to {change} table `{table_name}`, because other tables inherit from it."
+    )]
+    /// Error indicating that `ALTER TABLE ONLY` asked for a change PostgreSQL
+    /// refuses to withhold from the tables below.
+    OnlyRefusedWithChildren {
+        /// Name of the table the statement names.
+        table_name: String,
+        /// The change that cannot stop at the named table.
+        change: InheritedChange,
     },
     #[error(
         "Column `{column_name}` of table `{child_table}` has type `{child_type}`, conflicting with type `{parent_type}` inherited from `{parent_table}`."

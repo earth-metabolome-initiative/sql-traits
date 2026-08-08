@@ -5,10 +5,10 @@
 //! columns the child declares itself. Both spellings record the same kind of
 //! edge, so both resolve here.
 //!
-//! Resolution runs once, after the last statement has been applied, so a
-//! column a parent gained through `ALTER TABLE` is already in place and the
-//! child needs no separate propagation. Parents resolve before children, which
-//! makes a grandchild pick up an already complete parent.
+//! Resolution runs while the `CREATE TABLE` statement is applied, and every
+//! later change to a parent is walked down to its descendants one edge at a
+//! time. Parents are complete before children, which makes a grandchild pick
+//! up an already complete parent.
 
 use alloc::{
     format,
@@ -18,14 +18,14 @@ use alloc::{
 
 use sqlparser::ast::{
     CharacterLength, ColumnDef, ColumnOption, ColumnOptionDef, CreateTable, DataType,
-    ExactNumberInfo, Ident, ObjectName, TableConstraint, TimezoneInfo,
+    ExactNumberInfo, Expr, Ident, IndexColumn, ObjectName, TableConstraint, TimezoneInfo,
 };
 
 use super::{
     ParserDBBuilder, StoredTable,
     column_copy::{copy_column, is_identity},
 };
-use crate::errors::Error;
+use crate::{errors::Error, traits::TableLike};
 
 /// Which spelling links a child to a table it takes its shape from.
 ///
@@ -33,7 +33,7 @@ use crate::errors::Error;
 /// one table where keys are concerned, so the two pass down different amounts
 /// of the parent's declaration.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ParentKind {
+pub(super) enum ParentKind {
     /// `INHERITS (parent)`, which passes down columns and checks.
     Inherits,
     /// `PARTITION OF root`, which passes down the whole shape.
@@ -112,6 +112,27 @@ pub(super) fn descendants(builder: &ParserDBBuilder, parent: &StoredTable) -> Ve
     found
 }
 
+/// The tables linked directly to `parent`, each under the spelling that links
+/// it.
+///
+/// A change to a parent is walked down one edge at a time rather than over the
+/// whole descendant set, because how much of the change a table receives
+/// depends on the spelling of the edge it arrives through.
+pub(super) fn direct_children(
+    builder: &ParserDBBuilder,
+    parent: &StoredTable,
+) -> Vec<(ParentKind, StoredTable)> {
+    builder
+        .tables()
+        .iter()
+        .filter_map(|(table, _)| {
+            parents_with_kind(table)
+                .find(|(_, name)| parent.named_by(name))
+                .map(|(kind, _)| (kind, StoredTable::of(table)))
+        })
+        .collect()
+}
+
 /// Marks a column a table has just received from a parent as inherited.
 pub(super) fn mark_inherited(builder: &mut ParserDBBuilder, table: &StoredTable, column: &str) {
     if let Some((_, metadata)) =
@@ -119,6 +140,22 @@ pub(super) fn mark_inherited(builder: &mut ParserDBBuilder, table: &StoredTable,
     {
         let mut names = metadata.inherited_column_names().to_vec();
         names.push(column.to_string());
+        metadata.set_inherited_column_names(names);
+    }
+}
+
+/// Records that a column a table received is now its own, which is what an
+/// `ONLY` drop on the parent leaves behind.
+pub(super) fn unmark_inherited(builder: &mut ParserDBBuilder, table: &StoredTable, column: &str) {
+    if let Some((_, metadata)) =
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+    {
+        let names: Vec<String> = metadata
+            .inherited_column_names()
+            .iter()
+            .filter(|name| name.as_str() != column)
+            .cloned()
+            .collect();
         metadata.set_inherited_column_names(names);
     }
 }
@@ -157,16 +194,40 @@ fn is_inherited_option(option: &ColumnOption) -> bool {
 /// Rewrites a parent column into the column the child receives.
 ///
 /// A partition withholds nothing, because PostgreSQL enforces the root's keys
-/// across every partition. The `NOT NULL` an option implies is added back
-/// either way, which is what the catalog holds too: a partition of an
-/// identity column carries a not-null constraint of its own.
-fn inherited_column(kind: ParentKind, column: &ColumnDef) -> ColumnDef {
-    copy_column(column, |option| {
+/// across every partition, but a key written inline still needs a name of its
+/// own for the same reason one written as a table constraint does. The
+/// `NOT NULL` an option implies is added back either way, which is what the
+/// catalog holds too: a partition of an identity column carries a not-null
+/// constraint of its own.
+fn inherited_column(
+    builder: &ParserDBBuilder,
+    kind: ParentKind,
+    child: &CreateTable,
+    column: &ColumnDef,
+    taken: &mut Vec<Ident>,
+) -> ColumnDef {
+    let mut copy = copy_column(column, |option| {
         match kind {
             ParentKind::PartitionOf => true,
             ParentKind::Inherits => is_inherited_option(option),
         }
-    })
+    });
+
+    if kind == ParentKind::PartitionOf {
+        let unique_stem = format!("_{}_key", copy.name.value);
+        for option in &mut copy.options {
+            let stem = match option.option {
+                ColumnOption::PrimaryKey(_) => Some("_pkey"),
+                ColumnOption::Unique(_) => Some(unique_stem.as_str()),
+                _ => None,
+            };
+            if let Some(stem) = stem {
+                option.name = Some(generated_key_name(builder, child, stem, taken));
+            }
+        }
+    }
+
+    copy
 }
 
 /// The name PostgreSQL resolves the type to, or [`None`] when the spelling is
@@ -249,29 +310,242 @@ fn same_column(left: &Ident, right: &Ident) -> bool {
     )
 }
 
-/// The table constraints a child receives from a parent.
+/// Whether a parent linked by this spelling passes the constraint down.
 ///
 /// A check passes down whichever way it is written, so one attached to a
 /// column arrives with the column and one written on its own arrives here. A
 /// partition also receives the root's keys, unique constraints and foreign
 /// keys, because PostgreSQL enforces those across the whole hierarchy rather
 /// than one table at a time.
-fn inherited_constraints(
+pub(super) fn passes_down(kind: ParentKind, constraint: &TableConstraint) -> bool {
+    kind == ParentKind::PartitionOf || matches!(constraint, TableConstraint::Check(_))
+}
+
+/// The columns a generated index name is built from, an unnamed expression
+/// contributing the same `expr` PostgreSQL uses for one.
+fn index_name_columns(columns: &[IndexColumn]) -> Vec<&str> {
+    columns
+        .iter()
+        .map(|column| {
+            match &column.column.expr {
+                Expr::Identifier(ident) => ident.value.as_str(),
+                _ => "expr",
+            }
+        })
+        .collect()
+}
+
+/// The name PostgreSQL gives an index it creates on its own behalf, with a
+/// counter appended until the schema has room for it.
+///
+/// A key is also an index, and two indexes in one schema cannot share a name,
+/// which is why a partition's copy of the root's key cannot simply keep the
+/// root's name.
+fn generated_key_name(
+    builder: &ParserDBBuilder,
+    child: &CreateTable,
+    stem: &str,
+    taken: &mut Vec<Ident>,
+) -> Ident {
+    let table = super::last_str(&child.name);
+    let base = format!("{table}{stem}");
+    let schema = super::table_schema_qualifier(child);
+    // A generated name follows the quoting of the table it is built from, so
+    // one built off a quoted name stays reachable under the spelling it needs.
+    let spell = |value: &str| {
+        if child.table_name_is_quoted() { Ident::with_quote('"', value) } else { Ident::new(value) }
+    };
+
+    let mut candidate = spell(&base);
+    let mut counter = 0u32;
+    while super::relation_name_holder(builder, &candidate, schema).is_some()
+        || taken.iter().any(|held| super::idents_match(held, &candidate))
+    {
+        counter += 1;
+        candidate = spell(&format!("{base}{counter}"));
+    }
+
+    taken.push(candidate.clone());
+    candidate
+}
+
+/// The copy of a parent's constraint the child holds, or [`None`] when the
+/// spelling of the edge keeps it with the parent.
+///
+/// A partition's copy of a key is given a name of its own, because the name of
+/// a key is the name of an index. A check and a foreign key take no index
+/// name, so their copies keep the parent's, which is what makes one of them
+/// recognisable across a whole hierarchy.
+pub(super) fn received_constraint(
+    builder: &ParserDBBuilder,
     kind: ParentKind,
-    parent: &CreateTable,
-) -> impl Iterator<Item = &TableConstraint> {
-    parent.constraints.iter().filter(move |constraint| {
-        kind == ParentKind::PartitionOf || matches!(constraint, TableConstraint::Check(_))
+    child: &CreateTable,
+    constraint: &TableConstraint,
+    taken: &mut Vec<Ident>,
+) -> Option<TableConstraint> {
+    if !passes_down(kind, constraint) {
+        return None;
+    }
+
+    let mut copy = constraint.clone();
+    match &mut copy {
+        TableConstraint::PrimaryKey(primary_key) => {
+            primary_key.name = Some(generated_key_name(builder, child, "_pkey", taken));
+            primary_key.index_name = None;
+        }
+        TableConstraint::Unique(unique) => {
+            let stem = format!("_{}_key", index_name_columns(&unique.columns).join("_"));
+            unique.name = Some(generated_key_name(builder, child, &stem, taken));
+            unique.index_name = None;
+        }
+        _ => {}
+    }
+    Some(copy)
+}
+
+/// The constraint with the name a copy would have been given stripped away.
+///
+/// A partition's copy of a key differs from the root's only in that name, so
+/// recognising the copy has to look past it. Every other kind keeps the
+/// parent's name and is compared whole.
+fn without_generated_name(constraint: &TableConstraint) -> TableConstraint {
+    let mut bare = constraint.clone();
+    match &mut bare {
+        TableConstraint::PrimaryKey(primary_key) => {
+            primary_key.name = None;
+            primary_key.index_name = None;
+        }
+        TableConstraint::Unique(unique) => {
+            unique.name = None;
+            unique.index_name = None;
+        }
+        _ => {}
+    }
+    bare
+}
+
+/// Whether the constraint a table holds is its copy of the one a parent passes
+/// down.
+pub(super) fn is_copy_of(held: &TableConstraint, passed: &TableConstraint) -> bool {
+    without_generated_name(held) == without_generated_name(passed)
+}
+
+/// Whether the table already carries its copy of the constraint.
+fn holds_constraint(create_table: &CreateTable, candidate: &TableConstraint) -> bool {
+    create_table.constraints.iter().any(|existing| is_copy_of(existing, candidate))
+}
+
+/// Whether a parent still passes the table its copy of the constraint.
+///
+/// Read from the parents rather than counted, so a table with two parents
+/// keeps the constraint until the last of them has dropped it, and a table
+/// that redeclared it is still refused the right to drop it.
+pub(super) fn receives_constraint(
+    builder: &ParserDBBuilder,
+    child: &CreateTable,
+    held: &TableConstraint,
+) -> bool {
+    parents_with_kind(child).any(|(kind, name)| {
+        builder.resolve_table_object_name(name).ok().flatten().is_some_and(|parent| {
+            parent
+                .constraints
+                .iter()
+                .any(|passed| passes_down(kind, passed) && is_copy_of(held, passed))
+        })
     })
 }
 
-/// Whether the table already carries an equivalent constraint.
-fn holds_constraint(create_table: &CreateTable, candidate: &TableConstraint) -> bool {
-    create_table.constraints.iter().any(|existing| existing == candidate)
+/// Records that a table has just received a constraint from a parent.
+pub(super) fn mark_inherited_constraint(
+    builder: &mut ParserDBBuilder,
+    table: &StoredTable,
+    constraint: &TableConstraint,
+) {
+    if let Some((_, metadata)) =
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+    {
+        let mut held = metadata.inherited_constraints().to_vec();
+        held.push(constraint.to_string());
+        metadata.set_inherited_constraints(held);
+    }
 }
 
-/// Gives the node the columns and checks its parents pass down, answering the
-/// names it took from a parent rather than declaring itself.
+/// Records that a constraint a table received is now its own, which is what an
+/// `ONLY` drop on the parent leaves behind.
+pub(super) fn unmark_inherited_constraint(
+    builder: &mut ParserDBBuilder,
+    table: &StoredTable,
+    constraint: &TableConstraint,
+) {
+    if let Some((_, metadata)) =
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+    {
+        let rendered = constraint.to_string();
+        let held: Vec<String> = metadata
+            .inherited_constraints()
+            .iter()
+            .filter(|recorded| **recorded != rendered)
+            .cloned()
+            .collect();
+        metadata.set_inherited_constraints(held);
+    }
+}
+
+/// Whether the table received the constraint from a parent rather than
+/// declaring it.
+pub(super) fn records_inherited_constraint(
+    builder: &ParserDBBuilder,
+    table: &StoredTable,
+    constraint: &TableConstraint,
+) -> bool {
+    let rendered = constraint.to_string();
+    builder
+        .tables()
+        .iter()
+        .find(|(stored, _)| table.matches(stored))
+        .is_some_and(|(_, metadata)| metadata.inherited_constraints().contains(&rendered))
+}
+
+/// Carries the record of which constraints a table received across a rebuild
+/// of its node.
+///
+/// An edit that rewrites the list in place, which is what a column rename
+/// reaching into a check expression does, keeps its length and its order, so
+/// the record follows position. An edit that adds or removes one leaves the
+/// survivors untouched, so those are recognised by their rendering.
+pub(super) fn follow_constraint_rewrite(
+    recorded: &[String],
+    previous: &[TableConstraint],
+    replacement: &[TableConstraint],
+) -> Vec<String> {
+    let inherited = |index: usize, constraint: &TableConstraint| {
+        if previous.len() == replacement.len() {
+            previous
+                .get(index)
+                .is_some_and(|before| recorded.iter().any(|held| *held == before.to_string()))
+        } else {
+            recorded.iter().any(|held| *held == constraint.to_string())
+        }
+    };
+
+    replacement
+        .iter()
+        .enumerate()
+        .filter(|(index, constraint)| inherited(*index, constraint))
+        .map(|(_, constraint)| constraint.to_string())
+        .collect()
+}
+
+/// What a table took from its parents rather than declaring itself.
+pub(super) struct Inherited {
+    /// The names of the columns received.
+    pub(super) columns: Vec<String>,
+    /// The rendering of each table constraint received.
+    pub(super) constraints: Vec<String>,
+}
+
+/// Gives the node the columns and constraints its parents pass down, answering
+/// what it took from a parent rather than declaring itself.
 ///
 /// Runs while the `CREATE TABLE` statement is applied, which is when
 /// PostgreSQL copies the parent's shape into the child. The parent's own node
@@ -287,15 +561,19 @@ fn holds_constraint(create_table: &CreateTable, candidate: &TableConstraint) -> 
 pub(super) fn apply_parents(
     builder: &ParserDBBuilder,
     create_table: &mut CreateTable,
-) -> Result<Vec<String>, Error> {
+) -> Result<Inherited, Error> {
     let parents: Vec<(ParentKind, ObjectName)> =
         parents_with_kind(create_table).map(|(kind, name)| (kind, name.clone())).collect();
     if parents.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Inherited { columns: Vec::new(), constraints: Vec::new() });
     }
 
     let child_name = create_table.name.to_string();
     let local: Vec<Ident> = create_table.columns.iter().map(|column| column.name.clone()).collect();
+    // The child is not in the stores yet, so the names it introduces itself
+    // have to be spoken for before a generated one is built beside them.
+    let mut taken: Vec<Ident> =
+        super::relation_names_of(create_table).into_iter().map(|(_, name)| name.clone()).collect();
 
     let mut columns: Vec<ColumnDef> = Vec::new();
     let mut constraints: Vec<TableConstraint> = Vec::new();
@@ -307,13 +585,20 @@ pub(super) fn apply_parents(
             // A second parent declaring the same column merges into the one
             // already taken, keeping the position the first parent gave it.
             if !columns.iter().any(|held| same_column(&held.name, &column.name)) {
-                columns.push(inherited_column(*kind, column));
+                columns.push(inherited_column(builder, *kind, create_table, column, &mut taken));
             }
         }
 
-        for constraint in inherited_constraints(*kind, parent) {
-            if !holds_constraint(create_table, constraint) && !constraints.contains(constraint) {
-                constraints.push(constraint.clone());
+        for constraint in &parent.constraints {
+            if holds_constraint(create_table, constraint)
+                || constraints.iter().any(|held| is_copy_of(held, constraint))
+            {
+                continue;
+            }
+            if let Some(copy) =
+                received_constraint(builder, *kind, create_table, constraint, &mut taken)
+            {
+                constraints.push(copy);
             }
         }
     }
@@ -338,15 +623,18 @@ pub(super) fn apply_parents(
         }
     }
 
-    // Which columns came from a parent is not spelled by the node once they
-    // join it, so the caller records it beside them, the way
-    // `pg_attribute.attislocal` does.
-    let inherited = columns
-        .iter()
-        .map(|column| &column.name)
-        .filter(|name| !local.iter().any(|declared| same_column(declared, name)))
-        .map(|name| name.value.clone())
-        .collect();
+    // Which columns and constraints came from a parent is not spelled by the
+    // node once they join it, so the caller records it beside them, the way
+    // `pg_attribute.attislocal` and `pg_constraint.conislocal` do.
+    let inherited = Inherited {
+        columns: columns
+            .iter()
+            .map(|column| &column.name)
+            .filter(|name| !local.iter().any(|declared| same_column(declared, name)))
+            .map(|name| name.value.clone())
+            .collect(),
+        constraints: constraints.iter().map(TableConstraint::to_string).collect(),
+    };
 
     create_table.columns = columns;
     create_table.constraints.extend(constraints);
