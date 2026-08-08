@@ -16,6 +16,21 @@ use crate::{
     utils::identifier_resolution::{normalize_identifier, stored_identifier_matches_lookup},
 };
 
+/// How a partitioned table routes a row to one of its partitions.
+///
+/// PostgreSQL requires one of these three words after `PARTITION BY`. A table
+/// that declares one holds no rows of its own, even before a partition is
+/// attached to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PartitionStrategy {
+    /// Each partition takes a contiguous span of the key.
+    Range,
+    /// Each partition takes an enumerated set of key values.
+    List,
+    /// Each partition takes a remainder class of the key.
+    Hash,
+}
+
 /// A trait for types that can be treated as SQL tables.
 pub trait TableLike:
     Debug
@@ -402,12 +417,13 @@ pub trait TableLike:
     where
         Self: 'db;
 
-    /// Iterates over the tables this one takes its columns from.
+    /// Iterates over the tables this one inherits from.
     ///
-    /// PostgreSQL spells the edge either `INHERITS`, naming any number of
-    /// parents, or `PARTITION OF`, naming exactly one, and records both the
-    /// same way. Only direct parents are answered, so walking a longer chain
-    /// means asking each parent in turn.
+    /// Only `INHERITS` parents, and only direct ones, so a grandparent is
+    /// answered by the parent rather than here. A partition answers nothing
+    /// here: the table it belongs to is [`TableLike::partition_root`], which
+    /// PostgreSQL records the same way but which passes down its keys as well
+    /// as its columns and which holds no rows of its own.
     ///
     /// # Arguments
     ///
@@ -426,7 +442,9 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE docs (id INT);
-    ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);",
+    ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);
+    ///      CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
+    ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     /// )?;
     /// let child = db.table(None, "secret_docs").unwrap();
     /// let parents: Vec<&str> = child.inherits_from(&db)?.map(|p| p.table_name()).collect();
@@ -434,6 +452,10 @@ pub trait TableLike:
     ///
     /// let parent = db.table(None, "docs").unwrap();
     /// assert_eq!(parent.inherits_from(&db)?.count(), 0);
+    ///
+    /// // A partition belongs to its root, it does not inherit from it.
+    /// let part = db.table(None, "evt_low").unwrap();
+    /// assert_eq!(part.inherits_from(&db)?.count(), 0);
     /// # Ok(())
     /// # }
     /// ```
@@ -444,10 +466,11 @@ pub trait TableLike:
     where
         Self: 'db;
 
-    /// Iterates over the tables that take their columns from this one.
+    /// Iterates over the tables that inherit from this one.
     ///
-    /// The inverse of [`TableLike::inherits_from`], and likewise only one step
-    /// deep, so a grandchild is answered by the child rather than here.
+    /// The inverse of [`TableLike::inherits_from`], so a partition is answered
+    /// by [`TableLike::partitions`] instead, and likewise only one step deep,
+    /// so a grandchild is answered by the child rather than here.
     ///
     /// # Arguments
     ///
@@ -466,11 +489,16 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE docs (id INT);
-    ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);",
+    ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);
+    ///      CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
+    ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     /// )?;
     /// let parent = db.table(None, "docs").unwrap();
     /// let children: Vec<&str> = parent.inheritors(&db)?.map(|c| c.table_name()).collect();
     /// assert_eq!(children, vec!["secret_docs"]);
+    ///
+    /// // A root has partitions, not inheritors.
+    /// assert_eq!(db.table(None, "evt").unwrap().inheritors(&db)?.count(), 0);
     /// # Ok(())
     /// # }
     /// ```
@@ -493,6 +521,157 @@ pub trait TableLike:
             }
         }
         Ok(children.into_iter())
+    }
+
+    /// Returns the partitioned table this one is a partition of.
+    ///
+    /// A partition is written `PARTITION OF` and receives the root's keys,
+    /// unique constraints and foreign keys along with its columns, none of
+    /// which an `INHERITS` child receives. Only the direct root is answered,
+    /// so a partition of a partition answers the one it names.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
+    ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
+    /// )?;
+    /// let part = db.table(None, "evt_low").unwrap();
+    /// assert_eq!(part.partition_root(&db)?.map(|root| root.table_name()), Some("evt"));
+    /// assert!(db.table(None, "evt").unwrap().partition_root(&db)?.is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn partition_root<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db;
+
+    /// Returns how this table routes rows to its partitions, or [`None`] when
+    /// it is not partitioned.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE evt (id INT, region TEXT) PARTITION BY LIST (region);
+    ///      CREATE TABLE docs (id INT);",
+    /// )?;
+    /// assert_eq!(db.table(None, "evt").unwrap().partition_strategy(), Some(PartitionStrategy::List));
+    /// assert_eq!(db.table(None, "docs").unwrap().partition_strategy(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn partition_strategy(&self) -> Option<PartitionStrategy>;
+
+    /// Iterates over the partitions of this table.
+    ///
+    /// The inverse of [`TableLike::partition_root`], one step deep, so a
+    /// partition that is itself partitioned answers its own.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table or one of the tables it checks.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
+    ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
+    /// )?;
+    /// let root = db.table(None, "evt").unwrap();
+    /// let parts: Vec<&str> = root.partitions(&db)?.map(|p| p.table_name()).collect();
+    /// assert_eq!(parts, vec!["evt_low"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn partitions<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        self.require_in_database(database)?;
+        let schema = self.table_schema();
+        let name = self.table_name();
+        let mut partitions = Vec::new();
+        for candidate in database.tables() {
+            if candidate
+                .partition_root(database)?
+                .is_some_and(|root| root.table_schema() == schema && root.table_name() == name)
+            {
+                partitions.push(candidate);
+            }
+        }
+        Ok(partitions.into_iter())
+    }
+
+    /// Whether this table is a partition of another.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    fn is_partition(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        Ok(self.partition_root(database)?.is_some())
+    }
+
+    /// Whether this table is partitioned, and so holds no rows of its own.
+    ///
+    /// True from the moment `PARTITION BY` is written, which is also when
+    /// PostgreSQL starts refusing rows into the table, so a root with no
+    /// partitions yet still answers `true`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
+    ///      CREATE TABLE docs (id INT);",
+    /// )?;
+    /// let root = db.table(None, "evt").unwrap();
+    /// assert!(root.is_partitioned());
+    /// assert_eq!(root.partitions(&db)?.count(), 0);
+    /// assert!(!db.table(None, "docs").unwrap().is_partitioned());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn is_partitioned(&self) -> bool {
+        self.partition_strategy().is_some()
     }
 
     /// Returns a deterministic SHA-256 fingerprint of the table's schema.
@@ -3749,6 +3928,38 @@ where
         Self: 'db,
     {
         T::inheritors(self, database)
+    }
+
+    fn partition_root<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        T::partition_root(self, database)
+    }
+
+    fn partition_strategy(&self) -> Option<PartitionStrategy> {
+        T::partition_strategy(self)
+    }
+
+    fn partitions<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        T::partitions(self, database)
+    }
+
+    fn is_partition(&self, database: &Self::DB) -> Result<bool, LookupError> {
+        T::is_partition(self, database)
+    }
+
+    fn is_partitioned(&self) -> bool {
+        T::is_partitioned(self)
     }
 
     fn column_by_id<'db>(

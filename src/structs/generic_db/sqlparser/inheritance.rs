@@ -27,12 +27,38 @@ use super::{
 };
 use crate::errors::Error;
 
-/// The tables a table takes its shape from, in the order they are written.
+/// Which spelling links a child to a table it takes its shape from.
+///
+/// PostgreSQL records both in `pg_inherits`, but a partition and its root are
+/// one table where keys are concerned, so the two pass down different amounts
+/// of the parent's declaration.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParentKind {
+    /// `INHERITS (parent)`, which passes down columns and checks.
+    Inherits,
+    /// `PARTITION OF root`, which passes down the whole shape.
+    PartitionOf,
+}
+
+/// The tables a table takes its shape from, in the order they are written,
+/// each under the spelling that links it.
 ///
 /// `INHERITS` names any number of parents and `PARTITION OF` names exactly
-/// one, and PostgreSQL records both as the same edge.
+/// one.
+fn parents_with_kind(
+    create_table: &CreateTable,
+) -> impl Iterator<Item = (ParentKind, &ObjectName)> {
+    create_table
+        .inherits
+        .iter()
+        .flatten()
+        .map(|name| (ParentKind::Inherits, name))
+        .chain(create_table.partition_of.iter().map(|name| (ParentKind::PartitionOf, name)))
+}
+
+/// The tables a table takes its shape from, in the order they are written.
 pub(super) fn parent_names(create_table: &CreateTable) -> impl Iterator<Item = &ObjectName> {
-    create_table.inherits.iter().flatten().chain(create_table.partition_of.iter())
+    parents_with_kind(create_table).map(|(_, name)| name)
 }
 
 /// The tables a table takes its shape from, for a node being rewritten.
@@ -116,7 +142,7 @@ pub(super) fn rename_inherited(
     }
 }
 
-/// Whether a child receives the option along with the column.
+/// Whether an `INHERITS` child receives the option along with the column.
 ///
 /// PostgreSQL passes down what describes the column itself and withholds what
 /// would create a constraint or an index of its own: a primary key, a unique
@@ -129,8 +155,18 @@ fn is_inherited_option(option: &ColumnOption) -> bool {
 }
 
 /// Rewrites a parent column into the column the child receives.
-fn inherited_column(column: &ColumnDef) -> ColumnDef {
-    copy_column(column, is_inherited_option)
+///
+/// A partition withholds nothing, because PostgreSQL enforces the root's keys
+/// across every partition. The `NOT NULL` an option implies is added back
+/// either way, which is what the catalog holds too: a partition of an
+/// identity column carries a not-null constraint of its own.
+fn inherited_column(kind: ParentKind, column: &ColumnDef) -> ColumnDef {
+    copy_column(column, |option| {
+        match kind {
+            ParentKind::PartitionOf => true,
+            ParentKind::Inherits => is_inherited_option(option),
+        }
+    })
 }
 
 /// The name PostgreSQL resolves the type to, or [`None`] when the spelling is
@@ -213,16 +249,24 @@ fn same_column(left: &Ident, right: &Ident) -> bool {
     )
 }
 
-/// The check constraints a child receives from a parent.
+/// The table constraints a child receives from a parent.
 ///
 /// A check passes down whichever way it is written, so one attached to a
-/// column arrives with the column and one written on its own arrives here.
-fn inherited_checks(parent: &CreateTable) -> impl Iterator<Item = &TableConstraint> {
-    parent.constraints.iter().filter(|constraint| matches!(constraint, TableConstraint::Check(_)))
+/// column arrives with the column and one written on its own arrives here. A
+/// partition also receives the root's keys, unique constraints and foreign
+/// keys, because PostgreSQL enforces those across the whole hierarchy rather
+/// than one table at a time.
+fn inherited_constraints(
+    kind: ParentKind,
+    parent: &CreateTable,
+) -> impl Iterator<Item = &TableConstraint> {
+    parent.constraints.iter().filter(move |constraint| {
+        kind == ParentKind::PartitionOf || matches!(constraint, TableConstraint::Check(_))
+    })
 }
 
-/// Whether the table already carries an equivalent check.
-fn holds_check(create_table: &CreateTable, candidate: &TableConstraint) -> bool {
+/// Whether the table already carries an equivalent constraint.
+fn holds_constraint(create_table: &CreateTable, candidate: &TableConstraint) -> bool {
     create_table.constraints.iter().any(|existing| existing == candidate)
 }
 
@@ -244,7 +288,8 @@ pub(super) fn apply_parents(
     builder: &ParserDBBuilder,
     create_table: &mut CreateTable,
 ) -> Result<Vec<String>, Error> {
-    let parents: Vec<ObjectName> = parent_names(create_table).cloned().collect();
+    let parents: Vec<(ParentKind, ObjectName)> =
+        parents_with_kind(create_table).map(|(kind, name)| (kind, name.clone())).collect();
     if parents.is_empty() {
         return Ok(Vec::new());
     }
@@ -253,22 +298,22 @@ pub(super) fn apply_parents(
     let local: Vec<Ident> = create_table.columns.iter().map(|column| column.name.clone()).collect();
 
     let mut columns: Vec<ColumnDef> = Vec::new();
-    let mut checks: Vec<TableConstraint> = Vec::new();
+    let mut constraints: Vec<TableConstraint> = Vec::new();
 
-    for parent_name in &parents {
+    for (kind, parent_name) in &parents {
         let parent = resolve_parent(builder, parent_name, &child_name)?;
 
         for column in &parent.columns {
             // A second parent declaring the same column merges into the one
             // already taken, keeping the position the first parent gave it.
             if !columns.iter().any(|held| same_column(&held.name, &column.name)) {
-                columns.push(inherited_column(column));
+                columns.push(inherited_column(*kind, column));
             }
         }
 
-        for check in inherited_checks(parent) {
-            if !holds_check(create_table, check) && !checks.contains(check) {
-                checks.push(check.clone());
+        for constraint in inherited_constraints(*kind, parent) {
+            if !holds_constraint(create_table, constraint) && !constraints.contains(constraint) {
+                constraints.push(constraint.clone());
             }
         }
     }
@@ -304,7 +349,7 @@ pub(super) fn apply_parents(
         .collect();
 
     create_table.columns = columns;
-    create_table.constraints.extend(checks);
+    create_table.constraints.extend(constraints);
 
     Ok(inherited)
 }
@@ -328,12 +373,12 @@ fn merge_declarations(parent: &ColumnDef, child: &ColumnDef) -> ColumnDef {
 /// Names the parent a column reaches the child from, for the conflict message.
 fn parent_owning(
     builder: &ParserDBBuilder,
-    parents: &[ObjectName],
+    parents: &[(ParentKind, ObjectName)],
     column: &Ident,
 ) -> Option<String> {
     parents
         .iter()
-        .filter_map(|name| builder.resolve_table_object_name(name).ok().flatten())
+        .filter_map(|(_, name)| builder.resolve_table_object_name(name).ok().flatten())
         .find(|parent| parent.columns.iter().any(|held| same_column(&held.name, column)))
         .map(|parent| parent.name.to_string())
 }

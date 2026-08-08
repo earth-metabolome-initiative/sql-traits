@@ -9,13 +9,17 @@
 //!
 //! Every expectation here was measured against PostgreSQL 18.4 rather than
 //! read off the documentation, including the parts that are easy to guess
-//! wrong: a child does not receive the parent's primary key, unique
-//! constraint, foreign key or identity, but does receive its `NOT NULL`,
-//! `DEFAULT`, `CHECK`, collation and stored generated expression.
+//! wrong. An `INHERITS` child does not receive the parent's primary key,
+//! unique constraint, foreign key or identity, but does receive its
+//! `NOT NULL`, `DEFAULT`, `CHECK`, collation and stored generated expression.
+//! A partition receives every one of them, because PostgreSQL enforces a
+//! root's keys across the whole hierarchy rather than one table at a time,
+//! and the two links are told apart rather than folded together: a partition
+//! does not inherit from its root.
 #![allow(clippy::expect_used)]
 
 use sql_traits::{errors::Error, prelude::*};
-use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::dialect::{BigQueryDialect, PostgreSqlDialect};
 
 fn parse(sql: &str) -> Result<ParserDB, Error> {
     ParserDB::parse::<PostgreSqlDialect>(sql)
@@ -53,6 +57,15 @@ fn parent_names(database: &ParserDB, table_name: &str) -> Vec<String> {
         .expect("table is in this database")
         .map(|parent| parent.table_name().to_owned())
         .collect()
+}
+
+fn root_name(database: &ParserDB, table_name: &str) -> Option<String> {
+    database
+        .table(None, table_name)
+        .expect("table exists")
+        .partition_root(database)
+        .expect("table is in this database")
+        .map(|root| root.table_name().to_owned())
 }
 
 fn column<'db>(
@@ -233,7 +246,10 @@ fn a_partition_receives_every_column_of_the_table_it_partitions() {
     // parent's and none is local.
     assert_eq!(column_names(&database, "evt_2024"), ["id", "happened_at"]);
     assert_eq!(local_column_names(&database, "evt_2024"), Vec::<String>::new());
-    assert_eq!(parent_names(&database, "evt_2024"), ["evt"]);
+
+    // The link is a partition link, and not an inheritance one.
+    assert_eq!(root_name(&database, "evt_2024").as_deref(), Some("evt"));
+    assert_eq!(parent_names(&database, "evt_2024"), Vec::<String>::new());
 }
 
 #[test]
@@ -686,4 +702,209 @@ fn an_unbounded_length_compares_like_any_other() {
         ),
         Err(Error::InheritedColumnTypeConflict { .. })
     ));
+}
+
+#[test]
+fn a_partition_receives_the_roots_keys_and_an_inheritor_does_not() {
+    // PostgreSQL enforces a root's primary key across every partition, so the
+    // partition carries it. An `INHERITS` child may hold a row whose key
+    // duplicates one of the parent's, so it carries none of it.
+    //
+    // Every key of a partitioned table has to contain its partitioning
+    // columns, which is why the unique constraint here names `id` as well.
+    let database = database(
+        "CREATE TABLE target (id INT PRIMARY KEY);
+         CREATE TABLE root (
+             id INT PRIMARY KEY,
+             ref_id INT REFERENCES target (id),
+             code TEXT,
+             UNIQUE (id, code)
+         ) PARTITION BY RANGE (id);
+         CREATE TABLE part PARTITION OF root FOR VALUES FROM (1) TO (100);
+         CREATE TABLE parent (
+             id INT PRIMARY KEY,
+             ref_id INT REFERENCES target (id),
+             code TEXT,
+             UNIQUE (id, code)
+         );
+         CREATE TABLE child (extra TEXT) INHERITS (parent);",
+    );
+
+    let part = database.table(None, "part").expect("table exists");
+    assert_eq!(
+        part.primary_key_columns(&database)
+            .expect("in database")
+            .map(|column| column.column_name().to_owned())
+            .collect::<Vec<_>>(),
+        ["id"]
+    );
+    // The key's own index and the one behind `UNIQUE (id, code)`.
+    assert_eq!(part.unique_indices(&database).expect("in database").count(), 2);
+    assert_eq!(part.foreign_keys(&database).expect("in database").count(), 1);
+
+    let child = database.table(None, "child").expect("table exists");
+    assert_eq!(child.primary_key_columns(&database).expect("in database").count(), 0);
+    assert_eq!(child.unique_indices(&database).expect("in database").count(), 0);
+    assert_eq!(child.foreign_keys(&database).expect("in database").count(), 0);
+}
+
+#[test]
+fn a_partition_receives_the_roots_identity() {
+    // No accessor reports an identity, so this reads the declaration the
+    // model holds. An `INHERITS` child must not carry one, or it would own a
+    // sequence of its own, while a partition draws on the root's, which
+    // PostgreSQL reports as `attidentity = 'a'` on the partition too.
+    let database = database(
+        "CREATE TABLE root (id INT GENERATED ALWAYS AS IDENTITY, payload TEXT)
+             PARTITION BY RANGE (id);
+         CREATE TABLE part PARTITION OF root FOR VALUES FROM (1) TO (9);
+         CREATE TABLE parent (id INT GENERATED ALWAYS AS IDENTITY, payload TEXT);
+         CREATE TABLE child (extra TEXT) INHERITS (parent);",
+    );
+
+    let carries_identity = |table_name: &str| {
+        database
+            .table(None, table_name)
+            .expect("table exists")
+            .columns
+            .iter()
+            .find(|column| column.name.value == "id")
+            .expect("column exists")
+            .options
+            .iter()
+            .any(|option| {
+                matches!(
+                    option.option,
+                    sqlparser::ast::ColumnOption::Generated { generation_expr: None, .. }
+                )
+            })
+    };
+    assert!(carries_identity("part"));
+    assert!(!carries_identity("child"));
+
+    // Either way the `NOT NULL` an identity implies is kept, which PostgreSQL
+    // records as a not-null constraint on the partition as well.
+    for table_name in ["part", "child"] {
+        let table = database.table(None, table_name).expect("table exists");
+        assert!(!column(table, "id", &database).is_nullable(&database).expect("in database"));
+    }
+}
+
+#[test]
+fn a_root_answers_its_partitions_and_a_parent_its_inheritors() {
+    let database = database(
+        "CREATE TABLE root (id INT) PARTITION BY RANGE (id);
+         CREATE TABLE part_low PARTITION OF root FOR VALUES FROM (1) TO (9);
+         CREATE TABLE part_high PARTITION OF root FOR VALUES FROM (9) TO (99);
+         CREATE TABLE parent (id INT);
+         CREATE TABLE child (extra TEXT) INHERITS (parent);",
+    );
+
+    let root = database.table(None, "root").expect("table exists");
+    let partitions: Vec<_> = root
+        .partitions(&database)
+        .expect("in database")
+        .map(|partition| partition.table_name().to_owned())
+        .collect();
+    assert_eq!(partitions, ["part_high", "part_low"]);
+    assert_eq!(root.inheritors(&database).expect("in database").count(), 0);
+
+    let parent = database.table(None, "parent").expect("table exists");
+    assert_eq!(parent.partitions(&database).expect("in database").count(), 0);
+    assert_eq!(parent.inheritors(&database).expect("in database").count(), 1);
+    assert!(!parent.is_partition(&database).expect("in database"));
+}
+
+#[test]
+fn a_root_with_no_partitions_is_still_partitioned() {
+    // PostgreSQL refuses a row into a partitioned table with no partition to
+    // route it to, so the root holds no rows of its own from the moment it is
+    // written. An empty list of partitions cannot say that.
+    let database = database(
+        "CREATE TABLE root (id INT) PARTITION BY HASH (id);
+         CREATE TABLE plain (id INT);",
+    );
+
+    let root = database.table(None, "root").expect("table exists");
+    assert!(root.is_partitioned());
+    assert_eq!(root.partitions(&database).expect("in database").count(), 0);
+
+    let plain = database.table(None, "plain").expect("table exists");
+    assert!(!plain.is_partitioned());
+}
+
+#[test]
+fn every_partitioning_strategy_is_read_whatever_its_spelling() {
+    // PostgreSQL takes the strategy as a plain identifier and folds its case,
+    // so a quoted or mixed-case spelling names the same one. All three
+    // spellings of `RANGE` below record `partstrat = 'r'`.
+    let database = database(
+        "CREATE TABLE by_range (id INT) PARTITION BY RANGE (id);
+         CREATE TABLE by_list (region TEXT) PARTITION BY LIST (region);
+         CREATE TABLE by_hash (id INT) PARTITION BY HASH (id);
+         CREATE TABLE mixed_case (id INT) PARTITION BY rAnGe (id);
+         CREATE TABLE quoted (id INT) PARTITION BY \"RANGE\" (id);
+         CREATE TABLE several (a INT, b INT) PARTITION BY RANGE (a, b);
+         CREATE TABLE computed (a INT, b INT) PARTITION BY RANGE ((a + b));",
+    );
+
+    let strategy =
+        |name: &str| database.table(None, name).expect("table exists").partition_strategy();
+    assert_eq!(strategy("by_range"), Some(PartitionStrategy::Range));
+    assert_eq!(strategy("by_list"), Some(PartitionStrategy::List));
+    assert_eq!(strategy("by_hash"), Some(PartitionStrategy::Hash));
+    assert_eq!(strategy("mixed_case"), Some(PartitionStrategy::Range));
+    assert_eq!(strategy("quoted"), Some(PartitionStrategy::Range));
+    assert_eq!(strategy("several"), Some(PartitionStrategy::Range));
+    assert_eq!(strategy("computed"), Some(PartitionStrategy::Range));
+}
+
+#[test]
+fn a_partitioning_expression_of_another_dialect_is_not_a_strategy() {
+    // BigQuery writes an ordinary table's storage layout into the very same
+    // clause, and such a table does hold its own rows, so it is not a root.
+    let database = ParserDB::parse::<BigQueryDialect>(
+        "CREATE TABLE events (ts TIMESTAMP, id INT64) PARTITION BY DATE(ts)",
+    )
+    .expect("schema parses");
+
+    let events = database.table(None, "events").expect("table exists");
+    assert_eq!(events.partition_strategy(), None);
+    assert!(!events.is_partitioned());
+}
+
+#[test]
+fn a_partition_can_itself_be_partitioned() {
+    // PostgreSQL answers `relkind = 'p'` and `relispartition = true` for the
+    // middle table, so belonging to a root and having partitions are two
+    // separate facts about one table.
+    //
+    // Both partitioning columns have to sit in the key, since each level
+    // partitions on one of them.
+    let database = database(
+        "CREATE TABLE top (id INT, region TEXT, PRIMARY KEY (id, region))
+             PARTITION BY RANGE (id);
+         CREATE TABLE middle PARTITION OF top
+             FOR VALUES FROM (1) TO (9) PARTITION BY LIST (region);
+         CREATE TABLE leaf PARTITION OF middle FOR VALUES IN ('eu');",
+    );
+
+    let middle = database.table(None, "middle").expect("table exists");
+    assert!(middle.is_partition(&database).expect("in database"));
+    assert!(middle.is_partitioned());
+    assert_eq!(middle.partition_strategy(), Some(PartitionStrategy::List));
+    assert_eq!(root_name(&database, "middle").as_deref(), Some("top"));
+
+    // The root's key reaches the whole chain, one level at a time.
+    let leaf = database.table(None, "leaf").expect("table exists");
+    assert!(leaf.is_partition(&database).expect("in database"));
+    assert!(!leaf.is_partitioned());
+    assert_eq!(
+        leaf.primary_key_columns(&database)
+            .expect("in database")
+            .map(|column| column.column_name().to_owned())
+            .collect::<Vec<_>>(),
+        ["id", "region"]
+    );
+    assert_eq!(root_name(&database, "leaf").as_deref(), Some("middle"));
 }
