@@ -762,6 +762,15 @@ struct RenameTarget {
     schema_changed: bool,
 }
 
+/// The two clauses an `ALTER TABLE` header carries into every operation it
+/// lists: whether an absent table is excused, and whether the tables taking
+/// their shape from this one are to be left alone.
+#[derive(Clone, Copy)]
+struct AlterTableScope {
+    if_exists: bool,
+    only: bool,
+}
+
 impl RenameTarget {
     /// `ALTER TABLE ... RENAME TO` spells the new name without a schema and
     /// cannot move a table between schemas, so a bare new name inherits the
@@ -2589,6 +2598,11 @@ impl ParserDB {
         // Which columns came from a parent is not spelled by the node, so it
         // has to survive the rebuild the way the other unspelled settings do.
         metadata.set_inherited_column_names(previous_metadata.inherited_column_names().to_vec());
+        metadata.set_inherited_constraints(inheritance::follow_constraint_rewrite(
+            previous_metadata.inherited_constraints(),
+            &previous_node.constraints,
+            &replacement.constraints,
+        ));
 
         let detached_indices = builder.take_table_derived_objects(
             &stored.name,
@@ -3002,23 +3016,190 @@ impl ParserDB {
     /// it is recomputed rather than patched.
     fn alter_table_constraints(
         builder: ParserDBBuilder,
-        table_name: &ObjectName,
-        if_exists: bool,
+        stored: &StoredTable,
         edit: impl FnOnce(&CreateTable, &mut Vec<TableConstraint>) -> Result<(), crate::errors::Error>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        let Some(resolved_table) = builder.resolve_table_object_name(table_name)? else {
+        Self::replace_table_node(builder, stored, |previous, replacement| {
+            edit(previous, &mut replacement.constraints)
+        })
+    }
+
+    /// Adds a constraint to a table and to every table that takes its shape
+    /// from it.
+    ///
+    /// The walk goes one edge at a time rather than over the whole descendant
+    /// set, because how much of a parent's declaration a table receives
+    /// depends on the spelling of the edge it arrives through: an `INHERITS`
+    /// child receives a check and nothing else, while a partition receives the
+    /// root's keys and foreign keys as well.
+    fn alter_table_add_constraint(
+        builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        scope: AlterTableScope,
+        constraint: TableConstraint,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
+            return Ok(builder);
+        };
+        Self::refuse_only_with_children(
+            &builder,
+            &stored,
+            scope,
+            crate::errors::InheritedChange::AddConstraint,
+        )?;
+
+        let mut builder = Self::alter_table_constraints(builder, &stored, |_, constraints| {
+            constraints.push(constraint.clone());
+            Ok(())
+        })?;
+
+        let mut frontier = alloc::vec![(stored, constraint)];
+        let mut reached: Vec<StoredTable> = Vec::new();
+
+        while let Some((current, passed)) = frontier.pop() {
+            for (kind, child) in inheritance::direct_children(&builder, &current) {
+                // Whether the edge carries the constraint is a property of the
+                // edge, so it is asked before the table is counted as visited.
+                if !inheritance::passes_down(kind, &passed) || reached.contains(&child) {
+                    continue;
+                }
+                reached.push(child.clone());
+
+                // A table already holding an equivalent constraint keeps its
+                // own, the way PostgreSQL merges the two rather than adding a
+                // second, and keeps it as its own so the parent's drop spares
+                // it. Asked before a name is built, since the copy is then
+                // never made.
+                let node = Self::stored_node(&builder, &child)?;
+                if let Some(held) =
+                    node.constraints.iter().find(|held| inheritance::is_copy_of(held, &passed))
+                {
+                    frontier.push((child, held.clone()));
+                    continue;
+                }
+
+                let mut taken = Vec::new();
+                let Some(copy) =
+                    inheritance::received_constraint(&builder, kind, node, &passed, &mut taken)
+                else {
+                    continue;
+                };
+
+                let recorded = copy.clone();
+                builder = Self::alter_table_constraints(builder, &child, |_, constraints| {
+                    constraints.push(recorded);
+                    Ok(())
+                })?;
+                inheritance::mark_inherited_constraint(&mut builder, &child, &copy);
+                frontier.push((child, copy));
+            }
+        }
+
+        Ok(builder)
+    }
+
+    /// Drops a named constraint from a table, taking it out of every table
+    /// that received it.
+    ///
+    /// A table that declared an equivalent constraint itself keeps its own,
+    /// and so does one still receiving it from another parent. `ONLY` stops
+    /// the walk at the named table and leaves the copies behind as their
+    /// holders' own, which is what PostgreSQL leaves.
+    fn alter_table_drop_constraint(
+        builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        scope: AlterTableScope,
+        name: &Ident,
+        if_exists: bool,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
+            return Ok(builder);
+        };
+
+        let node = Self::stored_node(&builder, &stored)?;
+        let Some(dropped) =
+            node.constraints.iter().find(|held| table_constraint_has_name(held, name)).cloned()
+        else {
             if if_exists {
                 return Ok(builder);
             }
-            return Err(crate::errors::Error::AlterTableNotFound {
-                table_name: last_str(table_name).to_string(),
+            return Err(crate::errors::Error::DropConstraintNotFound {
+                table_name: node.name.to_string(),
+                constraint_name: name.value.clone(),
             });
         };
-        let stored = StoredTable::of(resolved_table);
 
-        Self::replace_table_node(builder, &stored, |previous, replacement| {
-            edit(previous, &mut replacement.constraints)
-        })
+        // Only the table that holds a constraint as its own may drop it, which
+        // is checked before anything moves so a refusal changes nothing.
+        if inheritance::receives_constraint(&builder, node, &dropped) {
+            return Err(crate::errors::Error::InheritedConstraintNotDroppable {
+                table_name: stored.name.clone(),
+                constraint_name: name.value.clone(),
+            });
+        }
+
+        let mut builder = Self::alter_table_constraints(builder, &stored, |_, constraints| {
+            constraints.retain(|held| !table_constraint_has_name(held, name));
+            Ok(())
+        })?;
+
+        if scope.only {
+            // The tables below keep their copies, and each becomes the holder's
+            // own now that nothing passes it down. A grandchild is untouched,
+            // because its own parent still holds one.
+            for (_, child) in inheritance::direct_children(&builder, &stored) {
+                let node = Self::stored_node(&builder, &child)?;
+                let held: Vec<TableConstraint> = node
+                    .constraints
+                    .iter()
+                    .filter(|held| inheritance::is_copy_of(held, &dropped))
+                    .cloned()
+                    .collect();
+                for constraint in &held {
+                    inheritance::unmark_inherited_constraint(&mut builder, &child, constraint);
+                }
+            }
+            return Ok(builder);
+        }
+
+        let mut frontier = alloc::vec![(stored, dropped)];
+        let mut reached: Vec<StoredTable> = Vec::new();
+
+        while let Some((current, passed)) = frontier.pop() {
+            for (kind, child) in inheritance::direct_children(&builder, &current) {
+                if reached.contains(&child) || !inheritance::passes_down(kind, &passed) {
+                    continue;
+                }
+                reached.push(child.clone());
+
+                let node = Self::stored_node(&builder, &child)?;
+                let Some(copy) = node
+                    .constraints
+                    .iter()
+                    .find(|held| inheritance::is_copy_of(held, &passed))
+                    .cloned()
+                else {
+                    continue;
+                };
+
+                // A copy the table declared itself stays, and so does one
+                // another parent still passes down.
+                if !inheritance::records_inherited_constraint(&builder, &child, &copy)
+                    || inheritance::receives_constraint(&builder, node, &copy)
+                {
+                    continue;
+                }
+
+                let removed = copy.clone();
+                builder = Self::alter_table_constraints(builder, &child, |_, constraints| {
+                    constraints.retain(|held| *held != removed);
+                    Ok(())
+                })?;
+                frontier.push((child, copy));
+            }
+        }
+
+        Ok(builder)
     }
 
     /// Applies `edit` to the metadata of the table an `ALTER TABLE` statement
@@ -3076,11 +3257,11 @@ impl ParserDB {
     fn alter_table_target(
         builder: &ParserDBBuilder,
         table_name: &ObjectName,
-        if_exists: bool,
+        scope: AlterTableScope,
     ) -> Result<Option<StoredTable>, crate::errors::Error> {
         match builder.resolve_table_object_name(table_name)? {
             Some(resolved) => Ok(Some(StoredTable::of(resolved))),
-            None if if_exists => Ok(None),
+            None if scope.if_exists => Ok(None),
             None => {
                 Err(crate::errors::Error::AlterTableNotFound {
                     table_name: last_str(table_name).to_string(),
@@ -3103,16 +3284,37 @@ impl ParserDB {
             .ok_or_else(|| ObjectKind::Table.not_in_database(&stored.name).into())
     }
 
+    /// Refuses a change `ONLY` would withhold from tables that inherit it.
+    ///
+    /// PostgreSQL grants `ONLY` only where the change can stand on one table
+    /// alone. Adding and renaming cannot: the tables below would end up
+    /// disagreeing with the one their shape comes from, so the whole statement
+    /// is refused rather than half applied.
+    fn refuse_only_with_children(
+        builder: &ParserDBBuilder,
+        stored: &StoredTable,
+        scope: AlterTableScope,
+        change: crate::errors::InheritedChange,
+    ) -> Result<(), crate::errors::Error> {
+        if scope.only && !inheritance::direct_children(builder, stored).is_empty() {
+            return Err(crate::errors::Error::OnlyRefusedWithChildren {
+                table_name: stored.name.clone(),
+                change,
+            });
+        }
+        Ok(())
+    }
+
     /// Adds a column to a table.
     fn alter_table_add_column(
         builder: ParserDBBuilder,
         table_name: &ObjectName,
-        if_exists: bool,
+        scope: AlterTableScope,
         column_def: ColumnDef,
         if_not_exists: bool,
         position: Option<&MySQLColumnPosition>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
         };
         let added = NamedColumn::of(&column_def.name);
@@ -3126,6 +3328,12 @@ impl ParserDB {
                 column_name: added.name.clone(),
             });
         }
+        Self::refuse_only_with_children(
+            &builder,
+            &stored,
+            scope,
+            crate::errors::InheritedChange::AddColumn,
+        )?;
 
         // PostgreSQL gives the column to every table inheriting this one,
         // added at the end of each because their own columns already hold
@@ -3173,12 +3381,12 @@ impl ParserDB {
     fn alter_table_drop_columns(
         mut builder: ParserDBBuilder,
         table_name: &ObjectName,
-        if_exists: bool,
+        scope: AlterTableScope,
         column_names: &[Ident],
         column_if_exists: bool,
         cascade: bool,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
         };
 
@@ -3209,8 +3417,11 @@ impl ParserDB {
                 });
             }
 
-            // The column leaves every table inheriting this one along with it.
-            let inheritors = inheritance::descendants(&builder, &stored);
+            // The column leaves every table inheriting this one along with it,
+            // unless `ONLY` asked for the named table, which leaves each
+            // direct child holding the column as its own.
+            let inheritors =
+                if scope.only { Vec::new() } else { inheritance::descendants(&builder, &stored) };
 
             // Which other tables declare a column of this name decides who a
             // mention inside a nested query belongs to, so it is read before
@@ -3248,6 +3459,12 @@ impl ParserDB {
                     Ok(())
                 })?;
             }
+
+            if scope.only {
+                for (_, child) in inheritance::direct_children(&builder, &stored) {
+                    inheritance::unmark_inherited(&mut builder, &child, &column.name);
+                }
+            }
         }
 
         Ok(builder)
@@ -3261,13 +3478,19 @@ impl ParserDB {
     fn alter_table_rename_column(
         mut builder: ParserDBBuilder,
         table_name: &ObjectName,
-        if_exists: bool,
+        scope: AlterTableScope,
         old_column_name: &Ident,
         new_column_name: &Ident,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
         };
+        Self::refuse_only_with_children(
+            &builder,
+            &stored,
+            scope,
+            crate::errors::InheritedChange::RenameColumn,
+        )?;
         let from = NamedColumn::of(old_column_name);
         let to = NamedColumn::of(new_column_name);
         let node = Self::stored_node(&builder, &stored)?;
@@ -3329,11 +3552,11 @@ impl ParserDB {
     fn alter_table_column_def(
         builder: ParserDBBuilder,
         table_name: &ObjectName,
-        if_exists: bool,
+        scope: AlterTableScope,
         column_name: &Ident,
         edit: impl Fn(&mut ColumnDef),
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
+        let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
         };
         let column = NamedColumn::of(column_name);
@@ -3346,9 +3569,12 @@ impl ParserDB {
             .into());
         }
 
-        // A child holds its own copy of an inherited column, so the change
-        // has to reach it too.
-        let inheritors = inheritance::descendants(&builder, &stored);
+        // A child holds its own copy of an inherited column, so the change has
+        // to reach it too, unless `ONLY` asked for the named table. PostgreSQL
+        // grants that here, because a table below may differ on what a column
+        // holds without disagreeing on what the column is.
+        let inheritors =
+            if scope.only { Vec::new() } else { inheritance::descendants(&builder, &stored) };
         let apply = |node: &mut CreateTable| {
             if let Some(declared) =
                 node.columns.iter_mut().find(|declared| column.matches(&declared.name))
@@ -4163,6 +4389,10 @@ impl ParserDB {
                     builder = builder.add_index(index, metadata);
                 }
                 Statement::AlterTable(alter_table) => {
+                    let scope = AlterTableScope {
+                        if_exists: alter_table.if_exists,
+                        only: alter_table.only,
+                    };
                     for operation in alter_table.operations {
                         match operation {
                             AlterTableOperation::EnableRowLevelSecurity => {
@@ -4210,36 +4440,20 @@ impl ParserDB {
                                 )?;
                             }
                             AlterTableOperation::AddConstraint { constraint, .. } => {
-                                builder = Self::alter_table_constraints(
+                                builder = Self::alter_table_add_constraint(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
-                                    |_, constraints| {
-                                        constraints.push(constraint);
-                                        Ok(())
-                                    },
+                                    scope,
+                                    constraint,
                                 )?;
                             }
                             AlterTableOperation::DropConstraint { if_exists, name, .. } => {
-                                builder = Self::alter_table_constraints(
+                                builder = Self::alter_table_drop_constraint(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
-                                    |table, constraints| {
-                                        let declared = constraints.len();
-                                        constraints.retain(|constraint| {
-                                            !table_constraint_has_name(constraint, &name)
-                                        });
-                                        if constraints.len() == declared && !if_exists {
-                                            return Err(
-                                                crate::errors::Error::DropConstraintNotFound {
-                                                    table_name: table.name.to_string(),
-                                                    constraint_name: name.value.clone(),
-                                                },
-                                            );
-                                        }
-                                        Ok(())
-                                    },
+                                    scope,
+                                    &name,
+                                    if_exists,
                                 )?;
                             }
                             AlterTableOperation::AddColumn {
@@ -4251,7 +4465,7 @@ impl ParserDB {
                                 builder = Self::alter_table_add_column(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                     column_def,
                                     if_not_exists,
                                     column_position.as_ref(),
@@ -4266,7 +4480,7 @@ impl ParserDB {
                                 builder = Self::alter_table_drop_columns(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                     &column_names,
                                     if_exists,
                                     drop_behavior == Some(DropBehavior::Cascade),
@@ -4279,7 +4493,7 @@ impl ParserDB {
                                 builder = Self::alter_table_rename_column(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                     &old_column_name,
                                     &new_column_name,
                                 )?;
@@ -4288,7 +4502,7 @@ impl ParserDB {
                                 builder = Self::alter_table_column_def(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                     &column_name,
                                     |declared| Self::apply_alter_column(declared, op.clone()),
                                 )?;
@@ -4303,14 +4517,14 @@ impl ParserDB {
                                 builder = Self::alter_table_rename_column(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                     &old_name,
                                     &new_name,
                                 )?;
                                 builder = Self::alter_table_column_def(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                     &new_name,
                                     |declared| {
                                         redeclare_column(
@@ -4330,7 +4544,7 @@ impl ParserDB {
                                 builder = Self::alter_table_column_def(
                                     builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                     &col_name,
                                     |declared| {
                                         redeclare_column(
@@ -4356,7 +4570,7 @@ impl ParserDB {
                                 if Self::alter_table_target(
                                     &builder,
                                     &alter_table.name,
-                                    alter_table.if_exists,
+                                    scope,
                                 )?
                                 .is_some()
                                 {
@@ -4509,7 +4723,8 @@ impl ParserDB {
                     // leaves the edges acyclic.
                     let inherited = inheritance::apply_parents(&builder, &mut create_table)?;
                     let mut metadata = TableMetadata::default();
-                    metadata.set_inherited_column_names(inherited);
+                    metadata.set_inherited_column_names(inherited.columns);
+                    metadata.set_inherited_constraints(inherited.constraints);
                     builder = Self::ingest_table_node(builder, Arc::new(create_table), metadata)?;
                 }
                 Statement::CreatePolicy(policy) => {
