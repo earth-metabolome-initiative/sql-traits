@@ -12,10 +12,11 @@ env:
 jobs:
   test:
     name: Build and Test
-    runs-on: ${{ matrix.os }}
+    # Linux only. The macOS and Windows runners bill at several times the
+    # Linux rate and this crate has no platform-specific code to cover.
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         rust: [stable, beta, nightly]
     steps:
     - uses: actions/checkout@v7
