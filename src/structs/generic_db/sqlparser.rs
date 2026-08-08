@@ -56,7 +56,10 @@ use crate::{
     },
 };
 
+mod column_copy;
 mod functions_in_expression;
+mod inheritance;
+mod like;
 mod parse_options;
 
 pub use parse_options::{AccessResolution, ParseOptions};
@@ -698,6 +701,7 @@ fn object_name_matches_resolved_identity(
 
 /// The four values every table lookup in this module keys on, owned so that it
 /// survives the mutations a rename performs on the stores it walks.
+#[derive(Clone, PartialEq, Eq)]
 struct StoredTable {
     name: String,
     name_quoted: bool,
@@ -2527,19 +2531,25 @@ impl ParserDB {
             .tables()
             .iter()
             .map(|(table, _)| table.as_ref())
-            .filter(|table| !renamed.matches(table) && table_references(table, &renamed))
+            .filter(|table| {
+                !renamed.matches(table)
+                    && (table_references(table, &renamed)
+                        || inheritance::names_parent(table, &renamed))
+            })
             .map(StoredTable::of)
             .collect();
 
         builder = Self::replace_table_node(builder, &renamed, |_, node| {
             node.name = target.name.clone();
             rewrite_foreign_key_targets(node, &renamed, &target);
+            inheritance::rewrite_parent_names(node, &renamed, &target);
             Ok(())
         })?;
 
         for host in &hosts {
             builder = Self::replace_table_node(builder, host, |_, node| {
                 rewrite_foreign_key_targets(node, &renamed, &target);
+                inheritance::rewrite_parent_names(node, &renamed, &target);
                 Ok(())
             })?;
         }
@@ -2576,6 +2586,9 @@ impl ParserDB {
         metadata.set_rls_enabled(previous_metadata.rls_enabled());
         metadata.set_rls_forced(previous_metadata.rls_forced());
         metadata.set_owner(previous_metadata.owner().map(str::to_string));
+        // Which columns came from a parent is not spelled by the node, so it
+        // has to survive the rebuild the way the other unspelled settings do.
+        metadata.set_inherited_column_names(previous_metadata.inherited_column_names().to_vec());
 
         let detached_indices = builder.take_table_derived_objects(
             &stored.name,
@@ -3114,7 +3127,14 @@ impl ParserDB {
             });
         }
 
-        Self::replace_table_node(builder, &stored, |_, node| {
+        // PostgreSQL gives the column to every table inheriting this one,
+        // added at the end of each because their own columns already hold
+        // their places. Read before the parent changes, so the list is the
+        // one the statement found.
+        let inheritors = inheritance::descendants(&builder, &stored);
+        let inherited_def = column_def.clone();
+
+        let mut builder = Self::replace_table_node(builder, &stored, |_, node| {
             let at = match position {
                 Some(MySQLColumnPosition::First) => 0,
                 Some(MySQLColumnPosition::After(after)) => {
@@ -3128,7 +3148,23 @@ impl ParserDB {
             };
             node.columns.insert(at, column_def);
             Ok(())
-        })
+        })?;
+
+        for child in &inheritors {
+            // A child already declaring the name keeps its own, the way
+            // PostgreSQL merges the two rather than adding a second.
+            if added.declared_by(Self::stored_node(&builder, child)?) {
+                continue;
+            }
+            let inherited_def = inherited_def.clone();
+            builder = Self::replace_table_node(builder, child, |_, node| {
+                node.columns.push(inherited_def);
+                Ok(())
+            })?;
+            inheritance::mark_inherited(&mut builder, child, &added.name);
+        }
+
+        Ok(builder)
     }
 
     /// Drops columns from a table, taking with them what the real database
@@ -3160,6 +3196,22 @@ impl ParserDB {
                 .into());
             }
 
+            // A child cannot drop a column it receives from a parent, which
+            // PostgreSQL refuses outright.
+            if inheritance::is_inherited_column(
+                &builder,
+                Self::stored_node(&builder, &stored)?,
+                column_name,
+            ) {
+                return Err(crate::errors::Error::InheritedColumnNotDroppable {
+                    table_name: stored.name.clone(),
+                    column_name: column.name.clone(),
+                });
+            }
+
+            // The column leaves every table inheriting this one along with it.
+            let inheritors = inheritance::descendants(&builder, &stored);
+
             // Which other tables declare a column of this name decides who a
             // mention inside a nested query belongs to, so it is read before
             // anything moves.
@@ -3187,6 +3239,15 @@ impl ParserDB {
                 drop_column_from_node(node, &stored, &declaring, &column);
                 Ok(())
             })?;
+
+            for child in &inheritors {
+                let declaring = tables_declaring_column(&builder, child, &column);
+                builder.take_column_dependents(child, &declaring, &column);
+                builder = Self::replace_table_node(builder, child, |_, node| {
+                    drop_column_from_node(node, child, &declaring, &column);
+                    Ok(())
+                })?;
+            }
         }
 
         Ok(builder)
@@ -3236,6 +3297,9 @@ impl ParserDB {
             .map(StoredTable::of)
             .collect();
         let declaring = tables_declaring_column(&builder, &stored, &from);
+        // The new name reaches every table inheriting this one, because a
+        // child holds its own copy of an inherited column.
+        let inheritors = inheritance::descendants(&builder, &stored);
 
         builder.rewrite_column_references(&stored, &declaring, &from, new_column_name);
         builder = Self::replace_table_node(builder, &stored, |_, node| {
@@ -3248,6 +3312,15 @@ impl ParserDB {
                 Ok(())
             })?;
         }
+        for child in &inheritors {
+            let declaring = tables_declaring_column(&builder, child, &from);
+            builder.rewrite_column_references(child, &declaring, &from, new_column_name);
+            builder = Self::replace_table_node(builder, child, |_, node| {
+                rename_column_in_node(node, child, &declaring, &from, new_column_name);
+                Ok(())
+            })?;
+            inheritance::rename_inherited(&mut builder, child, &from.name, new_column_name);
+        }
 
         Ok(builder)
     }
@@ -3258,7 +3331,7 @@ impl ParserDB {
         table_name: &ObjectName,
         if_exists: bool,
         column_name: &Ident,
-        edit: impl FnOnce(&mut ColumnDef),
+        edit: impl Fn(&mut ColumnDef),
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         let Some(stored) = Self::alter_table_target(&builder, table_name, if_exists)? else {
             return Ok(builder);
@@ -3273,14 +3346,29 @@ impl ParserDB {
             .into());
         }
 
-        Self::replace_table_node(builder, &stored, |_, node| {
+        // A child holds its own copy of an inherited column, so the change
+        // has to reach it too.
+        let inheritors = inheritance::descendants(&builder, &stored);
+        let apply = |node: &mut CreateTable| {
             if let Some(declared) =
                 node.columns.iter_mut().find(|declared| column.matches(&declared.name))
             {
                 edit(declared);
             }
+        };
+
+        let mut builder = Self::replace_table_node(builder, &stored, |_, node| {
+            apply(node);
             Ok(())
-        })
+        })?;
+        for child in &inheritors {
+            builder = Self::replace_table_node(builder, child, |_, node| {
+                apply(node);
+                Ok(())
+            })?;
+        }
+
+        Ok(builder)
     }
 
     /// Applies an `ALTER COLUMN` operation to a column declaration.
@@ -3626,6 +3714,26 @@ impl ParserDB {
                         let resolved_table_quoted = table.table_name_is_quoted();
                         let resolved_schema_name = table.table_schema().map(str::to_string);
                         let resolved_schema_quoted = table.table_schema_is_quoted();
+                        let dropped = StoredTable::of(table);
+
+                        // A child builds its column list out of its parents,
+                        // so a parent cannot leave while a child still names
+                        // it. `CASCADE` takes the children with it.
+                        let children = inheritance::descendants(&builder, &dropped);
+                        if !cascade && let Some(child) = children.first() {
+                            return Err(crate::errors::Error::DropTableInheritedFrom {
+                                parent_table: resolved_table_name.clone(),
+                                child_table: child.name.clone(),
+                            });
+                        }
+                        for child in &children {
+                            builder.remove_table(
+                                &child.name,
+                                child.name_quoted,
+                                child.schema.as_deref(),
+                                child.schema_quoted,
+                            );
+                        }
 
                         // Check for references from other tables (unless CASCADE)
                         if !cascade
@@ -4182,7 +4290,7 @@ impl ParserDB {
                                     &alter_table.name,
                                     alter_table.if_exists,
                                     &column_name,
-                                    |declared| Self::apply_alter_column(declared, op),
+                                    |declared| Self::apply_alter_column(declared, op.clone()),
                                 )?;
                             }
                             AlterTableOperation::ChangeColumn {
@@ -4204,7 +4312,13 @@ impl ParserDB {
                                     &alter_table.name,
                                     alter_table.if_exists,
                                     &new_name,
-                                    |declared| redeclare_column(declared, data_type, options),
+                                    |declared| {
+                                        redeclare_column(
+                                            declared,
+                                            data_type.clone(),
+                                            options.clone(),
+                                        );
+                                    },
                                 )?;
                             }
                             AlterTableOperation::ModifyColumn {
@@ -4218,7 +4332,13 @@ impl ParserDB {
                                     &alter_table.name,
                                     alter_table.if_exists,
                                     &col_name,
-                                    |declared| redeclare_column(declared, data_type, options),
+                                    |declared| {
+                                        redeclare_column(
+                                            declared,
+                                            data_type.clone(),
+                                            options.clone(),
+                                        );
+                                    },
                                 )?;
                             }
 
@@ -4376,11 +4496,21 @@ impl ParserDB {
                     {
                         continue;
                     }
-                    builder = Self::ingest_table_node(
-                        builder,
-                        Arc::new(create_table),
-                        TableMetadata::default(),
-                    )?;
+
+                    // A `LIKE` copy becomes the table's own columns, so it
+                    // runs before the parents contribute theirs.
+                    like::apply_like(&builder, &mut create_table)?;
+
+                    // PostgreSQL copies the parent's shape into the child
+                    // while running this statement, so the node carries the
+                    // inherited columns from here on and everything derived
+                    // from it sees them. A parent has to exist by now, the
+                    // way a foreign key target does, which is also what
+                    // leaves the edges acyclic.
+                    let inherited = inheritance::apply_parents(&builder, &mut create_table)?;
+                    let mut metadata = TableMetadata::default();
+                    metadata.set_inherited_column_names(inherited);
+                    builder = Self::ingest_table_node(builder, Arc::new(create_table), metadata)?;
                 }
                 Statement::CreatePolicy(policy) => {
                     require_named(&policy.table_name, crate::errors::ObjectKind::Table)?;

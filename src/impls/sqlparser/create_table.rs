@@ -1,7 +1,7 @@
 //! Submodule implementing the [`TableLike`] trait for `sqlparser`'s
 //! [`CreateTable`] struct.
 
-use alloc::string::ToString;
+use alloc::{string::ToString, vec::Vec};
 
 use ::sqlparser::ast::{CreateTable, Ident, ObjectNamePart};
 use sql_docs::docs::TableDoc;
@@ -94,6 +94,35 @@ impl TableLike for CreateTable {
         Self: 'db,
     {
         Ok(table_metadata(self, database)?.columns())
+    }
+
+    fn local_columns<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
+    where
+        Self: 'db,
+    {
+        Ok(table_metadata(self, database)?.local_columns())
+    }
+
+    fn inherits_from<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        // Membership is what every accessor here checks first, and the parent
+        // list is read off the node rather than the metadata.
+        self.require_in_database(database)?;
+        let mut parents = Vec::new();
+        for name in self.inherits.iter().flatten().chain(self.partition_of.iter()) {
+            if let Some(parent) = database.resolve_table_object_name(name)? {
+                parents.push(parent);
+            }
+        }
+        Ok(parents.into_iter())
     }
 
     fn primary_key_columns<'db>(
