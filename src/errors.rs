@@ -70,6 +70,25 @@ impl core::fmt::Display for InheritedChange {
     }
 }
 
+/// Why a column may not stop requiring a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RequiredValue {
+    /// A key on the same table covers the column, and a key never matches a row
+    /// holding nothing.
+    CoveredByKey,
+    /// A parent requires it, so only the parent may lift the requirement.
+    EnforcedByParent,
+}
+
+impl core::fmt::Display for RequiredValue {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::CoveredByKey => "a key covers it",
+            Self::EnforcedByParent => "a parent requires it",
+        })
+    }
+}
+
 impl ObjectKind {
     /// Reports an object of this kind that the queried database does not hold,
     /// identified by its own `name`.
@@ -234,6 +253,30 @@ pub enum Error {
         table_name: String,
         /// The change that cannot stop at the named table.
         change: InheritedChange,
+    },
+    #[error(
+        "Column `{column_name}` of table `{table_name}` cannot stop requiring a value because {reason}."
+    )]
+    /// Error indicating that `ALTER COLUMN ... DROP NOT NULL` named a column
+    /// something else requires a value in.
+    RequiredValueNotDroppable {
+        /// Name of the table the statement names.
+        table_name: String,
+        /// Name of the column.
+        column_name: String,
+        /// What keeps the requirement in place.
+        reason: RequiredValue,
+    },
+    #[error(
+        "Column `{column_name}` of table `{table_name}` must require a value before it can be given an identity."
+    )]
+    /// Error indicating that `ALTER COLUMN ... ADD GENERATED AS IDENTITY` named
+    /// a column that may still hold nothing, which PostgreSQL refuses.
+    IdentityNeedsRequiredValue {
+        /// Name of the table the statement names.
+        table_name: String,
+        /// Name of the column.
+        column_name: String,
     },
     #[error(
         "Column `{column_name}` of table `{child_table}` has type `{child_type}`, conflicting with type `{parent_type}` inherited from `{parent_table}`."
