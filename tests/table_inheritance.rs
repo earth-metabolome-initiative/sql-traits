@@ -467,7 +467,9 @@ fn a_table_without_a_parent_is_left_alone() {
 fn the_accessors_answer_the_same_through_a_reference() {
     let database = database(
         "CREATE TABLE docs (id INT);
-         CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);",
+         CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);
+         CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
+         CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     );
     let child = database.table(None, "secret_docs").expect("table exists");
     let by_reference = &child;
@@ -490,6 +492,23 @@ fn the_accessors_answer_the_same_through_a_reference() {
     let parent = database.table(None, "docs").expect("table exists");
     let parent_reference = &parent;
     assert_eq!(TableLike::inheritors(parent_reference, &database).expect("in database").count(), 1);
+
+    let root = database.table(None, "evt").expect("table exists");
+    let root_reference = &root;
+    assert_eq!(TableLike::partitions(root_reference, &database).expect("in database").count(), 1);
+    assert_eq!(TableLike::partition_strategy(root_reference), Some(PartitionStrategy::Range));
+    assert!(TableLike::is_partitioned(root_reference));
+    assert!(!TableLike::is_partition(root_reference, &database).expect("in database"));
+
+    let partition = database.table(None, "evt_low").expect("table exists");
+    let partition_reference = &partition;
+    assert_eq!(
+        TableLike::partition_root(partition_reference, &database)
+            .expect("in database")
+            .map(|root| root.table_name().to_owned()),
+        Some("evt".to_owned())
+    );
+    assert!(TableLike::is_partition(partition_reference, &database).expect("in database"));
 }
 
 #[test]
@@ -863,14 +882,21 @@ fn every_partitioning_strategy_is_read_whatever_its_spelling() {
 fn a_partitioning_expression_of_another_dialect_is_not_a_strategy() {
     // BigQuery writes an ordinary table's storage layout into the very same
     // clause, and such a table does hold its own rows, so it is not a root.
+    // The clause reaches this crate as a call, as a bare column, and as a
+    // call to a qualified user function, and none of the three names a
+    // strategy.
     let database = ParserDB::parse::<BigQueryDialect>(
-        "CREATE TABLE events (ts TIMESTAMP, id INT64) PARTITION BY DATE(ts)",
+        "CREATE TABLE by_call (ts TIMESTAMP, id INT64) PARTITION BY DATE(ts);
+         CREATE TABLE by_column (ts TIMESTAMP) PARTITION BY _PARTITIONDATE;
+         CREATE TABLE by_qualified_call (ts TIMESTAMP) PARTITION BY dataset.udf(ts);",
     )
     .expect("schema parses");
 
-    let events = database.table(None, "events").expect("table exists");
-    assert_eq!(events.partition_strategy(), None);
-    assert!(!events.is_partitioned());
+    for name in ["by_call", "by_column", "by_qualified_call"] {
+        let table = database.table(None, name).expect("table exists");
+        assert_eq!(table.partition_strategy(), None);
+        assert!(!table.is_partitioned());
+    }
 }
 
 #[test]
