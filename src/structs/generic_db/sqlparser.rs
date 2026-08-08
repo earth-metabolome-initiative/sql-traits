@@ -2026,6 +2026,148 @@ fn table_constraint_has_name(constraint: &TableConstraint, name: &Ident) -> bool
     })
 }
 
+/// Whether a named option written on a column is a constraint at all.
+///
+/// PostgreSQL lets `CONSTRAINT name` precede a `DEFAULT` or a `NULL` and then
+/// records nothing for it, so a `DROP CONSTRAINT` naming one of those is
+/// refused. Every other option it accepts a name for becomes a constraint,
+/// `NOT NULL` included since PostgreSQL 18 records that as one of its own.
+fn column_option_is_constraint(option: &ColumnOption) -> bool {
+    matches!(
+        option,
+        ColumnOption::Check(_)
+            | ColumnOption::Unique(_)
+            | ColumnOption::PrimaryKey(_)
+            | ColumnOption::ForeignKey(_)
+            | ColumnOption::NotNull
+    )
+}
+
+/// The column carrying a constraint written on it under `name`, and where in
+/// its option list it sits.
+///
+/// A constraint reaches a table either in its constraint list or on one of its
+/// columns, and `DROP CONSTRAINT` names one without saying which, so both are
+/// searched.
+fn column_constraint_position(create_table: &CreateTable, name: &Ident) -> Option<(usize, usize)> {
+    create_table.columns.iter().enumerate().find_map(|(column, declared)| {
+        declared
+            .options
+            .iter()
+            .position(|option| {
+                option.name.as_ref().is_some_and(|declared| idents_match(declared, name))
+                    && column_option_is_constraint(&option.option)
+            })
+            .map(|option| (column, option))
+    })
+}
+
+/// Whether the column already states that it must hold a value.
+fn states_not_null(column: &ColumnDef) -> bool {
+    column.options.iter().any(|option| matches!(option.option, ColumnOption::NotNull))
+}
+
+/// Writes down the `NOT NULL` a key or an identity implies, so that the node
+/// carries it rather than leaving every reader to work it out again.
+///
+/// PostgreSQL keeps it as a constraint of its own rather than as a shadow of
+/// the key, which has two consequences this mirrors: a child copying its
+/// parent's columns receives it without the key coming too, and dropping the
+/// key afterwards leaves the column still requiring a value.
+///
+/// Called wherever a table node is about to be stored, so every path that
+/// builds or rewrites one upholds the invariant without knowing about it.
+fn record_implied_not_null(create_table: &mut CreateTable) {
+    let keyed: Vec<Ident> = create_table
+        .constraints
+        .iter()
+        .filter_map(|constraint| {
+            match constraint {
+                TableConstraint::PrimaryKey(primary_key) => Some(&primary_key.columns),
+                _ => None,
+            }
+        })
+        .flat_map(|columns| plain_column_names(columns))
+        .collect();
+
+    for column in &mut create_table.columns {
+        let implied = keyed.iter().any(|keyed| idents_match(keyed, &column.name))
+            || column.options.iter().any(|option| {
+                matches!(option.option, ColumnOption::PrimaryKey(_))
+                    || crate::utils::is_identity(&option.option)
+            });
+        if implied {
+            state_not_null(column);
+        }
+    }
+}
+
+/// The plain columns an index-shaped constraint names, skipping any entry that
+/// is an expression rather than a column.
+fn plain_column_names(columns: &[IndexColumn]) -> Vec<Ident> {
+    columns
+        .iter()
+        .filter_map(|column| {
+            match &column.column.expr {
+                Expr::Identifier(ident) => Some(ident.clone()),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Writes down that the column must hold a value, unless it already says so.
+fn state_not_null(column: &mut ColumnDef) {
+    if states_not_null(column) {
+        return;
+    }
+    // An explicit `NULL` cannot stand beside the requirement, the same way
+    // `SET NOT NULL` clears one.
+    column.options.retain(|option| !matches!(option.option, ColumnOption::Null));
+    column.options.push(ColumnOptionDef { name: None, option: ColumnOption::NotNull });
+}
+
+/// Takes the constraint written on a column under `name` off that column.
+///
+/// Used on the table the statement names, where the name identifies exactly one
+/// constraint.
+fn remove_named_column_constraint(
+    create_table: &mut CreateTable,
+    written_on: &Ident,
+    name: &Ident,
+) {
+    let Some(column) =
+        create_table.columns.iter_mut().find(|declared| idents_match(&declared.name, written_on))
+    else {
+        return;
+    };
+    column.options.retain(|held| {
+        !(held.name.as_ref().is_some_and(|declared| idents_match(declared, name))
+            && column_option_is_constraint(&held.option))
+    });
+}
+
+/// Takes a table's copy of a constraint written on a column off that column.
+///
+/// Used on the tables below, whose copy may carry a name of its own, so the
+/// match looks past the name a copy would have been given.
+fn remove_copied_column_constraint(
+    create_table: &mut CreateTable,
+    written_on: &Ident,
+    option: &ColumnOptionDef,
+) {
+    let Some(column) =
+        create_table.columns.iter_mut().find(|declared| idents_match(&declared.name, written_on))
+    else {
+        return;
+    };
+    if let Some(at) =
+        column.options.iter().position(|held| inheritance::is_copy_of_option(held, option))
+    {
+        column.options.remove(at);
+    }
+}
+
 /// Rewrites every grantee naming `previous` so that it names `replacement`.
 ///
 /// A grant in PostgreSQL holds the role itself rather than its spelling, so it
@@ -2590,6 +2732,7 @@ impl ParserDB {
         let (previous_node, previous_metadata) = builder.tables_mut().remove(position);
         let mut replacement = (*previous_node).clone();
         edit(&previous_node, &mut replacement)?;
+        record_implied_not_null(&mut replacement);
 
         let mut metadata: TableMetadata<CreateTable> = TableMetadata::default();
         metadata.set_rls_enabled(previous_metadata.rls_enabled());
@@ -3053,6 +3196,24 @@ impl ParserDB {
             Ok(())
         })?;
 
+        // The requirement to hold a value reaches every table below, even where
+        // the key itself stays put: PostgreSQL records it as a constraint of
+        // its own and passes that one down. The named table already carries it,
+        // because storing its node writes it in.
+        if let TableConstraint::PrimaryKey(primary_key) = &constraint {
+            let keyed = plain_column_names(&primary_key.columns);
+            for child in inheritance::descendants(&builder, &stored) {
+                builder = Self::replace_table_node(builder, &child, |_, node| {
+                    for column in &mut node.columns {
+                        if keyed.iter().any(|keyed| idents_match(keyed, &column.name)) {
+                            state_not_null(column);
+                        }
+                    }
+                    Ok(())
+                })?;
+            }
+        }
+
         let mut frontier = alloc::vec![(stored, constraint)];
         let mut reached: Vec<StoredTable> = Vec::new();
 
@@ -3098,13 +3259,13 @@ impl ParserDB {
         Ok(builder)
     }
 
-    /// Drops a named constraint from a table, taking it out of every table
-    /// that received it.
+    /// Drops a named constraint from a table, taking it out of every table that
+    /// received it.
     ///
-    /// A table that declared an equivalent constraint itself keeps its own,
-    /// and so does one still receiving it from another parent. `ONLY` stops
-    /// the walk at the named table and leaves the copies behind as their
-    /// holders' own, which is what PostgreSQL leaves.
+    /// A constraint reaches a table either in its constraint list or written on
+    /// one of its columns, and the statement names one without saying which, so
+    /// both are searched. The two are removed from different places and travel
+    /// by different routes, so each has its own body below.
     fn alter_table_drop_constraint(
         builder: ParserDBBuilder,
         table_name: &ObjectName,
@@ -3117,17 +3278,48 @@ impl ParserDB {
         };
 
         let node = Self::stored_node(&builder, &stored)?;
-        let Some(dropped) =
+        if let Some(dropped) =
             node.constraints.iter().find(|held| table_constraint_has_name(held, name)).cloned()
-        else {
-            if if_exists {
-                return Ok(builder);
-            }
-            return Err(crate::errors::Error::DropConstraintNotFound {
-                table_name: node.name.to_string(),
-                constraint_name: name.value.clone(),
-            });
-        };
+        {
+            return Self::drop_table_constraint(builder, &stored, scope, name, dropped);
+        }
+
+        if let Some((column, option)) = column_constraint_position(node, name) {
+            let written_on = node.columns[column].name.clone();
+            let option = node.columns[column].options[option].clone();
+            return Self::drop_column_constraint(
+                builder,
+                &stored,
+                scope,
+                name,
+                &written_on,
+                &option,
+            );
+        }
+
+        if if_exists {
+            return Ok(builder);
+        }
+        Err(crate::errors::Error::DropConstraintNotFound {
+            table_name: node.name.to_string(),
+            constraint_name: name.value.clone(),
+        })
+    }
+
+    /// Drops a constraint held in the table's own constraint list.
+    ///
+    /// A table that declared an equivalent constraint itself keeps its own, and
+    /// so does one still receiving it from another parent. `ONLY` stops the
+    /// walk at the named table and leaves the copies behind as their
+    /// holders' own, which is what PostgreSQL leaves.
+    fn drop_table_constraint(
+        builder: ParserDBBuilder,
+        stored: &StoredTable,
+        scope: AlterTableScope,
+        name: &Ident,
+        dropped: TableConstraint,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let node = Self::stored_node(&builder, stored)?;
 
         // Only the table that holds a constraint as its own may drop it, which
         // is checked before anything moves so a refusal changes nothing.
@@ -3138,7 +3330,7 @@ impl ParserDB {
             });
         }
 
-        let mut builder = Self::alter_table_constraints(builder, &stored, |_, constraints| {
+        let mut builder = Self::alter_table_constraints(builder, stored, |_, constraints| {
             constraints.retain(|held| !table_constraint_has_name(held, name));
             Ok(())
         })?;
@@ -3147,7 +3339,7 @@ impl ParserDB {
             // The tables below keep their copies, and each becomes the holder's
             // own now that nothing passes it down. A grandchild is untouched,
             // because its own parent still holds one.
-            for (_, child) in inheritance::direct_children(&builder, &stored) {
+            for (_, child) in inheritance::direct_children(&builder, stored) {
                 let node = Self::stored_node(&builder, &child)?;
                 let held: Vec<TableConstraint> = node
                     .constraints
@@ -3162,7 +3354,7 @@ impl ParserDB {
             return Ok(builder);
         }
 
-        let mut frontier = alloc::vec![(stored, dropped)];
+        let mut frontier = alloc::vec![(stored.clone(), dropped)];
         let mut reached: Vec<StoredTable> = Vec::new();
 
         while let Some((current, passed)) = frontier.pop() {
@@ -3196,6 +3388,86 @@ impl ParserDB {
                     Ok(())
                 })?;
                 frontier.push((child, copy));
+            }
+        }
+
+        Ok(builder)
+    }
+
+    /// Drops a constraint written on one of the table's columns.
+    ///
+    /// Nothing has to be recorded about where such a copy came from, unlike one
+    /// in the constraint list: a child's copy always arrives with the column it
+    /// is written on, so it can never be the child's own, and whether a parent
+    /// still writes it is read from the parents.
+    fn drop_column_constraint(
+        builder: ParserDBBuilder,
+        stored: &StoredTable,
+        scope: AlterTableScope,
+        name: &Ident,
+        written_on: &Ident,
+        option: &ColumnOptionDef,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        let node = Self::stored_node(&builder, stored)?;
+        if inheritance::receives_column_constraint(&builder, node, written_on, option) {
+            return Err(crate::errors::Error::InheritedConstraintNotDroppable {
+                table_name: stored.name.clone(),
+                constraint_name: name.value.clone(),
+            });
+        }
+
+        let mut builder = Self::replace_table_node(builder, stored, |_, node| {
+            remove_named_column_constraint(node, written_on, name);
+            Ok(())
+        })?;
+
+        if scope.only {
+            return Ok(builder);
+        }
+
+        // One edge at a time, because a partition's copy of a key carries a
+        // name of its own, so each level is recognised against the copy the
+        // level above holds rather than against the original.
+        let mut frontier = alloc::vec![(stored.clone(), option.clone())];
+        let mut reached: Vec<StoredTable> = Vec::new();
+
+        while let Some((current, passed)) = frontier.pop() {
+            for (kind, child) in inheritance::direct_children(&builder, &current) {
+                if !inheritance::option_passes_down(kind, &passed.option)
+                    || reached.contains(&child)
+                {
+                    continue;
+                }
+                reached.push(child.clone());
+
+                let node = Self::stored_node(&builder, &child)?;
+                let Some(held) = node
+                    .columns
+                    .iter()
+                    .find(|declared| idents_match(&declared.name, written_on))
+                    .and_then(|declared| {
+                        declared
+                            .options
+                            .iter()
+                            .find(|held| inheritance::is_copy_of_option(held, &passed))
+                    })
+                    .cloned()
+                else {
+                    continue;
+                };
+
+                // Another parent may still write it, in which case the copy
+                // stays, the same way it does for one in the constraint list.
+                if inheritance::receives_column_constraint(&builder, node, written_on, &held) {
+                    continue;
+                }
+
+                let removed = held.clone();
+                builder = Self::replace_table_node(builder, &child, |_, node| {
+                    remove_copied_column_constraint(node, written_on, &removed);
+                    Ok(())
+                })?;
+                frontier.push((child, held));
             }
         }
 
@@ -4722,6 +4994,7 @@ impl ParserDB {
                     // way a foreign key target does, which is also what
                     // leaves the edges acyclic.
                     let inherited = inheritance::apply_parents(&builder, &mut create_table)?;
+                    record_implied_not_null(&mut create_table);
                     let mut metadata = TableMetadata::default();
                     metadata.set_inherited_column_names(inherited.columns);
                     metadata.set_inherited_constraints(inherited.constraints);

@@ -12,7 +12,7 @@ use crate::{
     errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableAttribute},
     traits::{ColumnLike, DatabaseLike, Metadata},
-    utils::normalize_sqlparser_type,
+    utils::{is_identity, normalize_sqlparser_type},
 };
 
 const GENERATED_TYPES: &[&str] = &["SERIAL", "BIGSERIAL", "SMALLSERIAL"];
@@ -56,14 +56,22 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
         GENERATED_TYPES.contains(&self.attribute().data_type.to_string().as_str())
     }
 
+    /// # Errors
+    ///
+    /// Returns an error when the table the column belongs to is not held by
+    /// `database`.
+    ///
+    /// A stored node carries the `NOT NULL` a key or an identity implies, so
+    /// the option alone answers for anything this crate built. The key and the
+    /// identity are still consulted, so a node assembled by hand rather than
+    /// parsed answers alike.
     #[inline]
     fn is_nullable(&self, database: &Self::DB) -> Result<bool, LookupError> {
-        Ok(!self
-            .attribute()
-            .options
-            .iter()
-            .any(|opt| matches!(opt.option, sqlparser::ast::ColumnOption::NotNull))
-            && !self.is_primary_key(database)?)
+        let declared = self.attribute().options.iter().any(|option| {
+            matches!(option.option, sqlparser::ast::ColumnOption::NotNull)
+                || is_identity(&option.option)
+        });
+        Ok(!declared && !self.is_primary_key(database)?)
     }
 
     #[inline]

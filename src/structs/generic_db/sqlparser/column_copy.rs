@@ -12,18 +12,7 @@ use alloc::vec::Vec;
 
 use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef};
 
-/// Whether the option makes the column an identity column.
-///
-/// `GENERATED ... AS IDENTITY` and `GENERATED ... AS (expr) STORED` share one
-/// variant and are told apart by whether an expression is present. Other
-/// dialects spell the same idea as a variant of its own.
-pub(super) fn is_identity(option: &ColumnOption) -> bool {
-    match option {
-        ColumnOption::Identity(_) => true,
-        ColumnOption::Generated { generation_expr, .. } => generation_expr.is_none(),
-        _ => false,
-    }
-}
+use crate::utils::is_identity;
 
 /// Whether the option only holds because of a constraint the copy will not
 /// receive, yet still forces the column to hold a value.

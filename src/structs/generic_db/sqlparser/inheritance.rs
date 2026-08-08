@@ -21,11 +21,8 @@ use sqlparser::ast::{
     ExactNumberInfo, Expr, Ident, IndexColumn, ObjectName, TableConstraint, TimezoneInfo,
 };
 
-use super::{
-    ParserDBBuilder, StoredTable,
-    column_copy::{copy_column, is_identity},
-};
-use crate::{errors::Error, traits::TableLike};
+use super::{ParserDBBuilder, StoredTable, column_copy::copy_column};
+use crate::{errors::Error, traits::TableLike, utils::is_identity};
 
 /// Which spelling links a child to a table it takes its shape from.
 ///
@@ -191,6 +188,53 @@ fn is_inherited_option(option: &ColumnOption) -> bool {
     ) && !is_identity(option)
 }
 
+/// Whether a parent linked by this spelling writes the option onto the copy.
+pub(super) fn option_passes_down(kind: ParentKind, option: &ColumnOption) -> bool {
+    kind == ParentKind::PartitionOf || is_inherited_option(option)
+}
+
+/// The option with the name a partition's copy would have been given stripped
+/// away.
+///
+/// A partition's copy of a key differs from the root's only in that name, for
+/// the same reason a copy written as a table constraint does, so recognising it
+/// has to look past it.
+fn without_generated_option_name(option: &ColumnOptionDef) -> ColumnOptionDef {
+    let mut bare = option.clone();
+    if matches!(option.option, ColumnOption::PrimaryKey(_) | ColumnOption::Unique(_)) {
+        bare.name = None;
+    }
+    bare
+}
+
+/// Whether the option a table holds is its copy of the one a parent writes.
+pub(super) fn is_copy_of_option(held: &ColumnOptionDef, written: &ColumnOptionDef) -> bool {
+    without_generated_option_name(held) == without_generated_option_name(written)
+}
+
+/// Whether a parent still writes the same constraint on the same column.
+///
+/// Read from the parents rather than recorded, which is enough because a copy
+/// written on a column always arrives with the column and so is never the
+/// child's own. A table with two parents keeps its copy until the last of them
+/// stops writing it.
+pub(super) fn receives_column_constraint(
+    builder: &ParserDBBuilder,
+    child: &CreateTable,
+    written_on: &Ident,
+    option: &ColumnOptionDef,
+) -> bool {
+    parents_with_kind(child).any(|(kind, name)| {
+        option_passes_down(kind, &option.option)
+            && builder.resolve_table_object_name(name).ok().flatten().is_some_and(|parent| {
+                parent.columns.iter().any(|declared| {
+                    same_column(&declared.name, written_on)
+                        && declared.options.iter().any(|held| is_copy_of_option(option, held))
+                })
+            })
+    })
+}
+
 /// Rewrites a parent column into the column the child receives.
 ///
 /// A partition withholds nothing, because PostgreSQL enforces the root's keys
@@ -206,12 +250,7 @@ fn inherited_column(
     column: &ColumnDef,
     taken: &mut Vec<Ident>,
 ) -> ColumnDef {
-    let mut copy = copy_column(column, |option| {
-        match kind {
-            ParentKind::PartitionOf => true,
-            ParentKind::Inherits => is_inherited_option(option),
-        }
-    });
+    let mut copy = copy_column(column, |option| option_passes_down(kind, option));
 
     if kind == ParentKind::PartitionOf {
         let unique_stem = format!("_{}_key", copy.name.value);
