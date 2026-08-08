@@ -159,6 +159,59 @@ pub enum Error {
         /// Name of the host table containing the foreign key.
         host_table: String,
     },
+    #[error("Parent table `{parent_table}` not found for table `{child_table}`.")]
+    /// Error indicating that a table derives its shape from a table that does
+    /// not exist, spelled either `INHERITS` or `PARTITION OF`.
+    ParentTableNotFound {
+        /// Name of the parent table the child names.
+        parent_table: String,
+        /// Name of the table naming the parent.
+        child_table: String,
+    },
+    #[error("Table `{copied_table}` not found for the `LIKE` in table `{table_name}`.")]
+    /// Error indicating that a table copies its columns from a table that
+    /// does not exist.
+    CopiedTableNotFound {
+        /// Name of the table the `LIKE` names.
+        copied_table: String,
+        /// Name of the table doing the copying.
+        table_name: String,
+    },
+    #[error("Cannot drop column `{column_name}` of table `{table_name}` because it is inherited.")]
+    /// Error indicating that a table tried to drop a column it receives from
+    /// a parent, which only the parent can drop.
+    InheritedColumnNotDroppable {
+        /// Name of the table the statement names.
+        table_name: String,
+        /// Name of the inherited column.
+        column_name: String,
+    },
+    #[error(
+        "Column `{column_name}` of table `{child_table}` has type `{child_type}`, conflicting with type `{parent_type}` inherited from `{parent_table}`."
+    )]
+    /// Error indicating that a table redeclares an inherited column with a
+    /// different type, which PostgreSQL refuses.
+    InheritedColumnTypeConflict {
+        /// Name of the column declared twice.
+        column_name: String,
+        /// Name of the table redeclaring the column.
+        child_table: String,
+        /// Type the child declares.
+        child_type: String,
+        /// Name of the parent the column comes from.
+        parent_table: String,
+        /// Type the parent declares.
+        parent_type: String,
+    },
+    #[error("Cannot drop table `{parent_table}` because table `{child_table}` inherits from it.")]
+    /// Error indicating that a `DROP TABLE` would leave a child naming a
+    /// parent that no longer exists.
+    DropTableInheritedFrom {
+        /// Name of the table the statement drops.
+        parent_table: String,
+        /// Name of a table inheriting from it.
+        child_table: String,
+    },
     #[error(
         "Referenced column `{referenced_column}` not found in table `{referenced_table}` for foreign key in table `{host_table}`."
     )]

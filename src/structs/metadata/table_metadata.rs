@@ -2,7 +2,7 @@
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 
-use crate::traits::{DatabaseLike, DocumentationMetadata, TableLike};
+use crate::traits::{ColumnLike, DatabaseLike, DocumentationMetadata, TableLike};
 
 #[derive(Debug, Clone)]
 /// Metadata about a database table.
@@ -19,6 +19,14 @@ pub struct TableMetadata<T: TableLike> {
     foreign_keys: Vec<Arc<<T::DB as DatabaseLike>::ForeignKey>>,
     /// The columns composing the primary key of the table.
     primary_key: Vec<Arc<<T::DB as DatabaseLike>::Column>>,
+    /// The names of the columns the table takes from a parent rather than
+    /// declaring itself.
+    ///
+    /// Mirrors `pg_attribute.attislocal`: a column the child also declares is
+    /// local and so absent here, even though it merged with a parent's. Held
+    /// as names rather than handles because replacing the table node rebuilds
+    /// every column, and the distinction has to survive that.
+    inherited_column_names: Vec<String>,
     /// Whether Row Level Security is enabled for the table.
     rls_enabled: bool,
     /// Whether Row Level Security is forced for the table (applies to table
@@ -39,6 +47,7 @@ impl<T: TableLike> Default for TableMetadata<T> {
             unique_indices: Vec::new(),
             foreign_keys: Vec::new(),
             primary_key: Vec::new(),
+            inherited_column_names: Vec::new(),
             rls_enabled: false,
             rls_forced: false,
             owner: None,
@@ -116,6 +125,35 @@ impl<T: TableLike> TableMetadata<T> {
     #[inline]
     pub fn column_arc_slice(&self) -> &[Arc<<T::DB as DatabaseLike>::Column>] {
         &self.columns
+    }
+
+    /// Returns an iterator over the columns the table declares itself.
+    ///
+    /// A column the table declares and a parent also declares counts as local,
+    /// matching `pg_attribute.attislocal`.
+    #[inline]
+    pub fn local_columns(&self) -> impl Iterator<Item = &<T::DB as DatabaseLike>::Column> {
+        self.columns
+            .iter()
+            .filter(|column| !self.is_inherited(column))
+            .map(core::convert::AsRef::as_ref)
+    }
+
+    fn is_inherited(&self, column: &Arc<<T::DB as DatabaseLike>::Column>) -> bool {
+        self.inherited_column_names.iter().any(|name| name == column.column_name())
+    }
+
+    /// Returns the names of the columns the table takes from a parent.
+    #[must_use]
+    #[inline]
+    pub fn inherited_column_names(&self) -> &[String] {
+        &self.inherited_column_names
+    }
+
+    /// Records the names of the columns the table takes from a parent.
+    #[inline]
+    pub fn set_inherited_column_names(&mut self, inherited_column_names: Vec<String>) {
+        self.inherited_column_names = inherited_column_names;
     }
 
     /// Returns an iterator over the check constraints of the table.

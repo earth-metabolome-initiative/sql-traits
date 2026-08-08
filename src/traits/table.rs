@@ -361,6 +361,140 @@ pub trait TableLike:
     where
         Self: 'db;
 
+    /// Iterates over the columns the table declares itself.
+    ///
+    /// A table that inherits carries its parents' columns beside its own, and
+    /// this answers only those written in its own definition. A column both
+    /// the table and a parent declare counts as the table's own, which is
+    /// what PostgreSQL records.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE docs (id INT, owner_id TEXT);
+    ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);",
+    /// )?;
+    /// let child = db.table(None, "secret_docs").unwrap();
+    /// let all: Vec<&str> = child.columns(&db)?.map(|column| column.column_name()).collect();
+    /// assert_eq!(all, vec!["id", "owner_id", "classification"]);
+    /// let own: Vec<&str> = child.local_columns(&db)?.map(|column| column.column_name()).collect();
+    /// assert_eq!(own, vec!["classification"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn local_columns<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
+    where
+        Self: 'db;
+
+    /// Iterates over the tables this one takes its columns from.
+    ///
+    /// PostgreSQL spells the edge either `INHERITS`, naming any number of
+    /// parents, or `PARTITION OF`, naming exactly one, and records both the
+    /// same way. Only direct parents are answered, so walking a longer chain
+    /// means asking each parent in turn.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE docs (id INT);
+    ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);",
+    /// )?;
+    /// let child = db.table(None, "secret_docs").unwrap();
+    /// let parents: Vec<&str> = child.inherits_from(&db)?.map(|p| p.table_name()).collect();
+    /// assert_eq!(parents, vec!["docs"]);
+    ///
+    /// let parent = db.table(None, "docs").unwrap();
+    /// assert_eq!(parent.inherits_from(&db)?.count(), 0);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn inherits_from<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db;
+
+    /// Iterates over the tables that take their columns from this one.
+    ///
+    /// The inverse of [`TableLike::inherits_from`], and likewise only one step
+    /// deep, so a grandchild is answered by the child rather than here.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table or one of the tables it checks.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE docs (id INT);
+    ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);",
+    /// )?;
+    /// let parent = db.table(None, "docs").unwrap();
+    /// let children: Vec<&str> = parent.inheritors(&db)?.map(|c| c.table_name()).collect();
+    /// assert_eq!(children, vec!["secret_docs"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn inheritors<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        self.require_in_database(database)?;
+        let schema = self.table_schema();
+        let name = self.table_name();
+        let mut children = Vec::new();
+        for candidate in database.tables() {
+            let mut parents = candidate.inherits_from(database)?;
+            if parents.any(|parent| parent.table_schema() == schema && parent.table_name() == name)
+            {
+                children.push(candidate);
+            }
+        }
+        Ok(children.into_iter())
+    }
+
     /// Returns a deterministic SHA-256 fingerprint of the table's schema.
     ///
     /// The fingerprint is stable across Rust versions and suitable for
@@ -3585,6 +3719,36 @@ where
         Self: 'db,
     {
         T::columns(self, database)
+    }
+
+    fn local_columns<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
+    where
+        Self: 'db,
+    {
+        T::local_columns(self, database)
+    }
+
+    fn inherits_from<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        T::inherits_from(self, database)
+    }
+
+    fn inheritors<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Table>, LookupError>
+    where
+        Self: 'db,
+    {
+        T::inheritors(self, database)
     }
 
     fn column_by_id<'db>(
