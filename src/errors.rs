@@ -365,9 +365,10 @@ pub enum Error {
     /// Error indicating that an ownership statement names a role that does not
     /// exist.
     ///
-    /// Covers `ALTER TABLE ... OWNER TO`, `ALTER SCHEMA ... OWNER TO` and
-    /// `CREATE SCHEMA ... AUTHORIZATION`, all of which the database refuses
-    /// when the role is absent. Like the other role checks this one follows
+    /// Covers `ALTER TABLE ... OWNER TO`, `ALTER FUNCTION ... OWNER TO`,
+    /// `ALTER SCHEMA ... OWNER TO` and `CREATE SCHEMA ... AUTHORIZATION`, all
+    /// of which the database refuses when the role is absent. Like the other
+    /// role checks this one follows
     /// [`AccessResolution`](crate::structs::AccessResolution), because a schema
     /// dump names an owner while creating no role.
     RoleNotFoundForOwner {
@@ -703,7 +704,8 @@ pub enum Error {
     },
     #[error("Function `{function_name}` not found for ALTER FUNCTION statement.")]
     /// Error indicating that an ALTER FUNCTION statement carrying a security
-    /// clause references a function that does not exist.
+    /// clause or an owner reassignment references a function that does not
+    /// exist.
     AlterFunctionNotFound {
         /// Name of the function that was not found.
         function_name: String,
@@ -712,11 +714,27 @@ pub enum Error {
         "Function name `{function_name}` is not unique: an `ALTER FUNCTION` naming no argument list cannot say which one to alter."
     )]
     /// Error indicating that an `ALTER FUNCTION` statement carrying a security
-    /// clause omits the argument list while the name it gives covers more than
-    /// one function.
+    /// clause or an owner reassignment omits the argument list while the name
+    /// it gives covers more than one function.
     AmbiguousAlterFunction {
         /// The name covering more than one function.
         function_name: String,
+    },
+    #[error(
+        "Aggregate `{aggregate_name}` cannot be given an owner: this model holds no aggregates at all."
+    )]
+    /// Error indicating that an `ALTER AGGREGATE ... OWNER TO` statement names
+    /// an aggregate, which this model never holds.
+    ///
+    /// The parser this crate builds on rejects `CREATE AGGREGATE`, so no
+    /// aggregate can exist here for an owner to belong to. Reading the
+    /// statement as naming a function of the same name would contradict
+    /// PostgreSQL, which refuses to reach a function through `ALTER AGGREGATE`,
+    /// and passing it over would read an ownership change and drop it, so the
+    /// statement is refused instead.
+    AggregateOwnerUnsupported {
+        /// Name of the aggregate the statement names.
+        aggregate_name: String,
     },
     #[error("Index `{index_name}` not found for ALTER INDEX statement.")]
     /// Error indicating that an ALTER INDEX statement references an index that
