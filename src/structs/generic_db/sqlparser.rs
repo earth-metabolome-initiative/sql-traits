@@ -19,17 +19,17 @@ use sql_docs::SqlDoc;
 use sqlparser::parser::ParserError;
 use sqlparser::{
     ast::{
-        Action, AlterColumnOperation, AlterFunction, AlterFunctionAction, AlterFunctionOperation,
-        AlterIndexOperation, AlterPolicy, AlterPolicyOperation, AlterRoleOperation, AlterSchema,
-        AlterSchemaOperation, AlterTableOperation, ArgMode, CheckConstraint, ColumnDef,
-        ColumnOption, ColumnOptionDef, CreateFunction, CreateFunctionBody, CreateIndex,
-        CreatePolicy, CreateRole, CreateTable, CreateTrigger, DataType, DropBehavior,
-        ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionReturnType, GeneratedAs, Grant,
-        GrantObjects, Grantee, GranteeName, GranteesType, Ident, IndexColumn, MySQLColumnPosition,
-        ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr, OrderByOptions, Owner,
-        Privileges, Query, RenameTableNameKind, SchemaName, Statement, TableConstraint,
-        TimezoneInfo, TriggerEvent, UniqueConstraint, Value, ValueWithSpan, Visit, VisitMut,
-        Visitor, VisitorMut, visit_relations,
+        Action, AlterColumnOperation, AlterFunction, AlterFunctionAction, AlterFunctionKind,
+        AlterFunctionOperation, AlterIndexOperation, AlterPolicy, AlterPolicyOperation,
+        AlterRoleOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation, ArgMode,
+        CheckConstraint, ColumnDef, ColumnOption, ColumnOptionDef, CreateFunction,
+        CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger,
+        DataType, DropBehavior, ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionDesc,
+        FunctionReturnType, GeneratedAs, Grant, GrantObjects, Grantee, GranteeName, GranteesType,
+        Ident, IndexColumn, MySQLColumnPosition, ObjectName, ObjectNamePart, OperateFunctionArg,
+        OrderByExpr, OrderByOptions, Owner, Privileges, Query, RenameTableNameKind, SchemaName,
+        Statement, TableConstraint, TimezoneInfo, TriggerEvent, UniqueConstraint, Value,
+        ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut, visit_relations,
     },
     dialect::Dialect,
     parser::Parser,
@@ -41,7 +41,9 @@ use crate::{
     impls::SqlparserDialect,
     structs::{
         GenericDB, Schema, TableAttribute, TableMetadata,
-        metadata::{CheckMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata},
+        metadata::{
+            CheckMetadata, FunctionMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata,
+        },
     },
     traits::{ColumnLike, FunctionLike, IndexLike, TableLike},
     utils::{
@@ -3554,6 +3556,50 @@ impl ParserDB {
         }
     }
 
+    /// Resolves the stored function an `ALTER FUNCTION` names.
+    ///
+    /// A statement that spells the argument list names one function, and one
+    /// that omits it names whichever function carries the name, so long as only
+    /// one does.
+    fn alter_function_target(
+        builder: &ParserDBBuilder,
+        func_desc: &FunctionDesc,
+    ) -> Result<usize, crate::errors::Error> {
+        let matching: Vec<usize> = builder
+            .functions()
+            .iter()
+            .enumerate()
+            .filter(|(_, (function, _))| {
+                match &func_desc.args {
+                    Some(args) => {
+                        function_signatures_match(
+                            &function.name,
+                            function.args.as_deref(),
+                            &func_desc.name,
+                            Some(args),
+                        )
+                    }
+                    None => object_names_match(&function.name, &func_desc.name),
+                }
+            })
+            .map(|(position, _)| position)
+            .collect();
+
+        let Some(&position) = matching.first() else {
+            return Err(crate::errors::Error::AlterFunctionNotFound {
+                function_name: last_str(&func_desc.name).to_string(),
+            });
+        };
+
+        if func_desc.args.is_none() && matching.len() > 1 {
+            return Err(crate::errors::Error::AmbiguousAlterFunction {
+                function_name: last_str(&func_desc.name).to_string(),
+            });
+        }
+
+        Ok(position)
+    }
+
     /// Returns the stored node of a table whose identity is known to be
     /// present.
     fn stored_node<'builder>(
@@ -4233,7 +4279,7 @@ impl ParserDB {
                 security: None,
                 set_params: vec![],
             };
-            builder = builder.add_function(Arc::new(create_function), ());
+            builder = builder.add_function(Arc::new(create_function), FunctionMetadata::default());
         }
 
         for statement in statements {
@@ -4244,7 +4290,7 @@ impl ParserDB {
                     // stored node rather than appending a second one, which
                     // would leave the stale node answering every lookup.
                     require_named(&create_function.name, crate::errors::ObjectKind::Function)?;
-                    let existing = builder.functions().iter().position(|(existing, ())| {
+                    let existing = builder.functions().iter().position(|(existing, _)| {
                         function_signatures_match(
                             &existing.name,
                             existing.args.as_deref(),
@@ -4258,12 +4304,20 @@ impl ParserDB {
                                 function_name: last_str(&create_function.name).to_string(),
                             });
                         }
-                        (Some(position), true) => Some(builder.functions_mut().remove(position).0),
+                        (Some(position), true) => Some(builder.functions_mut().remove(position)),
                         (None, _) => None,
                     };
 
+                    // PostgreSQL keeps the same `pg_proc` entry across a
+                    // replacement, so the owner a later statement set on the
+                    // old definition still owns the new one.
+                    let (replaced, metadata) = match replaced {
+                        Some((stale, metadata)) => (Some(stale), metadata),
+                        None => (None, FunctionMetadata::default()),
+                    };
+
                     let fresh = Arc::new(create_function);
-                    builder = builder.add_function(Arc::clone(&fresh), ());
+                    builder = builder.add_function(Arc::clone(&fresh), metadata);
 
                     // Policies and check constraints cache the function
                     // nodes their expressions call, so a replacement has to
@@ -4296,7 +4350,7 @@ impl ParserDB {
                             .functions()
                             .iter()
                             .enumerate()
-                            .filter(|(_, (function, ()))| {
+                            .filter(|(_, (function, _))| {
                                 match &func_desc.args {
                                     Some(args) => {
                                         function_signatures_match(
@@ -5427,74 +5481,94 @@ impl ParserDB {
                     }
                 }
                 Statement::AlterFunction(AlterFunction {
-                    function: func_desc, operation, ..
+                    kind,
+                    function: func_desc,
+                    operation,
+                    ..
                 }) => {
-                    // Only the security clause changes state this model
-                    // tracks: it is applied to the stored function, held to
-                    // the closed world the way ALTER POLICY is. Every other
-                    // operation and action keeps being ignored the way the
-                    // catch-all arm ignored the whole statement before.
-                    let AlterFunctionOperation::Actions { actions, .. } = operation else {
-                        continue;
-                    };
-                    let Some(security) = actions.into_iter().rev().find_map(|action| {
-                        match action {
-                            AlterFunctionAction::Security { security, .. } => Some(security),
-                            _ => None,
-                        }
-                    }) else {
-                        continue;
-                    };
-
-                    // A statement that spells the argument list names one
-                    // function, and one that omits it names whichever
-                    // function carries the name, so long as only one does.
-                    let matching: Vec<usize> = builder
-                        .functions()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, (function, ()))| {
-                            match &func_desc.args {
-                                Some(args) => {
-                                    function_signatures_match(
-                                        &function.name,
-                                        function.args.as_deref(),
-                                        &func_desc.name,
-                                        Some(args),
-                                    )
-                                }
-                                None => object_names_match(&function.name, &func_desc.name),
+                    // Two operations change state this model tracks: the
+                    // security clause and the owner. Both are applied to the
+                    // stored function, held to the closed world the way ALTER
+                    // POLICY is. Every other operation and action keeps being
+                    // ignored the way the catch-all arm ignored the whole
+                    // statement before.
+                    match operation {
+                        AlterFunctionOperation::OwnerTo(new_owner) => {
+                            // An aggregate reaches here as this same statement,
+                            // and PostgreSQL refuses to reach a function
+                            // through it, so a same-named function must not
+                            // answer for one.
+                            //
+                            // TODO: record the aggregate and its owner once
+                            // upstream parses `CREATE AGGREGATE`, tracked in
+                            // `upstream/sqlparser-create-aggregate.md`. Until
+                            // then no aggregate can be in this model, so the
+                            // statement is refused rather than dropped.
+                            if matches!(kind, AlterFunctionKind::Aggregate) {
+                                return Err(crate::errors::Error::AggregateOwnerUnsupported {
+                                    aggregate_name: last_str(&func_desc.name).to_string(),
+                                });
                             }
-                        })
-                        .map(|(position, _)| position)
-                        .collect();
 
-                    let Some(&position) = matching.first() else {
-                        return Err(crate::errors::Error::AlterFunctionNotFound {
-                            function_name: last_str(&func_desc.name).to_string(),
-                        });
-                    };
+                            let position = Self::alter_function_target(&builder, &func_desc)?;
 
-                    if func_desc.args.is_none() && matching.len() > 1 {
-                        return Err(crate::errors::Error::AmbiguousAlterFunction {
-                            function_name: last_str(&func_desc.name).to_string(),
-                        });
-                    }
+                            // After the function, because the database reports
+                            // an absent function first. The keyword owners name
+                            // no role, so there is nothing to look for.
+                            if options.access_resolution() == AccessResolution::ClosedWorld
+                                && let Owner::Ident(ident) = &new_owner
+                            {
+                                validate_owner_role_ident(
+                                    &builder,
+                                    ident,
+                                    last_str(&func_desc.name),
+                                )?;
+                            }
 
-                    let function_arc = &mut builder.functions_mut()[position].0;
-                    let stale = Arc::clone(function_arc);
-                    Arc::make_mut(function_arc).security = Some(security);
-                    let fresh = Arc::clone(function_arc);
+                            let owner = match new_owner {
+                                Owner::Ident(ident) => Some(ident.value),
+                                // These name whoever runs the statement, so the
+                                // owner changed to one the input never spells
+                                // and the model can no longer name it either.
+                                Owner::CurrentRole | Owner::CurrentUser | Owner::SessionUser => {
+                                    None
+                                }
+                            };
+                            builder.functions_mut()[position].1.set_owner(owner);
+                        }
+                        AlterFunctionOperation::Actions { actions, .. } => {
+                            let Some(security) = actions.into_iter().rev().find_map(|action| {
+                                match action {
+                                    AlterFunctionAction::Security { security, .. } => {
+                                        Some(security)
+                                    }
+                                    _ => None,
+                                }
+                            }) else {
+                                continue;
+                            };
 
-                    // Policies and check constraints cache the function
-                    // nodes their expressions call, resolved at creation
-                    // time, so the rewritten node has to be swapped into
-                    // those caches as well.
-                    for (_, metadata) in builder.policies_mut() {
-                        metadata.replace_function(&stale, &fresh);
-                    }
-                    for (_, metadata) in builder.check_constraints_mut() {
-                        metadata.replace_function(&stale, &fresh);
+                            let position = Self::alter_function_target(&builder, &func_desc)?;
+
+                            let function_arc = &mut builder.functions_mut()[position].0;
+                            let stale = Arc::clone(function_arc);
+                            Arc::make_mut(function_arc).security = Some(security);
+                            let fresh = Arc::clone(function_arc);
+
+                            // Policies and check constraints cache the function
+                            // nodes their expressions call, resolved at creation
+                            // time, so the rewritten node has to be swapped into
+                            // those caches as well.
+                            for (_, metadata) in builder.policies_mut() {
+                                metadata.replace_function(&stale, &fresh);
+                            }
+                            for (_, metadata) in builder.check_constraints_mut() {
+                                metadata.replace_function(&stale, &fresh);
+                            }
+                        }
+                        AlterFunctionOperation::RenameTo { .. }
+                        | AlterFunctionOperation::SetSchema { .. }
+                        | AlterFunctionOperation::DependsOnExtension { .. } => {}
                     }
                 }
                 Statement::AlterPolicy(AlterPolicy { name, table_name, operation }) => {
