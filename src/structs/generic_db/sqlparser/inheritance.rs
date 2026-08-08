@@ -235,6 +235,35 @@ pub(super) fn receives_column_constraint(
     })
 }
 
+/// Whether a parent requires the column to hold a value, so that only the
+/// parent may lift the requirement.
+///
+/// Read from the parents, the way the other inherited facts are. A parent that
+/// states it explicitly, one whose key covers the column, and one whose column
+/// is an identity all require it, because each is recorded as a requirement in
+/// its own right once the parent's node is stored.
+pub(super) fn requires_a_value(
+    builder: &ParserDBBuilder,
+    child: &CreateTable,
+    column: &str,
+) -> bool {
+    parents_with_kind(child).any(|(_, name)| {
+        builder.resolve_table_object_name(name).ok().flatten().is_some_and(|parent| {
+            parent.columns.iter().any(|declared| {
+                super::identifiers_match(
+                    declared.name.value.as_str(),
+                    declared.name.quote_style.is_some(),
+                    column,
+                    false,
+                ) && declared
+                    .options
+                    .iter()
+                    .any(|option| matches!(option.option, ColumnOption::NotNull))
+            })
+        })
+    })
+}
+
 /// Rewrites a parent column into the column the child receives.
 ///
 /// A partition withholds nothing, because PostgreSQL enforces the root's keys
@@ -681,19 +710,38 @@ pub(super) fn apply_parents(
     Ok(inherited)
 }
 
-/// Merges a parent's column with the child's redeclaration of it.
+/// Whether the option is one a column may state only once.
 ///
-/// The child's declaration wins, except that a `NOT NULL` the parent states
-/// survives a child that omits it, because a child cannot loosen one.
-fn merge_declarations(parent: &ColumnDef, child: &ColumnDef) -> ColumnDef {
+/// A check may be written any number of times, each becoming a constraint of
+/// its own, so several stand together. Everything else describes the column and
+/// a second one would contradict the first.
+fn stated_once(option: &ColumnOption) -> bool {
+    !matches!(option, ColumnOption::Check(_))
+}
+
+/// Merges the column a parent passes down with the child's redeclaration of it.
+///
+/// A redeclared column follows the same rule as an inherited one, because the
+/// copy handed in here has already been filtered to what the link passes down.
+/// The child's declaration wins on anything that can be stated only once, which
+/// is what PostgreSQL leaves: a parent's default gives way to the child's,
+/// while both checks stand under their own names.
+fn merge_declarations(received: &ColumnDef, child: &ColumnDef) -> ColumnDef {
     let mut merged = child.clone();
-    let parent_not_null =
-        parent.options.iter().any(|option| matches!(option.option, ColumnOption::NotNull));
-    let child_not_null =
-        merged.options.iter().any(|option| matches!(option.option, ColumnOption::NotNull));
-    if parent_not_null && !child_not_null {
-        merged.options.push(ColumnOptionDef { name: None, option: ColumnOption::NotNull });
+
+    for option in &received.options {
+        let already_stated = if stated_once(&option.option) {
+            merged.options.iter().any(|held| {
+                core::mem::discriminant(&held.option) == core::mem::discriminant(&option.option)
+            })
+        } else {
+            merged.options.iter().any(|held| held.option == option.option)
+        };
+        if !already_stated {
+            merged.options.push(option.clone());
+        }
     }
+
     merged
 }
 

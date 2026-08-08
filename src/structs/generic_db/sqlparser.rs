@@ -2026,6 +2026,18 @@ fn table_constraint_has_name(constraint: &TableConstraint, name: &Ident) -> bool
     })
 }
 
+/// Whether an index-shaped constraint names the column among its own.
+fn table_constraint_covers_column(constraint: &TableConstraint, column: &str) -> bool {
+    let columns = match constraint {
+        TableConstraint::PrimaryKey(primary_key) => &primary_key.columns,
+        TableConstraint::Unique(unique) => &unique.columns,
+        _ => return false,
+    };
+    plain_column_names(columns).iter().any(|named| {
+        identifiers_match(named.value.as_str(), named.quote_style.is_some(), column, false)
+    })
+}
+
 /// Whether a named option written on a column is a constraint at all.
 ///
 /// PostgreSQL lets `CONSTRAINT name` precede a `DEFAULT` or a `NULL` and then
@@ -3820,12 +3832,25 @@ impl ParserDB {
         Ok(builder)
     }
 
-    /// Applies `edit` to the declaration of one column of a table.
+    /// Applies `edit` to the declaration of one column of a table, and to the
+    /// same column of every table the change reaches.
+    ///
+    /// `installs` names the column option the operation is about, which decides
+    /// how far it travels: a requirement to hold a value or a default reaches
+    /// every table below, while an identity reaches a partition and stops at an
+    /// `INHERITS` child, because that child would otherwise own a sequence of
+    /// its own. The walk goes one edge at a time for that reason, since the
+    /// answer depends on the spelling of each edge rather than on the table.
+    ///
+    /// `ONLY` stops it at the named table. PostgreSQL grants that here, because
+    /// a table below may differ on what a column holds without disagreeing on
+    /// what the column is.
     fn alter_table_column_def(
         builder: ParserDBBuilder,
         table_name: &ObjectName,
         scope: AlterTableScope,
         column_name: &Ident,
+        installs: &ColumnOption,
         edit: impl Fn(&mut ColumnDef),
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
@@ -3841,12 +3866,6 @@ impl ParserDB {
             .into());
         }
 
-        // A child holds its own copy of an inherited column, so the change has
-        // to reach it too, unless `ONLY` asked for the named table. PostgreSQL
-        // grants that here, because a table below may differ on what a column
-        // holds without disagreeing on what the column is.
-        let inheritors =
-            if scope.only { Vec::new() } else { inheritance::descendants(&builder, &stored) };
         let apply = |node: &mut CreateTable| {
             if let Some(declared) =
                 node.columns.iter_mut().find(|declared| column.matches(&declared.name))
@@ -3859,14 +3878,57 @@ impl ParserDB {
             apply(node);
             Ok(())
         })?;
-        for child in &inheritors {
-            builder = Self::replace_table_node(builder, child, |_, node| {
-                apply(node);
-                Ok(())
-            })?;
+
+        if scope.only {
+            return Ok(builder);
+        }
+
+        let mut frontier = alloc::vec![stored];
+        let mut reached: Vec<StoredTable> = Vec::new();
+
+        while let Some(current) = frontier.pop() {
+            for (kind, child) in inheritance::direct_children(&builder, &current) {
+                if !inheritance::option_passes_down(kind, installs) || reached.contains(&child) {
+                    continue;
+                }
+                reached.push(child.clone());
+                builder = Self::replace_table_node(builder, &child, |_, node| {
+                    apply(node);
+                    Ok(())
+                })?;
+                frontier.push(child);
+            }
         }
 
         Ok(builder)
+    }
+
+    /// Applies an `ALTER COLUMN` operation, refusing the ones PostgreSQL will
+    /// not perform before anything moves.
+    fn alter_table_alter_column(
+        builder: ParserDBBuilder,
+        table_name: &ObjectName,
+        scope: AlterTableScope,
+        column_name: &Ident,
+        operation: &AlterColumnOperation,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        if let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? {
+            let node = Self::stored_node(&builder, &stored)?;
+            let column = NamedColumn::of(column_name);
+            if column.declared_by(node) {
+                Self::refuse_alter_column(&builder, &stored, node, &column, operation)?;
+            }
+        }
+
+        let installs = Self::altered_column_option(operation);
+        Self::alter_table_column_def(
+            builder,
+            table_name,
+            scope,
+            column_name,
+            &installs,
+            |declared| Self::apply_alter_column(declared, operation.clone()),
+        )
     }
 
     /// Applies an `ALTER COLUMN` operation to a column declaration.
@@ -3921,6 +3983,94 @@ impl ParserDB {
                 );
             }
         }
+    }
+
+    /// The column option an `ALTER COLUMN` operation is about, which decides
+    /// how far down the change travels.
+    ///
+    /// A removal names the option it removes, since what travels is the same
+    /// either way: a table below that received the option receives its removal.
+    fn altered_column_option(operation: &AlterColumnOperation) -> ColumnOption {
+        match operation {
+            AlterColumnOperation::SetNotNull | AlterColumnOperation::DropNotNull => {
+                ColumnOption::NotNull
+            }
+            AlterColumnOperation::SetDefault { value } => ColumnOption::Default(value.clone()),
+            AlterColumnOperation::DropDefault => {
+                ColumnOption::Default(Expr::Value(sqlparser::ast::Value::Null.with_empty_span()))
+            }
+            AlterColumnOperation::SetDataType { .. } => ColumnOption::NotNull,
+            AlterColumnOperation::AddGenerated { generated_as, sequence_options } => {
+                ColumnOption::Generated {
+                    generated_as: generated_as.unwrap_or(GeneratedAs::ByDefault),
+                    sequence_options: sequence_options.clone(),
+                    generation_expr: None,
+                    generation_expr_mode: None,
+                    generated_keyword: generated_as.is_some(),
+                }
+            }
+        }
+    }
+
+    /// Refuses an `ALTER COLUMN` operation PostgreSQL will not perform.
+    ///
+    /// Removing the requirement to hold a value is refused where a key covers
+    /// the column, which PostgreSQL reports as the column being in a primary
+    /// key, and where a parent enforces it, which only the parent may lift.
+    /// Adding an identity is refused while the column may still hold nothing,
+    /// since an identity supplies a value on every row.
+    fn refuse_alter_column(
+        builder: &ParserDBBuilder,
+        stored: &StoredTable,
+        node: &CreateTable,
+        column: &NamedColumn,
+        operation: &AlterColumnOperation,
+    ) -> Result<(), crate::errors::Error> {
+        let declared = node.columns.iter().find(|declared| column.matches(&declared.name));
+
+        match operation {
+            AlterColumnOperation::DropNotNull => {
+                if node.constraints.iter().any(|constraint| {
+                    matches!(constraint, TableConstraint::PrimaryKey(_))
+                        && table_constraint_covers_column(constraint, &column.name)
+                }) || declared.is_some_and(|declared| {
+                    declared
+                        .options
+                        .iter()
+                        .any(|option| matches!(option.option, ColumnOption::PrimaryKey(_)))
+                }) {
+                    return Err(crate::errors::Error::RequiredValueNotDroppable {
+                        table_name: stored.name.clone(),
+                        column_name: column.name.clone(),
+                        reason: crate::errors::RequiredValue::CoveredByKey,
+                    });
+                }
+                if inheritance::requires_a_value(builder, node, &column.name) {
+                    return Err(crate::errors::Error::RequiredValueNotDroppable {
+                        table_name: stored.name.clone(),
+                        column_name: column.name.clone(),
+                        reason: crate::errors::RequiredValue::EnforcedByParent,
+                    });
+                }
+            }
+            AlterColumnOperation::AddGenerated { .. } => {
+                let requires = declared.is_some_and(|declared| {
+                    declared
+                        .options
+                        .iter()
+                        .any(|option| matches!(option.option, ColumnOption::NotNull))
+                });
+                if !requires {
+                    return Err(crate::errors::Error::IdentityNeedsRequiredValue {
+                        table_name: stored.name.clone(),
+                        column_name: column.name.clone(),
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 
     /// Creates a new `ParserDB` from a vector of SQL statements and a catalog
@@ -4771,12 +4921,12 @@ impl ParserDB {
                                 )?;
                             }
                             AlterTableOperation::AlterColumn { column_name, op } => {
-                                builder = Self::alter_table_column_def(
+                                builder = Self::alter_table_alter_column(
                                     builder,
                                     &alter_table.name,
                                     scope,
                                     &column_name,
-                                    |declared| Self::apply_alter_column(declared, op.clone()),
+                                    &op,
                                 )?;
                             }
                             AlterTableOperation::ChangeColumn {
@@ -4798,6 +4948,7 @@ impl ParserDB {
                                     &alter_table.name,
                                     scope,
                                     &new_name,
+                                    &ColumnOption::NotNull,
                                     |declared| {
                                         redeclare_column(
                                             declared,
@@ -4818,6 +4969,7 @@ impl ParserDB {
                                     &alter_table.name,
                                     scope,
                                     &col_name,
+                                    &ColumnOption::NotNull,
                                     |declared| {
                                         redeclare_column(
                                             declared,
