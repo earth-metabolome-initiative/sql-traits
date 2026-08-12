@@ -6,6 +6,8 @@ mod table_attribute;
 pub use table_attribute::TableAttribute;
 mod index_metadata;
 pub use index_metadata::{IndexMetadata, UniqueIndexMetadata};
+mod function_metadata;
+pub use function_metadata::FunctionMetadata;
 mod check_metadata;
 pub use check_metadata::CheckMetadata;
 mod policy_metadata;

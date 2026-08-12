@@ -6,6 +6,7 @@ use core::{fmt::Debug, hash::Hash};
 use sqlparser::ast::FunctionSecurity;
 
 use crate::{
+    errors::LookupError,
     traits::{DatabaseLike, Metadata},
     utils::{identifier_resolution::normalize_identifier, normalize_postgres_type_cow},
 };
@@ -244,6 +245,57 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// # }
     /// ```
     fn security_mode(&self) -> FunctionSecurity;
+
+    /// Returns the role the input names as the function's owner.
+    ///
+    /// A `SECURITY DEFINER` body reads its tables as this role, so the owner is
+    /// what decides whose row policies filter the read. It answers the question
+    /// [`security_mode`](FunctionLike::security_mode) leaves open: that reader
+    /// says the body runs as its definer, and this one says who the definer is.
+    ///
+    /// Only `ALTER FUNCTION ... OWNER TO <role>` names an owner. A function no
+    /// such statement altered has none, and neither has one handed to
+    /// `CURRENT_ROLE`, `CURRENT_USER` or `SESSION_USER`, which name whoever
+    /// runs the statement rather than a role the input declares.
+    ///
+    /// The role is reported as the statement spelled it, with no case folding,
+    /// which is how [`DatabaseLike::role`] stores the names it matches against.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance the function belongs
+    ///   to.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this function.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE ROLE app_reader;
+    /// CREATE FUNCTION reassigned() RETURNS INT LANGUAGE sql SECURITY DEFINER AS 'SELECT 1';
+    /// ALTER FUNCTION reassigned() OWNER TO app_reader;
+    /// CREATE FUNCTION untouched() RETURNS INT LANGUAGE sql SECURITY DEFINER AS 'SELECT 1';
+    /// ",
+    /// )?;
+    /// let reassigned = db.function("reassigned").expect("Function should exist");
+    /// assert_eq!(reassigned.owner(&db)?, Some("app_reader"));
+    ///
+    /// // Nobody reassigned this one, so the schema names no owner for it.
+    /// let untouched = db.function("untouched").expect("Function should exist");
+    /// assert_eq!(untouched.owner(&db)?, None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn owner<'db>(&self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError>;
 
     /// Returns the normalized return type name of the function as a string.
     ///

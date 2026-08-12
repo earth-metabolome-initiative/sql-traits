@@ -1,7 +1,7 @@
 //! Implementation of the `FunctionLike` trait for sqlparser's `CreateFunction`
 //! type.
 
-use alloc::{borrow::Cow, format};
+use alloc::{borrow::Cow, format, string::ToString};
 
 use sqlparser::ast::{
     CreateFunction, CreateFunctionBody, DataType, Expr, FunctionReturnType, FunctionSecurity,
@@ -9,13 +9,28 @@ use sqlparser::ast::{
 };
 
 use crate::{
-    structs::ParserDB,
+    errors::{LookupError, ObjectKind},
+    structs::{FunctionMetadata, ParserDB},
     traits::{FunctionLike, Metadata},
     utils::{last_str, normalize_sqlparser_type},
 };
 
 impl Metadata for CreateFunction {
-    type Meta = ();
+    type Meta = FunctionMetadata;
+}
+
+/// Resolves the metadata `database` holds for `function`.
+///
+/// A [`CreateFunction`] node and a [`ParserDB`] are independent values, so a
+/// node the database does not hold (dropped, replaced, or parsed from different
+/// input) has no metadata to report.
+fn function_metadata<'db>(
+    function: &CreateFunction,
+    database: &'db ParserDB,
+) -> Result<&'db FunctionMetadata, LookupError> {
+    database
+        .function_metadata(function)
+        .ok_or_else(|| ObjectKind::Function.not_in_database(&function.name.to_string()))
 }
 
 impl FunctionLike for CreateFunction {
@@ -96,5 +111,10 @@ impl FunctionLike for CreateFunction {
     #[inline]
     fn security_mode(&self) -> FunctionSecurity {
         self.security.clone().unwrap_or(FunctionSecurity::Invoker)
+    }
+
+    #[inline]
+    fn owner<'db>(&self, database: &'db Self::DB) -> Result<Option<&'db str>, LookupError> {
+        Ok(function_metadata(self, database)?.owner())
     }
 }
