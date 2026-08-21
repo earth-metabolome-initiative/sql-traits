@@ -117,10 +117,9 @@ impl FunctionLike for CreateFunction {
 
     #[inline]
     fn body(&self) -> Option<&str> {
-        let body_expr = match &self.function_body {
-            Some(CreateFunctionBody::AsBeforeOptions { body, .. }) => body,
-            Some(CreateFunctionBody::AsAfterOptions(expr)) => expr,
-            _ => return None,
+        let Some(CreateFunctionBody::AsBeforeOptions { body: body_expr, .. }) = &self.function_body
+        else {
+            return None;
         };
 
         match body_expr {

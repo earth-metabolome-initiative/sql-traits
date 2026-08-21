@@ -293,14 +293,11 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
 
     /// Returns whether the language name was quoted in SQL.
     ///
-    /// The default `false` folds the name to lowercase, so an implementation
-    /// over a source that preserves quoting must override it. Quoting is not
-    /// cosmetic here: PostgreSQL refuses `LANGUAGE "SQL"` outright, because the
-    /// language it stores is named `sql`.
-    #[inline]
-    fn language_is_quoted(&self) -> bool {
-        false
-    }
+    /// Required rather than defaulted to `false`, because assuming a name was
+    /// unquoted is not a harmless guess here: PostgreSQL refuses
+    /// `LANGUAGE "SQL"` outright, since the language it stores is named `sql`,
+    /// so the two spellings do not name the same thing.
+    fn language_is_quoted(&self) -> bool;
 
     /// Returns the language name PostgreSQL stores: an unquoted identifier
     /// folds to lowercase, a quoted one keeps its case.
