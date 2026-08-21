@@ -4204,10 +4204,13 @@ impl ParserDB {
             OperateFunctionArg { mode: None, name: None, data_type, default_expr: None }
         };
 
+        // The mode, not a name: an argument reader hands back what the input
+        // declares, and `VARIADIC` as a name would invent an argument called
+        // that.
         let variadic_arg = |data_type: DataType| {
             OperateFunctionArg {
-                mode: None,
-                name: Some(Ident::new("VARIADIC")),
+                mode: Some(ArgMode::Variadic),
+                name: None,
                 data_type,
                 default_expr: None,
             }

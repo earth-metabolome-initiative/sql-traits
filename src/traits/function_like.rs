@@ -3,10 +3,11 @@
 use alloc::{borrow::Cow, vec::Vec};
 use core::{fmt::Debug, hash::Hash};
 
-use sqlparser::ast::FunctionSecurity;
+use sqlparser::ast::{Expr, FunctionSecurity};
 
 use crate::{
     errors::LookupError,
+    structs::TargetName,
     traits::{DatabaseLike, Metadata},
     utils::{identifier_resolution::normalize_identifier, normalize_postgres_type_cow},
 };
@@ -126,6 +127,73 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
         self.argument_type_names(database).map(normalize_postgres_type_cow).collect()
     }
 
+    /// Returns the name each argument is declared under, in declaration order,
+    /// and [`None`] for an argument declared as a bare type.
+    ///
+    /// A body reaches an argument by this name, so a caller expanding a call
+    /// into the body needs it to know what to substitute. The positions line up
+    /// with [`argument_type_names`](FunctionLike::argument_type_names).
+    ///
+    /// PostgreSQL reads a bare name in the body as a column whenever one of
+    /// that name is in scope there, and only otherwise as the argument, so a
+    /// caller substituting arguments has to resolve the body's own scopes
+    /// first. `$1` and `function.argument` always name the argument.
+    ///
+    /// A quoted name is reached case-sensitively, so it keeps its case here
+    /// while an unquoted one folds. At the pinned parser a quoted argument name
+    /// is reported wrongly, which
+    /// [`upstream_pending`](crate::upstream_pending) records against
+    /// `sqlparser#2447`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE FUNCTION is_member(doc_id INT, Role TEXT) RETURNS BOOL LANGUAGE sql
+    ///     AS 'SELECT true';
+    /// CREATE FUNCTION unnamed(INT) RETURNS BOOL LANGUAGE sql AS 'SELECT true';
+    /// ",
+    /// )?;
+    /// let is_member = db.function("is_member").expect("Function should exist");
+    /// let names: Vec<_> = is_member.argument_names(&db).collect();
+    /// assert_eq!(names[0].map(|name| name.name()), Some("doc_id"));
+    /// assert_eq!(names[1].map(|name| name.name()), Some("Role"));
+    /// assert!(!names[1].expect("Argument should be named").name_is_quoted());
+    ///
+    /// // Stored the way PostgreSQL folds an unquoted identifier.
+    /// let stored: Vec<_> = is_member.stored_argument_names(&db).collect();
+    /// assert_eq!(stored[0].as_deref(), Some("doc_id"));
+    /// assert_eq!(stored[1].as_deref(), Some("role"));
+    ///
+    /// let unnamed = db.function("unnamed").expect("Function should exist");
+    /// assert_eq!(unnamed.argument_names(&db).collect::<Vec<_>>(), vec![None]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn argument_names<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = Option<TargetName<'db>>>;
+
+    /// Returns the name PostgreSQL stores for each argument: an unquoted
+    /// identifier folds to lowercase, a quoted one keeps its case.
+    ///
+    /// See [`argument_names`](FunctionLike::argument_names) for an example.
+    #[inline]
+    fn stored_argument_names<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> impl Iterator<Item = Option<Cow<'db, str>>> {
+        self.argument_names(database).map(|argument| {
+            argument.map(|name| normalize_identifier(name.name(), name.name_is_quoted()))
+        })
+    }
+
     /// Returns the return type name of the function as a string.
     ///
     /// # Example
@@ -189,7 +257,63 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// ```
     fn returns_set(&self) -> bool;
 
-    /// Returns the body of the function.
+    /// Returns the language the body is written in, as the input spells it.
+    ///
+    /// The body only means anything under its language, so a caller reading
+    /// [`body`](FunctionLike::body) as SQL has to ask this first. PostgreSQL
+    /// requires the clause on `CREATE FUNCTION` and refuses a function without
+    /// one, so a parsed function that answers [`None`] came from input the
+    /// server would reject.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE FUNCTION one() RETURNS INT LANGUAGE SQL AS 'SELECT 1';
+    /// CREATE FUNCTION two() RETURNS INT LANGUAGE plpgsql AS 'BEGIN RETURN 2; END';
+    /// ",
+    /// )?;
+    /// let one = db.function("one").expect("Function should exist");
+    /// assert_eq!(one.language(), Some("SQL"));
+    /// // The server folds the identifier, and `sql` is what it looks up.
+    /// assert_eq!(one.stored_language().as_deref(), Some("sql"));
+    /// assert!(!one.language_is_quoted());
+    ///
+    /// let two = db.function("two").expect("Function should exist");
+    /// assert_eq!(two.stored_language().as_deref(), Some("plpgsql"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn language(&self) -> Option<&str>;
+
+    /// Returns whether the language name was quoted in SQL.
+    ///
+    /// Required rather than defaulted to `false`, because assuming a name was
+    /// unquoted is not a harmless guess here: PostgreSQL refuses
+    /// `LANGUAGE "SQL"` outright, since the language it stores is named `sql`,
+    /// so the two spellings do not name the same thing.
+    fn language_is_quoted(&self) -> bool;
+
+    /// Returns the language name PostgreSQL stores: an unquoted identifier
+    /// folds to lowercase, a quoted one keeps its case.
+    ///
+    /// See [`language`](FunctionLike::language) for an example.
+    #[inline]
+    fn stored_language(&self) -> Option<Cow<'_, str>> {
+        self.language().map(|language| normalize_identifier(language, self.language_is_quoted()))
+    }
+
+    /// Returns the body text of the function, for the spellings that write the
+    /// body as a string.
+    ///
+    /// A function written `RETURN <expression>` has no body text and answers
+    /// [`None`] here. Its body is an expression the input already parsed, which
+    /// [`body_expression`](FunctionLike::body_expression) hands back.
     ///
     /// # Example
     ///
@@ -208,6 +332,40 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// # }
     /// ```
     fn body(&self) -> Option<&str>;
+
+    /// Returns the expression of a function written `RETURN <expression>`.
+    ///
+    /// PostgreSQL 14 added this spelling, and it is the one that parses the
+    /// body up front rather than leaving a string for the caller to parse. A
+    /// function whose body is written as a string answers [`None`] here and
+    /// answers [`body`](FunctionLike::body) instead, so a caller wanting the
+    /// body in either spelling asks this first and falls back to parsing the
+    /// text.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE FUNCTION added(a INT, b INT) RETURNS INT LANGUAGE sql RETURN a + b;
+    /// CREATE FUNCTION quoted(a INT) RETURNS INT LANGUAGE sql AS 'SELECT a';
+    /// ",
+    /// )?;
+    /// let added = db.function("added").expect("Function should exist");
+    /// assert_eq!(added.body(), None);
+    /// assert_eq!(added.body_expression().map(ToString::to_string).as_deref(), Some("a + b"));
+    ///
+    /// let quoted = db.function("quoted").expect("Function should exist");
+    /// assert_eq!(quoted.body(), Some("SELECT a"));
+    /// assert_eq!(quoted.body_expression(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn body_expression(&self) -> Option<&Expr>;
 
     /// Returns whether the function runs with the privileges of the user
     /// that defined it (`SECURITY DEFINER`) or of the user that calls it

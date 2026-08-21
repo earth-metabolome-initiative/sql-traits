@@ -22,6 +22,7 @@ pub mod errors;
 mod impls;
 pub mod structs;
 pub mod traits;
+pub mod upstream_pending;
 pub mod utils;
 
 /// Prelude module re-exporting commonly used items from the crate.

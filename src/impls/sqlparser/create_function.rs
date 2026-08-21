@@ -10,7 +10,7 @@ use sqlparser::ast::{
 
 use crate::{
     errors::{LookupError, ObjectKind},
-    structs::{FunctionMetadata, ParserDB},
+    structs::{FunctionMetadata, ParserDB, TargetName},
     traits::{FunctionLike, Metadata},
     utils::{last_str, normalize_sqlparser_type},
 };
@@ -63,6 +63,30 @@ impl FunctionLike for CreateFunction {
     }
 
     #[inline]
+    fn argument_names<'db>(
+        &'db self,
+        _database: &'db Self::DB,
+    ) -> impl Iterator<Item = Option<TargetName<'db>>> {
+        self.args.iter().flat_map(|args| {
+            args.iter().map(|arg| {
+                arg.name
+                    .as_ref()
+                    .map(|name| TargetName::new(&name.value, name.quote_style.is_some()))
+            })
+        })
+    }
+
+    #[inline]
+    fn language(&self) -> Option<&str> {
+        self.language.as_ref().map(|language| language.value.as_str())
+    }
+
+    #[inline]
+    fn language_is_quoted(&self) -> bool {
+        self.language.as_ref().is_some_and(|language| language.quote_style.is_some())
+    }
+
+    #[inline]
     fn return_type_name<'db>(&'db self, _database: &'db Self::DB) -> Option<Cow<'db, str>> {
         self.return_type.as_ref().map(|rt| {
             match rt {
@@ -93,10 +117,9 @@ impl FunctionLike for CreateFunction {
 
     #[inline]
     fn body(&self) -> Option<&str> {
-        let body_expr = match &self.function_body {
-            Some(CreateFunctionBody::AsBeforeOptions { body, .. }) => body,
-            Some(CreateFunctionBody::Return(expr)) => expr,
-            _ => return None,
+        let Some(CreateFunctionBody::AsBeforeOptions { body: body_expr, .. }) = &self.function_body
+        else {
+            return None;
         };
 
         match body_expr {
@@ -104,6 +127,14 @@ impl FunctionLike for CreateFunction {
             Expr::Value(ValueWithSpan { value: Value::DollarQuotedString(s), .. }) => {
                 Some(&s.value)
             }
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn body_expression(&self) -> Option<&Expr> {
+        match &self.function_body {
+            Some(CreateFunctionBody::Return(expr)) => Some(expr),
             _ => None,
         }
     }
