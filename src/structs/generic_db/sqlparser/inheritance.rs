@@ -189,7 +189,13 @@ fn is_inherited_option(option: &ColumnOption) -> bool {
 }
 
 /// Whether a parent linked by this spelling writes the option onto the copy.
+///
+/// A check written `NO INHERIT` stays with the table declaring it, which is
+/// the attribute's entire meaning, so it never joins the copy.
 pub(super) fn option_passes_down(kind: ParentKind, option: &ColumnOption) -> bool {
+    if matches!(option, ColumnOption::Check(check) if check.no_inherit) {
+        return false;
+    }
     kind == ParentKind::PartitionOf || is_inherited_option(option)
 }
 
@@ -381,12 +387,16 @@ fn same_column(left: &Ident, right: &Ident) -> bool {
 /// Whether a parent linked by this spelling passes the constraint down.
 ///
 /// A check passes down whichever way it is written, so one attached to a
-/// column arrives with the column and one written on its own arrives here. A
-/// partition also receives the root's keys, unique constraints and foreign
-/// keys, because PostgreSQL enforces those across the whole hierarchy rather
-/// than one table at a time.
+/// column arrives with the column and one written on its own arrives here,
+/// unless it is written `NO INHERIT`, which is the one spelling that keeps a
+/// check with the table declaring it. A partition also receives the root's
+/// keys, unique constraints and foreign keys, because PostgreSQL enforces
+/// those across the whole hierarchy rather than one table at a time.
 pub(super) fn passes_down(kind: ParentKind, constraint: &TableConstraint) -> bool {
-    kind == ParentKind::PartitionOf || matches!(constraint, TableConstraint::Check(_))
+    match constraint {
+        TableConstraint::Check(check) => !check.no_inherit,
+        _ => kind == ParentKind::PartitionOf,
+    }
 }
 
 /// The columns a generated index name is built from, an unnamed expression
@@ -496,6 +506,17 @@ fn without_generated_name(constraint: &TableConstraint) -> TableConstraint {
 /// down.
 pub(super) fn is_copy_of(held: &TableConstraint, passed: &TableConstraint) -> bool {
     without_generated_name(held) == without_generated_name(passed)
+}
+
+/// The name the constraint is declared under, when the kind writes one.
+pub(super) fn declared_name(constraint: &TableConstraint) -> Option<&Ident> {
+    match constraint {
+        TableConstraint::Check(check) => check.name.as_ref(),
+        TableConstraint::Unique(unique) => unique.name.as_ref(),
+        TableConstraint::PrimaryKey(primary_key) => primary_key.name.as_ref(),
+        TableConstraint::ForeignKey(foreign_key) => foreign_key.name.as_ref(),
+        _ => None,
+    }
 }
 
 /// Whether the table already carries its copy of the constraint.
@@ -663,11 +684,27 @@ pub(super) fn apply_parents(
             {
                 continue;
             }
-            if let Some(copy) =
+            let Some(copy) =
                 received_constraint(builder, *kind, create_table, constraint, &mut taken)
+            else {
+                continue;
+            };
+            // A child holding an exact copy was merged above, so a name still
+            // taken here belongs to a constraint the arriving one cannot merge
+            // with, which PostgreSQL refuses.
+            if let Some(name) = declared_name(&copy)
+                && (create_table
+                    .constraints
+                    .iter()
+                    .any(|held| super::table_constraint_has_name(held, name))
+                    || constraints.iter().any(|held| super::table_constraint_has_name(held, name)))
             {
-                constraints.push(copy);
+                return Err(Error::InheritedConstraintConflict {
+                    table_name: child_name.clone(),
+                    constraint_name: name.value.clone(),
+                });
             }
+            constraints.push(copy);
         }
     }
 

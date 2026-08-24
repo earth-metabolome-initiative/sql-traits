@@ -523,6 +523,38 @@ pub trait CheckConstraintLike:
     /// ```
     fn expression<'db>(&'db self, database: &'db Self::DB) -> &'db Expr;
 
+    /// Returns whether the check was written `NO INHERIT`, staying on the
+    /// table declaring it rather than passing to the tables inheriting from
+    /// it.
+    ///
+    /// Defaults to `false`, which is what every check not spelling the
+    /// attribute means.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "CREATE TABLE par (id INT, CONSTRAINT own CHECK (id > 0) NO INHERIT, CHECK (id < 9));",
+    /// )?;
+    /// let table = db.table(None, "par").unwrap();
+    /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
+    /// let [own, passed] = &check_constraints.as_slice() else {
+    ///     panic!("Expected two check constraints");
+    /// };
+    /// assert!(own.no_inherit());
+    /// assert!(!passed.no_inherit());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn no_inherit(&self) -> bool {
+        false
+    }
+
     /// Returns a reference to the table that the check constraint is defined
     /// on.
     ///

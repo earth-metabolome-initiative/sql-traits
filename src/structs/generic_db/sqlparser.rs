@@ -1670,6 +1670,34 @@ fn validate_table_schema(
     })
 }
 
+/// Refuses a `NO INHERIT` check written on a partitioned table.
+///
+/// PostgreSQL enforces every constraint of a partitioned table on its
+/// partitions, so the one spelling that would keep a check from them is
+/// refused, written as a table constraint or on a column alike.
+fn refuse_no_inherit_check_on_partitioned(
+    create_table: &CreateTable,
+) -> Result<(), crate::errors::Error> {
+    if create_table.partition_by.is_none() {
+        return Ok(());
+    }
+    let on_table = create_table
+        .constraints
+        .iter()
+        .any(|constraint| matches!(constraint, TableConstraint::Check(check) if check.no_inherit));
+    let on_column = create_table
+        .columns
+        .iter()
+        .flat_map(|column| &column.options)
+        .any(|option| matches!(&option.option, ColumnOption::Check(check) if check.no_inherit));
+    if on_table || on_column {
+        return Err(crate::errors::Error::NoInheritCheckOnPartitionedTable {
+            table_name: create_table.table_name().to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Records a permanent table created without a schema in the one the search
 /// path selects.
 ///
@@ -3181,6 +3209,67 @@ impl ParserDB {
         })
     }
 
+    /// Refuses the spellings of `ALTER TABLE [ONLY] ... ADD CONSTRAINT` that
+    /// PostgreSQL refuses, all measured on 18.4.
+    ///
+    /// A check would have to reach the tables below, so `ONLY` is refused for
+    /// one while any exist, except written `NO INHERIT`, when it never
+    /// travels and `ONLY` changes nothing, though a partitioned table refuses
+    /// that spelling outright. A unique constraint and a foreign key stay
+    /// with the named table even where tables inherit, a foreign key on a
+    /// partitioned table taking no `ONLY` at all. A primary key is granted
+    /// `ONLY` where every table below already requires the keyed columns,
+    /// because the `NOT NULL` it implies is the one part that cannot stop at
+    /// the named table.
+    fn refuse_unaddable_constraint(
+        builder: &ParserDBBuilder,
+        stored: &StoredTable,
+        scope: AlterTableScope,
+        constraint: &TableConstraint,
+    ) -> Result<(), crate::errors::Error> {
+        match constraint {
+            TableConstraint::Check(check) if check.no_inherit => {
+                if Self::stored_node(builder, stored)?.partition_by.is_some() {
+                    return Err(crate::errors::Error::NoInheritCheckOnPartitionedTable {
+                        table_name: stored.name.clone(),
+                    });
+                }
+            }
+            TableConstraint::Check(_) => {
+                Self::refuse_only_with_children(
+                    builder,
+                    stored,
+                    scope,
+                    crate::errors::InheritedChange::AddConstraint,
+                )?;
+            }
+            TableConstraint::ForeignKey(_) => {
+                if scope.only && Self::stored_node(builder, stored)?.partition_by.is_some() {
+                    return Err(crate::errors::Error::OnlyForeignKeyOnPartitionedTable {
+                        table_name: stored.name.clone(),
+                    });
+                }
+            }
+            TableConstraint::PrimaryKey(primary_key) if scope.only => {
+                let keyed = plain_column_names(&primary_key.columns);
+                for descendant in inheritance::descendants(builder, stored) {
+                    let node = Self::stored_node(builder, &descendant)?;
+                    if let Some(column) = node.columns.iter().find(|column| {
+                        keyed.iter().any(|keyed| idents_match(keyed, &column.name))
+                            && !states_not_null(column)
+                    }) {
+                        return Err(crate::errors::Error::OnlyPrimaryKeyOnNullableColumn {
+                            table_name: descendant.name.clone(),
+                            column_name: column.name.value.clone(),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Adds a constraint to a table and to every table that takes its shape
     /// from it.
     ///
@@ -3198,17 +3287,19 @@ impl ParserDB {
         let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
         };
-        Self::refuse_only_with_children(
-            &builder,
-            &stored,
-            scope,
-            crate::errors::InheritedChange::AddConstraint,
-        )?;
+        Self::refuse_unaddable_constraint(&builder, &stored, scope, &constraint)?;
 
         let mut builder = Self::alter_table_constraints(builder, &stored, |_, constraints| {
             constraints.push(constraint.clone());
             Ok(())
         })?;
+
+        // Nothing below the named table changes under `ONLY`: a table created
+        // afterwards still receives its copy at creation, which is also what
+        // the server leaves behind.
+        if scope.only {
+            return Ok(builder);
+        }
 
         // The requirement to hold a value reaches every table below, even where
         // the key itself stays put: PostgreSQL records it as a constraint of
@@ -3259,6 +3350,18 @@ impl ParserDB {
                 else {
                     continue;
                 };
+
+                // The merge above took the exact copies, so a held constraint
+                // still carrying the name cannot merge with the arriving one,
+                // which PostgreSQL refuses.
+                if let Some(name) = inheritance::declared_name(&copy)
+                    && node.constraints.iter().any(|held| table_constraint_has_name(held, name))
+                {
+                    return Err(crate::errors::Error::InheritedConstraintConflict {
+                        table_name: child.name.clone(),
+                        constraint_name: name.value.clone(),
+                    });
+                }
 
                 let recorded = copy.clone();
                 builder = Self::alter_table_constraints(builder, &child, |_, constraints| {
@@ -3665,12 +3768,28 @@ impl ParserDB {
             crate::errors::InheritedChange::AddColumn,
         )?;
 
+        // A check riding the column as `NO INHERIT` stays with the named
+        // table, and a partitioned table cannot hold one at all.
+        if column_def
+            .options
+            .iter()
+            .any(|option| matches!(&option.option, ColumnOption::Check(check) if check.no_inherit))
+            && Self::stored_node(&builder, &stored)?.partition_by.is_some()
+        {
+            return Err(crate::errors::Error::NoInheritCheckOnPartitionedTable {
+                table_name: stored.name.clone(),
+            });
+        }
+
         // PostgreSQL gives the column to every table inheriting this one,
         // added at the end of each because their own columns already hold
         // their places. Read before the parent changes, so the list is the
         // one the statement found.
         let inheritors = inheritance::descendants(&builder, &stored);
-        let inherited_def = column_def.clone();
+        let mut inherited_def = column_def.clone();
+        inherited_def.options.retain(
+            |option| !matches!(&option.option, ColumnOption::Check(check) if check.no_inherit),
+        );
 
         let mut builder = Self::replace_table_node(builder, &stored, |_, node| {
             let at = match position {
@@ -5203,6 +5322,7 @@ impl ParserDB {
                     // way a foreign key target does, which is also what
                     // leaves the edges acyclic.
                     let inherited = inheritance::apply_parents(&builder, &mut create_table)?;
+                    refuse_no_inherit_check_on_partitioned(&create_table)?;
                     record_implied_not_null(&mut create_table);
                     let mut metadata = TableMetadata::default();
                     metadata.set_inherited_column_names(inherited.columns);

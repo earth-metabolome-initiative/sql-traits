@@ -514,3 +514,294 @@ fn a_constraint_the_table_does_not_hold_is_reported_unless_excused() {
     );
     assert!(constraint_names(&database, "par").is_empty());
 }
+
+/// The number of check constraints the table answers, counting the ones
+/// written on a column along with the ones in the constraint list.
+fn check_count(database: &ParserDB, table_name: &str) -> usize {
+    database
+        .table(None, table_name)
+        .expect("table exists")
+        .check_constraints(database)
+        .expect("table is in this database")
+        .count()
+}
+
+#[test]
+fn a_no_inherit_check_stays_with_the_table_declaring_it() {
+    // Measured on PostgreSQL 18.4: whether the child exists before or after
+    // the statement, and whichever spelling writes the check, it never
+    // travels.
+    let after = database(
+        "CREATE TABLE par (id INT);
+         ALTER TABLE par ADD CONSTRAINT c1 CHECK (id > 0) NO INHERIT;
+         CREATE TABLE chi () INHERITS (par);",
+    );
+    assert_eq!(constraint_names(&after, "par"), ["c1"]);
+    assert!(constraint_names(&after, "chi").is_empty());
+
+    let before = database(
+        "CREATE TABLE par (id INT);
+         CREATE TABLE chi () INHERITS (par);
+         CREATE TABLE gch () INHERITS (chi);
+         ALTER TABLE par ADD CONSTRAINT c1 CHECK (id > 0) NO INHERIT;",
+    );
+    assert_eq!(constraint_names(&before, "par"), ["c1"]);
+    assert!(constraint_names(&before, "chi").is_empty());
+    assert!(constraint_names(&before, "gch").is_empty());
+
+    let declared = database(
+        "CREATE TABLE par (id INT, CONSTRAINT c1 CHECK (id > 0) NO INHERIT);
+         CREATE TABLE chi () INHERITS (par);",
+    );
+    assert_eq!(constraint_names(&declared, "par"), ["c1"]);
+    assert!(constraint_names(&declared, "chi").is_empty());
+}
+
+#[test]
+fn a_no_inherit_check_on_a_column_stays_while_the_column_travels() {
+    // Measured on PostgreSQL 18.4: the child receives the column bare, both
+    // when the column is inherited at creation and when it arrives later.
+    let declared = database(
+        "CREATE TABLE par (id INT CHECK (id > 0) NO INHERIT);
+         CREATE TABLE chi () INHERITS (par);",
+    );
+    assert_eq!(column_names(&declared, "chi"), ["id"]);
+    assert_eq!(check_count(&declared, "par"), 1);
+    assert_eq!(check_count(&declared, "chi"), 0);
+
+    let added = database(
+        "CREATE TABLE par (id INT);
+         CREATE TABLE chi () INHERITS (par);
+         ALTER TABLE par ADD COLUMN w INT CHECK (w > 0) NO INHERIT;",
+    );
+    assert_eq!(column_names(&added, "chi"), ["id", "w"]);
+    assert_eq!(check_count(&added, "par"), 1);
+    assert_eq!(check_count(&added, "chi"), 0);
+}
+
+#[test]
+fn only_is_granted_for_a_no_inherit_check() {
+    // PostgreSQL refuses `ONLY` for a check that would have to reach the
+    // tables below, and grants it for one that stays put either way.
+    let database = database(
+        "CREATE TABLE par (id INT);
+         CREATE TABLE chi () INHERITS (par);
+         ALTER TABLE ONLY par ADD CONSTRAINT c1 CHECK (id > 0) NO INHERIT;",
+    );
+    assert_eq!(constraint_names(&database, "par"), ["c1"]);
+    assert!(constraint_names(&database, "chi").is_empty());
+}
+
+#[test]
+fn a_partitioned_table_refuses_a_no_inherit_check() {
+    // PostgreSQL enforces every constraint of a partitioned table on its
+    // partitions, so each spelling that would keep a check from them is
+    // refused: added later, declared on the table, written on a column, and
+    // riding a column added later.
+    for sql in [
+        "CREATE TABLE root (id INT) PARTITION BY RANGE (id);
+         ALTER TABLE root ADD CONSTRAINT c1 CHECK (id > 0) NO INHERIT;",
+        "CREATE TABLE root (id INT, CONSTRAINT c1 CHECK (id > 0) NO INHERIT)
+             PARTITION BY RANGE (id);",
+        "CREATE TABLE root (id INT CHECK (id > 0) NO INHERIT) PARTITION BY RANGE (id);",
+        "CREATE TABLE root (id INT) PARTITION BY RANGE (id);
+         ALTER TABLE root ADD COLUMN w INT CHECK (w > 0) NO INHERIT;",
+    ] {
+        assert!(matches!(
+            parse(sql),
+            Err(Error::NoInheritCheckOnPartitionedTable { ref table_name })
+                if table_name == "root"
+        ));
+    }
+
+    // A partition itself may hold one, because nothing partitions it further.
+    let database = database(
+        "CREATE TABLE root (id INT) PARTITION BY RANGE (id);
+         CREATE TABLE part PARTITION OF root FOR VALUES FROM (1) TO (9);
+         ALTER TABLE part ADD CONSTRAINT cp CHECK (id < 100) NO INHERIT;",
+    );
+    assert_eq!(constraint_names(&database, "part"), ["cp"]);
+}
+
+#[test]
+fn a_child_constraint_unmergeable_with_an_inherited_one_is_refused() {
+    // Measured on PostgreSQL 18.4: an arriving check merges into a child's
+    // own of the same name only when the expressions match and the child's
+    // is not `NO INHERIT`. Anything else sharing the name is refused, at
+    // creation and through `ALTER TABLE` alike.
+    assert!(matches!(
+        parse(
+            "CREATE TABLE par (id INT, CONSTRAINT c6 CHECK (id > 0));
+             CREATE TABLE chi (id INT, CONSTRAINT c6 CHECK (id > 0) NO INHERIT) INHERITS (par);"
+        ),
+        Err(Error::InheritedConstraintConflict { ref table_name, ref constraint_name })
+            if table_name == "chi" && constraint_name == "c6"
+    ));
+
+    assert!(matches!(
+        parse(
+            "CREATE TABLE par (id INT);
+             CREATE TABLE chi (CONSTRAINT lc CHECK (id > 0) NO INHERIT) INHERITS (par);
+             ALTER TABLE par ADD CONSTRAINT lc CHECK (id > 0);"
+        ),
+        Err(Error::InheritedConstraintConflict { ref table_name, ref constraint_name })
+            if table_name == "chi" && constraint_name == "lc"
+    ));
+
+    assert!(matches!(
+        parse(
+            "CREATE TABLE par (id INT);
+             CREATE TABLE chi (CONSTRAINT kc CHECK (id > 0)) INHERITS (par);
+             ALTER TABLE par ADD CONSTRAINT kc CHECK (id < 5);"
+        ),
+        Err(Error::InheritedConstraintConflict { ref constraint_name, .. })
+            if constraint_name == "kc"
+    ));
+
+    // Two parents passing the same name merge when the checks agree and are
+    // refused when they do not.
+    assert!(matches!(
+        parse(
+            "CREATE TABLE qa (a INT, CONSTRAINT qc CHECK (a > 0));
+             CREATE TABLE qb (a INT, CONSTRAINT qc CHECK (a < 5));
+             CREATE TABLE qchild () INHERITS (qa, qb);"
+        ),
+        Err(Error::InheritedConstraintConflict { ref constraint_name, .. })
+            if constraint_name == "qc"
+    ));
+    let agreeing = database(
+        "CREATE TABLE ra (a INT, CONSTRAINT rc CHECK (a > 0));
+         CREATE TABLE rb (a INT, CONSTRAINT rc CHECK (a > 0));
+         CREATE TABLE rchild () INHERITS (ra, rb);",
+    );
+    assert_eq!(constraint_names(&agreeing, "rchild"), ["rc"]);
+}
+
+#[test]
+fn a_parent_no_inherit_check_leaves_the_name_free_for_the_child() {
+    // Nothing arrives from the parent, so the child's own constraint under
+    // the same name stands, whichever flavour the child writes.
+    for child_constraint in
+        ["CONSTRAINT c7 CHECK (id > 0) NO INHERIT", "CONSTRAINT c7 CHECK (id > 0)"]
+    {
+        let database = database(&format!(
+            "CREATE TABLE par (id INT, CONSTRAINT c7 CHECK (id > 0) NO INHERIT);
+             CREATE TABLE chi (id INT, {child_constraint}) INHERITS (par);"
+        ));
+        assert_eq!(constraint_names(&database, "par"), ["c7"]);
+        assert_eq!(constraint_names(&database, "chi"), ["c7"]);
+    }
+}
+
+#[test]
+fn the_no_inherit_flag_is_read_from_the_check() {
+    let database = database(
+        "CREATE TABLE par (id INT, CONSTRAINT own CHECK (id > 0) NO INHERIT, CHECK (id < 9));",
+    );
+    let table = database.table(None, "par").expect("table exists");
+    let flags: Vec<bool> = table
+        .check_constraints(&database)
+        .expect("table is in this database")
+        .map(sql_traits::traits::CheckConstraintLike::no_inherit)
+        .collect();
+    assert_eq!(flags, [true, false]);
+}
+
+#[test]
+fn only_is_granted_for_a_unique_or_foreign_key_where_tables_inherit() {
+    // Measured on PostgreSQL 18.4: neither reaches an `INHERITS` child even
+    // without `ONLY`, so there is nothing to withhold and the statement is
+    // granted.
+    let database = database(
+        "CREATE TABLE tgt (id INT PRIMARY KEY);
+         CREATE TABLE par (id INT, code TEXT);
+         CREATE TABLE chi () INHERITS (par);
+         ALTER TABLE ONLY par ADD CONSTRAINT u1 UNIQUE (code);
+         ALTER TABLE ONLY par ADD CONSTRAINT f1 FOREIGN KEY (id) REFERENCES tgt (id);",
+    );
+    assert_eq!(constraint_names(&database, "par"), ["u1", "f1"]);
+    assert!(constraint_names(&database, "chi").is_empty());
+}
+
+#[test]
+fn only_leaves_a_unique_constraint_off_existing_partitions() {
+    // Measured on PostgreSQL 18.4: the partition standing when the statement
+    // runs receives nothing, while one created afterwards receives its copy
+    // the ordinary way, under a name of its own.
+    let database = database(
+        "CREATE TABLE root (id INT) PARTITION BY RANGE (id);
+         CREATE TABLE before_it PARTITION OF root FOR VALUES FROM (1) TO (9);
+         ALTER TABLE ONLY root ADD CONSTRAINT u1 UNIQUE (id);
+         CREATE TABLE after_it PARTITION OF root FOR VALUES FROM (9) TO (99);",
+    );
+    assert_eq!(constraint_names(&database, "root"), ["u1"]);
+    assert!(constraint_names(&database, "before_it").is_empty());
+    assert_eq!(constraint_names(&database, "after_it"), ["after_it_id_key"]);
+}
+
+#[test]
+fn only_refuses_a_foreign_key_on_a_partitioned_table() {
+    // Measured on PostgreSQL 18.4: refused whether or not any partition
+    // exists yet.
+    assert!(matches!(
+        parse(
+            "CREATE TABLE tgt (id INT PRIMARY KEY);
+             CREATE TABLE root (id INT) PARTITION BY RANGE (id);
+             ALTER TABLE ONLY root ADD CONSTRAINT f1 FOREIGN KEY (id) REFERENCES tgt (id);"
+        ),
+        Err(Error::OnlyForeignKeyOnPartitionedTable { ref table_name }) if table_name == "root"
+    ));
+}
+
+#[test]
+fn only_grants_a_primary_key_where_every_table_below_requires_the_columns() {
+    // Measured on PostgreSQL 18.4: the key stays with the named table, and
+    // the `NOT NULL` it would imply has to hold below already.
+    let inherits = database(
+        "CREATE TABLE par (id INT NOT NULL);
+         CREATE TABLE chi () INHERITS (par);
+         ALTER TABLE ONLY par ADD CONSTRAINT p1 PRIMARY KEY (id);",
+    );
+    assert_eq!(constraint_names(&inherits, "par"), ["p1"]);
+    assert!(constraint_names(&inherits, "chi").is_empty());
+    assert_eq!(primary_key_width(&inherits, "chi"), 0);
+
+    let partitioned = database(
+        "CREATE TABLE root (id INT NOT NULL) PARTITION BY RANGE (id);
+         CREATE TABLE part PARTITION OF root FOR VALUES FROM (1) TO (9);
+         ALTER TABLE ONLY root ADD CONSTRAINT p1 PRIMARY KEY (id);",
+    );
+    assert_eq!(constraint_names(&partitioned, "root"), ["p1"]);
+    assert!(constraint_names(&partitioned, "part").is_empty());
+    assert_eq!(primary_key_width(&partitioned, "part"), 0);
+
+    // A grandchild redeclaring the column keeps the requirement the union
+    // with the parent's declaration gives it, so it stands in nothing's way.
+    let redeclared = database(
+        "CREATE TABLE par (id INT NOT NULL);
+         CREATE TABLE chi () INHERITS (par);
+         CREATE TABLE gch (id INT) INHERITS (chi);
+         ALTER TABLE ONLY par ADD CONSTRAINT p1 PRIMARY KEY (id);",
+    );
+    assert_eq!(constraint_names(&redeclared, "par"), ["p1"]);
+
+    // A table below whose keyed column may still hold nothing is refused.
+    assert!(matches!(
+        parse(
+            "CREATE TABLE par (id INT);
+             CREATE TABLE chi () INHERITS (par);
+             ALTER TABLE ONLY par ADD CONSTRAINT p1 PRIMARY KEY (id);"
+        ),
+        Err(Error::OnlyPrimaryKeyOnNullableColumn { ref table_name, ref column_name })
+            if table_name == "chi" && column_name == "id"
+    ));
+    assert!(matches!(
+        parse(
+            "CREATE TABLE root (id INT) PARTITION BY RANGE (id);
+             CREATE TABLE part PARTITION OF root FOR VALUES FROM (1) TO (9);
+             ALTER TABLE ONLY root ADD CONSTRAINT p1 PRIMARY KEY (id);"
+        ),
+        Err(Error::OnlyPrimaryKeyOnNullableColumn { ref table_name, .. })
+            if table_name == "part"
+    ));
+}

@@ -255,6 +255,49 @@ pub enum Error {
         change: InheritedChange,
     },
     #[error(
+        "Constraint `{constraint_name}` of table `{table_name}` conflicts with the constraint of the same name a parent passes down."
+    )]
+    /// Error indicating that a table holds a constraint under the same name as
+    /// one arriving from a parent without being mergeable with it, either
+    /// because the expressions differ or because the table's own is marked
+    /// `NO INHERIT`.
+    InheritedConstraintConflict {
+        /// Name of the table holding the conflicting constraint.
+        table_name: String,
+        /// Name the two constraints share.
+        constraint_name: String,
+    },
+    #[error("Cannot add a `NO INHERIT` check to partitioned table `{table_name}`.")]
+    /// Error indicating that a `NO INHERIT` check was written on a partitioned
+    /// table, which PostgreSQL refuses because every constraint of a
+    /// partitioned table is enforced on its partitions.
+    NoInheritCheckOnPartitionedTable {
+        /// Name of the partitioned table.
+        table_name: String,
+    },
+    #[error("Cannot use `ONLY` to add a foreign key on partitioned table `{table_name}`.")]
+    /// Error indicating that `ALTER TABLE ONLY ... ADD FOREIGN KEY` named a
+    /// partitioned table, which PostgreSQL refuses whether or not any
+    /// partition exists yet.
+    OnlyForeignKeyOnPartitionedTable {
+        /// Name of the partitioned table.
+        table_name: String,
+    },
+    #[error(
+        "Column `{column_name}` of table `{table_name}` must require a value before `ONLY` may add a primary key above it."
+    )]
+    /// Error indicating that `ALTER TABLE ONLY ... ADD PRIMARY KEY` named a
+    /// table below which a keyed column may still hold nothing. The `NOT NULL`
+    /// a key implies is the one part that cannot stop at the named table, so
+    /// PostgreSQL grants the statement only where every table below already
+    /// requires the keyed columns.
+    OnlyPrimaryKeyOnNullableColumn {
+        /// Name of the table whose column may still hold nothing.
+        table_name: String,
+        /// Name of the keyed column.
+        column_name: String,
+    },
+    #[error(
         "Column `{column_name}` of table `{table_name}` cannot stop requiring a value because {reason}."
     )]
     /// Error indicating that `ALTER COLUMN ... DROP NOT NULL` named a column

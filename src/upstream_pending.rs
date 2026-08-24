@@ -7,19 +7,6 @@
 //!
 //! Filed and open:
 //!
-//! - [`sqlparser#2447`](https://github.com/apache/datafusion-sqlparser-rs/pull/2447),
-//!   a quoted function argument name arrives with the quote characters inside
-//!   the value and its quote style cleared, so
-//!   [`FunctionLike::argument_names`](crate::traits::FunctionLike::argument_names)
-//!   answers a name no body ever writes. Unquoted names are unaffected. When it
-//!   lands: move the pin, drop the two `#[ignore]` marks in
-//!   `tests/function_signature.rs`, and put the quoted case back into the
-//!   `argument_names` example.
-//! - [`sqlparser#2435`](https://github.com/apache/datafusion-sqlparser-rs/pull/2435),
-//!   `CHECK ... NO INHERIT` does not parse, and it is the only way to write a
-//!   check that deliberately stays on the parent, so a schema using it cannot
-//!   be read at all. When it lands: record the marker on the check and stop
-//!   passing such a constraint to descendants.
 //! - [`sqlparser#2431`](https://github.com/apache/datafusion-sqlparser-rs/pull/2431),
 //!   `REVOKE GRANT OPTION FOR` does not parse, so the statement never reaches
 //!   the model and a revoked grant option cannot be applied.

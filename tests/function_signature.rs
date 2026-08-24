@@ -75,12 +75,7 @@ fn arguments_report_the_names_they_are_declared_under() {
 
 /// A quoted argument name is reached case-sensitively in the body, so folding
 /// it would point a substitution at a name the body never writes.
-///
-/// Parked on `sqlparser#2447`: the parser hands the name back with its quote
-/// characters inside the value and its quote style cleared. See
-/// [`sql_traits::upstream_pending`].
 #[test]
-#[ignore = "blocked on sqlparser#2447, see sql_traits::upstream_pending"]
 fn a_quoted_argument_name_keeps_its_case() {
     let database = db(r#"CREATE FUNCTION f("DocId" INT, "Role" TEXT) RETURNS BOOL LANGUAGE sql
              AS 'SELECT true';"#);
