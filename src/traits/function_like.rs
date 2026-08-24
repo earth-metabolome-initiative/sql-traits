@@ -140,10 +140,7 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// first. `$1` and `function.argument` always name the argument.
     ///
     /// A quoted name is reached case-sensitively, so it keeps its case here
-    /// while an unquoted one folds. At the pinned parser a quoted argument name
-    /// is reported wrongly, which
-    /// [`upstream_pending`](crate::upstream_pending) records against
-    /// `sqlparser#2447`.
+    /// while an unquoted one folds.
     ///
     /// # Example
     ///
@@ -154,7 +151,7 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     ///
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "
-    /// CREATE FUNCTION is_member(doc_id INT, Role TEXT) RETURNS BOOL LANGUAGE sql
+    /// CREATE FUNCTION is_member(doc_id INT, \"Role\" TEXT) RETURNS BOOL LANGUAGE sql
     ///     AS 'SELECT true';
     /// CREATE FUNCTION unnamed(INT) RETURNS BOOL LANGUAGE sql AS 'SELECT true';
     /// ",
@@ -163,12 +160,12 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// let names: Vec<_> = is_member.argument_names(&db).collect();
     /// assert_eq!(names[0].map(|name| name.name()), Some("doc_id"));
     /// assert_eq!(names[1].map(|name| name.name()), Some("Role"));
-    /// assert!(!names[1].expect("Argument should be named").name_is_quoted());
+    /// assert!(names[1].expect("Argument should be named").name_is_quoted());
     ///
-    /// // Stored the way PostgreSQL folds an unquoted identifier.
+    /// // An unquoted identifier folds to lowercase, a quoted one keeps its case.
     /// let stored: Vec<_> = is_member.stored_argument_names(&db).collect();
     /// assert_eq!(stored[0].as_deref(), Some("doc_id"));
-    /// assert_eq!(stored[1].as_deref(), Some("role"));
+    /// assert_eq!(stored[1].as_deref(), Some("Role"));
     ///
     /// let unnamed = db.function("unnamed").expect("Function should exist");
     /// assert_eq!(unnamed.argument_names(&db).collect::<Vec<_>>(), vec![None]);

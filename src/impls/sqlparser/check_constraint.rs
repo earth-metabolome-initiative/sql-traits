@@ -38,6 +38,11 @@ impl CheckConstraintLike for TableAttribute<CreateTable, CheckConstraint> {
     }
 
     #[inline]
+    fn no_inherit(&self) -> bool {
+        self.attribute().no_inherit
+    }
+
+    #[inline]
     fn table<'db>(
         &'db self,
         database: &'db Self::DB,
