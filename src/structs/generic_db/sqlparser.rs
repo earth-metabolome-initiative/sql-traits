@@ -2240,16 +2240,12 @@ fn rename_grantee_role(grants: &mut [(Arc<Grant>, ())], previous: &Ident, replac
     }
 }
 
-/// Subtracts a revoke from a grant store, reporting whether it asked for
-/// something this model cannot represent.
-///
-/// A revoke that matches no grant is a no-op, as it is in the database, so
-/// nothing is reported for it.
+/// Subtracts a revoke from a grant store and returns an unsupported shape.
 fn apply_revoke_to_grant_store(
     grants: &mut Vec<(Arc<Grant>, ())>,
     revoke: &sqlparser::ast::Revoke,
-) -> bool {
-    let mut has_unsupported_column_scoped_revoke = false;
+) -> Option<&'static str> {
+    let mut unsupported = None;
     let mut updated_grants = Vec::with_capacity(grants.len());
     let original_grants = core::mem::take(grants);
 
@@ -2264,23 +2260,34 @@ fn apply_revoke_to_grant_store(
 
         let mut targeted_grant = grant.as_ref().clone();
         targeted_grant.grantees = targeted_grantees;
+        let application = crate::impls::apply_revoke_to_grant(&targeted_grant, revoke);
 
-        if crate::impls::has_unsupported_column_scoped_revoke(&targeted_grant, revoke) {
-            has_unsupported_column_scoped_revoke = true;
+        if application.unsupported {
+            unsupported.get_or_insert(
+                if revoke.grant_option_for
+                    && matches!(
+                        (&targeted_grant.privileges, &revoke.privileges),
+                        (Privileges::All { .. }, Privileges::Actions(_))
+                    )
+                {
+                    "grant-option revoke of a subset from ALL PRIVILEGES is not representable in \
+                     this model"
+                } else {
+                    "column-scoped REVOKE against a table-wide action grant is not representable \
+                     in this model"
+                },
+            );
             updated_grants.push((grant, ()));
             continue;
         }
-
-        let application = crate::impls::apply_revoke_to_grant(&targeted_grant, revoke);
 
         if !application.matched {
             updated_grants.push((grant, ()));
             continue;
         }
 
-        // Preserve the original storage entry when revoke matched but did not
-        // change the targeted grantee's privileges (e.g. ALL minus action).
-        if application.updated_grant.as_ref().is_some_and(|g| g == &targeted_grant) {
+        if matches!(application.updated_grants.as_slice(), [updated] if updated == &targeted_grant)
+        {
             updated_grants.push((grant, ()));
             continue;
         }
@@ -2291,13 +2298,12 @@ fn apply_revoke_to_grant_store(
             updated_grants.push((Arc::new(untouched_grant), ()));
         }
 
-        if let Some(updated_grant) = application.updated_grant {
-            updated_grants.push((Arc::new(updated_grant), ()));
-        }
+        updated_grants
+            .extend(application.updated_grants.into_iter().map(|updated| (Arc::new(updated), ())));
     }
 
     *grants = updated_grants;
-    has_unsupported_column_scoped_revoke
+    unsupported
 }
 
 /// A database schema parsed from SQL text.
@@ -5505,17 +5511,8 @@ impl ParserDB {
                     builder = builder.add_column_grant(Arc::new(grant), ());
                 }
                 Statement::Revoke(revoke) => {
-                    // A revoke names the same targets a grant does and the
-                    // database refuses an absent one just as readily, so the
-                    // two statements are checked alike. What it does not
-                    // refuse is a revoke that matches no grant: subtracting a
-                    // privilege nobody holds simply leaves nothing to hold,
-                    // and `pg_dump` emits one per function whose default
-                    // execute privilege was revoked.
-                    //
-                    // TODO: `REVOKE GRANT OPTION FOR` is unparsed upstream, so
-                    // once it is not, this arm subtracts the whole privilege
-                    // where only the option should go.
+                    // A revoke naming no recorded grant is a no-op, as it is in
+                    // the database.
                     if options.access_resolution() == AccessResolution::ClosedWorld {
                         validate_access_targets_against_builder(
                             &builder,
@@ -5534,21 +5531,15 @@ impl ParserDB {
                         &path,
                     )?;
 
-                    // Applied to both canonical grant stores.
-                    let unsupported_in_tables =
-                        apply_revoke_to_grant_store(builder.table_grants_mut(), &revoke);
-                    let unsupported_in_columns =
-                        apply_revoke_to_grant_store(builder.column_grants_mut(), &revoke);
+                    let unsupported =
+                        apply_revoke_to_grant_store(builder.table_grants_mut(), &revoke).or_else(
+                            || apply_revoke_to_grant_store(builder.column_grants_mut(), &revoke),
+                        );
 
-                    // Shapes this model cannot represent are still refused, for
-                    // example a column-subset revoke against a table-wide
-                    // action grant.
-                    if unsupported_in_tables || unsupported_in_columns {
+                    if let Some(reason) = unsupported {
                         return Err(crate::errors::Error::UnsupportedRevoke {
                             statement: revoke.to_string(),
-                            reason: "column-scoped REVOKE against a table-wide action grant is \
-                                     not representable in this model"
-                                .to_string(),
+                            reason: reason.to_string(),
                         });
                     }
                 }
@@ -7777,6 +7768,135 @@ mod tests {
                 "SELECT should be revoked while INSERT remains"
             );
             assert!(table.can_insert(role, &db).expect("can_insert"));
+        }
+
+        #[test]
+        fn test_revoke_grant_option_preserves_privilege() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE r;
+                GRANT SELECT ON t TO r WITH GRANT OPTION;
+                REVOKE GRANT OPTION FOR SELECT ON t FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema parses");
+            let grant = db.table_grants().next().expect("grant remains");
+            let table = db.table(None, "t").expect("table exists");
+            let role = db.role("r").expect("role exists");
+
+            assert!(!grant.with_grant_option());
+            assert!(table.can_select(role, &db).expect("select resolves"));
+        }
+
+        #[test]
+        fn test_revoke_grant_option_splits_actions_and_grantees() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE a;
+                CREATE ROLE b;
+                GRANT SELECT, INSERT ON t TO a, b WITH GRANT OPTION;
+                REVOKE GRANT OPTION FOR SELECT ON t FROM a;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema parses");
+            let mut states = Vec::new();
+
+            for grant in db.table_grants() {
+                let has_select =
+                    grant.privileges(&db).any(|action| matches!(action, Action::Select { .. }));
+                let has_insert =
+                    grant.privileges(&db).any(|action| matches!(action, Action::Insert { .. }));
+                for grantee in grant.grantees(&db) {
+                    states.push((
+                        grantee.to_string(),
+                        has_select,
+                        has_insert,
+                        grant.with_grant_option(),
+                    ));
+                }
+            }
+            states.sort();
+
+            assert_eq!(
+                states,
+                vec![
+                    ("a".to_string(), false, true, true),
+                    ("a".to_string(), true, false, false),
+                    ("b".to_string(), true, true, true),
+                ]
+            );
+        }
+
+        #[test]
+        fn test_revoke_grant_option_splits_columns() {
+            let sql = r"
+                CREATE TABLE t (a INT, b INT);
+                CREATE ROLE r;
+                GRANT SELECT (a, b) ON t TO r WITH GRANT OPTION;
+                REVOKE GRANT OPTION FOR SELECT (a) ON t FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema parses");
+            let mut states = Vec::new();
+
+            for grant in db.table_grants() {
+                for action in grant.privileges(&db) {
+                    if let Action::Select { columns: Some(columns) } = action {
+                        states.extend(
+                            columns
+                                .iter()
+                                .map(|column| (column.value.clone(), grant.with_grant_option())),
+                        );
+                    }
+                }
+            }
+            states.sort();
+
+            assert_eq!(states, vec![("a".to_string(), false), ("b".to_string(), true)]);
+        }
+
+        #[test]
+        fn test_revoke_grant_option_for_all_preserves_all_privileges() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE r;
+                GRANT ALL PRIVILEGES ON t TO r WITH GRANT OPTION;
+                REVOKE GRANT OPTION FOR ALL PRIVILEGES ON t FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema parses");
+            let grant = db.table_grants().next().expect("grant remains");
+
+            assert!(grant.is_all_privileges());
+            assert!(!grant.with_grant_option());
+        }
+
+        #[test]
+        fn test_revoke_grant_option_subset_from_all_is_unsupported() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE r;
+                GRANT ALL PRIVILEGES ON t TO r WITH GRANT OPTION;
+                REVOKE GRANT OPTION FOR SELECT ON t FROM r;
+            ";
+            let result = ParserDB::parse::<PostgreSqlDialect>(sql);
+
+            assert!(matches!(
+                result,
+                Err(Error::UnsupportedRevoke { reason, .. })
+                    if reason.contains("subset from ALL PRIVILEGES")
+            ));
+        }
+
+        #[test]
+        fn test_revoke_absent_grant_option_is_a_noop() {
+            let sql = r"
+                CREATE TABLE t (id INT);
+                CREATE ROLE r;
+                GRANT SELECT ON t TO r;
+                REVOKE GRANT OPTION FOR SELECT ON t FROM r;
+            ";
+            let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema parses");
+            let grant = db.table_grants().next().expect("grant remains");
+
+            assert!(!grant.with_grant_option());
+            assert_eq!(db.table_grants().count(), 1);
         }
 
         #[test]

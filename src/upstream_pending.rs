@@ -7,9 +7,6 @@
 //!
 //! Filed and open:
 //!
-//! - [`sqlparser#2431`](https://github.com/apache/datafusion-sqlparser-rs/pull/2431),
-//!   `REVOKE GRANT OPTION FOR` does not parse, so the statement never reaches
-//!   the model and a revoked grant option cannot be applied.
 //! - [`sqlparser#2430`](https://github.com/apache/datafusion-sqlparser-rs/pull/2430),
 //!   `ALTER TRIGGER ... RENAME TO` does not parse, so a rename never frees the
 //!   old name and this crate refuses a schema PostgreSQL accepts.
