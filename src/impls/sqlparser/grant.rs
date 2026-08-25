@@ -4,7 +4,7 @@
 //! by the same `Grant` struct. This module implements all grant traits
 //! on `Grant` to support both use cases.
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::{string::ToString, vec, vec::Vec};
 use core::mem;
 
 use sqlparser::ast::{
@@ -341,69 +341,51 @@ fn action_with_columns(action: &Action, columns: Option<Vec<Ident>>) -> Action {
     }
 }
 
-fn is_unsupported_column_scoped_revoke_against_table_wide_action(
-    grant_action: &Action,
-    revoke_action: &Action,
-) -> bool {
-    mem::discriminant(grant_action) == mem::discriminant(revoke_action)
-        && is_column_scoped_action(grant_action)
-        && matches!((action_columns(grant_action), action_columns(revoke_action)), (None, Some(_)))
+struct ActionRevokeApplication {
+    retained: Option<Action>,
+    revoked: Option<Action>,
+    unsupported: bool,
 }
 
-/// Returns whether a `REVOKE` targets an unrepresentable case for this grant:
-/// revoking specific columns from a table-wide action grant.
-///
-/// Current grant model limits:
-/// - It can represent table-wide actions (for example `SELECT ON t`) or
-///   explicit column lists (for example `SELECT (a, b) ON t`).
-/// - It cannot represent "table-wide minus subset" (for example `SELECT ON t`
-///   minus column `a`).
-pub(crate) fn has_unsupported_column_scoped_revoke(grant: &Grant, revoke: &Revoke) -> bool {
-    if !grant_objects_match(grant.objects.as_ref(), revoke.objects.as_ref()) {
-        return false;
+fn partition_action_for_revoke(
+    grant_action: Action,
+    revoke_action: &Action,
+) -> ActionRevokeApplication {
+    if mem::discriminant(&grant_action) != mem::discriminant(revoke_action) {
+        return ActionRevokeApplication {
+            retained: Some(grant_action),
+            revoked: None,
+            unsupported: false,
+        };
     }
 
-    if !grantees_overlap(&grant.grantees, &revoke.grantees) {
-        return false;
+    if !is_column_scoped_action(&grant_action) {
+        return ActionRevokeApplication {
+            retained: None,
+            revoked: Some(grant_action),
+            unsupported: false,
+        };
     }
 
-    match (&grant.privileges, &revoke.privileges) {
-        (Privileges::Actions(grant_actions), Privileges::Actions(revoke_actions)) => {
-            grant_actions.iter().any(|grant_action| {
-                revoke_actions.iter().any(|revoke_action| {
-                    is_unsupported_column_scoped_revoke_against_table_wide_action(
-                        grant_action,
-                        revoke_action,
-                    )
-                })
-            })
+    match (action_columns(&grant_action), action_columns(revoke_action)) {
+        (None, Some(_)) => {
+            ActionRevokeApplication {
+                retained: Some(grant_action),
+                revoked: None,
+                unsupported: true,
+            }
         }
-        _ => false,
-    }
-}
-
-fn apply_revoke_action_to_grant_action(
-    grant_action: &Action,
-    revoke_action: &Action,
-) -> (bool, Option<Action>) {
-    if mem::discriminant(grant_action) != mem::discriminant(revoke_action) {
-        return (false, Some(grant_action.clone()));
-    }
-
-    if !is_column_scoped_action(grant_action) {
-        return (true, None);
-    }
-
-    match (action_columns(grant_action), action_columns(revoke_action)) {
-        // Unrepresentable in the current model ("table-wide action minus some
-        // columns"), so this action is explicitly treated as unsupported.
-        (None, Some(_)) => (false, Some(grant_action.clone())),
-        (None | Some(_), None) => (true, None),
+        (None | Some(_), None) => {
+            ActionRevokeApplication {
+                retained: None,
+                revoked: Some(grant_action),
+                unsupported: false,
+            }
+        }
         (Some(grant_columns), Some(revoke_columns)) => {
-            let remaining_columns: Vec<Ident> = grant_columns
-                .iter()
-                .filter(|grant_ident| {
-                    !revoke_columns.iter().any(|revoke_ident| {
+            let (withdrawn_columns, retained_columns): (Vec<Ident>, Vec<Ident>) =
+                grant_columns.iter().cloned().partition(|grant_ident| {
+                    revoke_columns.iter().any(|revoke_ident| {
                         identifiers_match(
                             grant_ident.value.as_str(),
                             grant_ident.quote_style.is_some(),
@@ -411,96 +393,157 @@ fn apply_revoke_action_to_grant_action(
                             revoke_ident.quote_style.is_some(),
                         )
                     })
-                })
-                .cloned()
-                .collect();
+                });
+            let retained = (!retained_columns.is_empty())
+                .then(|| action_with_columns(&grant_action, Some(retained_columns)));
+            let revoked = (!withdrawn_columns.is_empty())
+                .then(|| action_with_columns(&grant_action, Some(withdrawn_columns)));
 
-            if remaining_columns.is_empty() {
-                (true, None)
-            } else {
-                (true, Some(action_with_columns(grant_action, Some(remaining_columns))))
+            ActionRevokeApplication { retained, revoked, unsupported: false }
+        }
+    }
+}
+
+struct PrivilegeRevokeApplication {
+    retained: Option<Privileges>,
+    revoked: Option<Privileges>,
+    unsupported: bool,
+}
+
+fn partition_privileges_for_revoke(
+    grant: &Privileges,
+    revoke: &Privileges,
+) -> PrivilegeRevokeApplication {
+    match (grant, revoke) {
+        (_, Privileges::All { .. }) => {
+            PrivilegeRevokeApplication {
+                retained: None,
+                revoked: Some(grant.clone()),
+                unsupported: false,
             }
         }
-    }
-}
-
-/// Result of applying a REVOKE statement to a single grant.
-#[derive(Debug, Clone)]
-pub struct RevokeApplication {
-    /// Whether the revoke matched this grant (objects, grantees and
-    /// privileges).
-    pub matched: bool,
-    /// Updated grant. `None` means the grant is fully removed.
-    pub updated_grant: Option<Grant>,
-}
-
-/// Applies a REVOKE statement to a grant and returns the resulting grant (if
-/// any).
-///
-/// Representation notes:
-/// - `GRANT ALL` minus a subset of actions is not representable; the grant is
-///   preserved unchanged and treated as matched.
-/// - Column-scoped revoke from a table-wide action grant is also
-///   unrepresentable and is surfaced via higher-level
-///   `Error::UnsupportedRevoke`.
-#[must_use]
-pub fn apply_revoke_to_grant(grant: &Grant, revoke: &Revoke) -> RevokeApplication {
-    // Objects must match for a revoke to apply to this grant.
-    if !grant_objects_match(grant.objects.as_ref(), revoke.objects.as_ref()) {
-        return RevokeApplication { matched: false, updated_grant: Some(grant.clone()) };
-    }
-
-    // At least one grantee must overlap.
-    if !grantees_overlap(&grant.grantees, &revoke.grantees) {
-        return RevokeApplication { matched: false, updated_grant: Some(grant.clone()) };
-    }
-
-    // TODO: a role membership variant on `Privileges`, once upstream parses
-    // `GRANT role TO role`, breaks this match on purpose. Give it an arm rather
-    // than a wildcard: membership is neither a table nor a column grant.
-    match (&grant.privileges, &revoke.privileges) {
-        (_, Privileges::All { .. }) => RevokeApplication { matched: true, updated_grant: None },
         (Privileges::All { .. }, Privileges::Actions(_)) => {
-            // We cannot represent "ALL minus X" in this model.
-            RevokeApplication { matched: true, updated_grant: Some(grant.clone()) }
+            PrivilegeRevokeApplication {
+                retained: Some(grant.clone()),
+                revoked: None,
+                unsupported: true,
+            }
         }
         (Privileges::Actions(grant_actions), Privileges::Actions(revoke_actions)) => {
-            let mut matched = false;
-            let mut updated_actions = Vec::new();
+            let mut retained_actions = Vec::with_capacity(grant_actions.len());
+            let mut withdrawn_actions = Vec::new();
 
             for grant_action in grant_actions {
                 let mut current = Some(grant_action.clone());
-
                 for revoke_action in revoke_actions {
-                    let Some(current_action) = current.take() else {
+                    let Some(action) = current.take() else {
                         break;
                     };
-                    let (action_matched, next_action) =
-                        apply_revoke_action_to_grant_action(&current_action, revoke_action);
-                    if action_matched {
-                        matched = true;
+                    let application = partition_action_for_revoke(action, revoke_action);
+                    if application.unsupported {
+                        return PrivilegeRevokeApplication {
+                            retained: Some(grant.clone()),
+                            revoked: None,
+                            unsupported: true,
+                        };
                     }
-                    current = next_action;
+                    current = application.retained;
+                    if let Some(withdrawn) = application.revoked {
+                        withdrawn_actions.push(withdrawn);
+                    }
                 }
-
-                if let Some(action) = current {
-                    updated_actions.push(action);
+                if let Some(retained) = current {
+                    retained_actions.push(retained);
                 }
             }
 
-            if !matched {
-                return RevokeApplication { matched: false, updated_grant: Some(grant.clone()) };
-            }
-
-            if updated_actions.is_empty() {
-                RevokeApplication { matched: true, updated_grant: None }
-            } else {
-                let mut updated_grant = grant.clone();
-                updated_grant.privileges = Privileges::Actions(updated_actions);
-                RevokeApplication { matched: true, updated_grant: Some(updated_grant) }
+            PrivilegeRevokeApplication {
+                retained: (!retained_actions.is_empty())
+                    .then_some(Privileges::Actions(retained_actions)),
+                revoked: (!withdrawn_actions.is_empty())
+                    .then_some(Privileges::Actions(withdrawn_actions)),
+                unsupported: false,
             }
         }
     }
+}
+
+fn updated_grant(grant: &Grant, privileges: Privileges, with_grant_option: bool) -> Grant {
+    let mut updated = grant.clone();
+    updated.privileges = privileges;
+    updated.with_grant_option = with_grant_option;
+    updated
+}
+
+/// Result of applying a `REVOKE` statement to a single grant.
+#[derive(Debug, Clone)]
+pub struct RevokeApplication {
+    /// Whether the revoke matched this grant.
+    pub matched: bool,
+    /// Grants carrying the remaining privileges and grant options.
+    pub updated_grants: Vec<Grant>,
+    /// Whether the result cannot be represented by this grant model.
+    pub unsupported: bool,
+}
+
+impl RevokeApplication {
+    fn unmatched(grant: &Grant) -> Self {
+        Self { matched: false, updated_grants: vec![grant.clone()], unsupported: false }
+    }
+}
+
+/// Applies a `REVOKE` statement to a grant.
+#[must_use]
+pub fn apply_revoke_to_grant(grant: &Grant, revoke: &Revoke) -> RevokeApplication {
+    if !grant_objects_match(grant.objects.as_ref(), revoke.objects.as_ref())
+        || !grantees_overlap(&grant.grantees, &revoke.grantees)
+    {
+        return RevokeApplication::unmatched(grant);
+    }
+
+    let application = partition_privileges_for_revoke(&grant.privileges, &revoke.privileges);
+    let matched = application.revoked.is_some() || application.unsupported;
+    if !matched {
+        return RevokeApplication::unmatched(grant);
+    }
+    if application.unsupported {
+        let all_minus_actions = matches!(
+            (&grant.privileges, &revoke.privileges),
+            (Privileges::All { .. }, Privileges::Actions(_))
+        );
+        return RevokeApplication {
+            matched,
+            updated_grants: vec![grant.clone()],
+            unsupported: !all_minus_actions || revoke.grant_option_for,
+        };
+    }
+
+    if !revoke.grant_option_for {
+        return RevokeApplication {
+            matched,
+            updated_grants: application
+                .retained
+                .into_iter()
+                .map(|privileges| updated_grant(grant, privileges, grant.with_grant_option))
+                .collect(),
+            unsupported: false,
+        };
+    }
+
+    if !grant.with_grant_option {
+        return RevokeApplication {
+            matched,
+            updated_grants: vec![grant.clone()],
+            unsupported: false,
+        };
+    }
+
+    let mut updated_grants = Vec::with_capacity(2);
+    updated_grants
+        .extend(application.retained.map(|privileges| updated_grant(grant, privileges, true)));
+    updated_grants
+        .extend(application.revoked.map(|privileges| updated_grant(grant, privileges, false)));
+    RevokeApplication { matched, updated_grants, unsupported: false }
 }
 
 impl Metadata for Grant {
