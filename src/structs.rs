@@ -3,13 +3,14 @@
 pub(crate) mod fingerprint;
 pub mod generic_db;
 pub use generic_db::{
-    AccessResolution, GenericDB, ParseOptions, ParserDB, ParserDBBuilder, UnresolvedAccessReference,
+    AccessResolution, GenericDB, ParseOptions, ParserDB, ParserDBBuilder, PostgresCatalog,
+    PostgresCatalogCollation, PostgresCatalogType, UnresolvedAccessReference,
 };
 pub mod metadata;
 mod schema;
 mod target_name;
 
 pub use fingerprint::{AlgorithmId, FingerprintError, SchemaFingerprint, canonical_bytes_v1};
-pub use metadata::{FunctionMetadata, TableAttribute, TableMetadata};
+pub use metadata::{ColumnMetadata, FunctionMetadata, TableAttribute, TableMetadata};
 pub use schema::Schema;
 pub use target_name::TargetName;

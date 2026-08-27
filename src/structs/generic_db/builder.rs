@@ -145,6 +145,11 @@ where
         self.search_path = search_path;
     }
 
+    /// Returns the SQL dialect recorded for this builder.
+    pub(crate) fn dialect(&self) -> &D {
+        &self.dialect
+    }
+
     /// Returns the path a database starts with, and the one `RESET` restores.
     pub(crate) fn default_search_path() -> Vec<(String, bool)> {
         alloc::vec![("public".to_string(), false)]
@@ -208,6 +213,11 @@ where
     /// Returns a slice of column grant Arc references with their metadata.
     pub(crate) fn column_grants(&self) -> &[(Arc<CG>, CG::Meta)] {
         &self.column_grants
+    }
+
+    /// Returns a slice of column Arc references with their metadata.
+    pub(crate) fn columns(&self) -> &[(Arc<C>, C::Meta)] {
+        &self.columns
     }
 
     /// Returns a mutable reference to the columns list.
