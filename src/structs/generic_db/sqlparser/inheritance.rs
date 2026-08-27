@@ -625,12 +625,171 @@ pub(super) fn follow_constraint_rewrite(
         .collect()
 }
 
+fn inherited_column_metadata(
+    builder: &ParserDBBuilder,
+    parent: &CreateTable,
+    source: &ColumnDef,
+    copy: &ColumnDef,
+) -> Option<super::PreservedColumnMetadata> {
+    builder
+        .columns()
+        .iter()
+        .find(|(stored, _)| {
+            stored.table() == parent && same_column(&stored.attribute().name, &source.name)
+        })
+        .map(|(_, metadata)| {
+            super::PreservedColumnMetadata {
+                column_name: copy.name.value.clone(),
+                column_name_quoted: copy.name.quote_style.is_some(),
+                collation: super::stored_column_collation_name(copy).cloned(),
+                metadata: metadata.clone(),
+            }
+        })
+}
+
+fn inherited_column_metadata_for<'a>(
+    column: &Ident,
+    metadata: &'a [super::PreservedColumnMetadata],
+) -> Option<&'a super::PreservedColumnMetadata> {
+    metadata.iter().find(|metadata| {
+        super::identifiers_match(
+            &metadata.column_name,
+            metadata.column_name_quoted,
+            &column.value,
+            column.quote_style.is_some(),
+        )
+    })
+}
+
+struct ParentApplication<'a> {
+    builder: &'a ParserDBBuilder,
+    parents: &'a [(ParentKind, ObjectName)],
+    child_name: &'a str,
+    collations: &'a [super::CreatedCollationMetadata],
+    catalog: &'a super::PostgresCatalog,
+    search_path: &'a [(String, bool)],
+}
+
+impl<'a> ParentApplication<'a> {
+    fn new(
+        builder: &'a ParserDBBuilder,
+        parents: &'a [(ParentKind, ObjectName)],
+        child_name: &'a str,
+        collations: &'a [super::CreatedCollationMetadata],
+        catalog: &'a super::PostgresCatalog,
+        search_path: &'a [(String, bool)],
+    ) -> Self {
+        Self { builder, parents, child_name, collations, catalog, search_path }
+    }
+}
+
+fn local_collation_conflict(
+    context: &ParentApplication<'_>,
+    column: &ColumnDef,
+    inherited_metadata: &super::PreservedColumnMetadata,
+) -> Result<Option<Error>, Error> {
+    let local_collation = super::stored_column_collation_name(column);
+    let local_metadata = super::column_metadata_for_collations(
+        column,
+        context.collations,
+        context.catalog,
+        context.search_path,
+        &[],
+        super::should_validate_missing_collations(*context.builder.dialect()),
+    )?;
+    if inherited_metadata.metadata.postgres_collation_matches(&local_metadata) != Some(false) {
+        return Ok(None);
+    }
+    Ok(Some(Error::InheritedColumnCollationConflict {
+        column_name: column.name.value.clone().into_boxed_str(),
+        child_table: context.child_name.to_string().into_boxed_str(),
+        child_collation: local_collation
+            .map_or_else(|| "default".to_string(), ObjectName::to_string)
+            .into_boxed_str(),
+        parent_table: parent_owning(context.builder, context.parents, &column.name)
+            .unwrap_or_else(|| "a parent".to_string())
+            .into_boxed_str(),
+        parent_collation: inherited_metadata
+            .collation
+            .as_ref()
+            .map_or_else(|| "default".to_string(), ObjectName::to_string)
+            .into_boxed_str(),
+    }))
+}
+
+fn inherited_collation_conflict(
+    context: &ParentApplication<'_>,
+    column: &Ident,
+    inherited_metadata: &super::PreservedColumnMetadata,
+    incoming_metadata: &super::PreservedColumnMetadata,
+) -> Option<Error> {
+    if inherited_metadata.metadata.postgres_collation_matches(&incoming_metadata.metadata)
+        != Some(false)
+    {
+        return None;
+    }
+    Some(Error::InheritedColumnCollationConflict {
+        column_name: column.value.clone().into_boxed_str(),
+        child_table: context.child_name.to_string().into_boxed_str(),
+        child_collation: incoming_metadata
+            .collation
+            .as_ref()
+            .map_or_else(|| "default".to_string(), ObjectName::to_string)
+            .into_boxed_str(),
+        parent_table: parent_owning(context.builder, context.parents, column)
+            .unwrap_or_else(|| "a parent".to_string())
+            .into_boxed_str(),
+        parent_collation: inherited_metadata
+            .collation
+            .as_ref()
+            .map_or_else(|| "default".to_string(), ObjectName::to_string)
+            .into_boxed_str(),
+    })
+}
+
+fn merge_local_columns(
+    context: &ParentApplication<'_>,
+    local_columns: &[ColumnDef],
+    columns: &mut Vec<ColumnDef>,
+    column_metadata: &[super::PreservedColumnMetadata],
+) -> Result<(), Error> {
+    for column in local_columns {
+        if let Some(position) =
+            columns.iter().position(|held| same_column(&held.name, &column.name))
+        {
+            if types_conflict(&columns[position].data_type, &column.data_type) {
+                return Err(Error::InheritedColumnTypeConflict {
+                    column_name: column.name.value.clone(),
+                    child_table: context.child_name.to_string(),
+                    child_type: column.data_type.to_string(),
+                    parent_table: parent_owning(context.builder, context.parents, &column.name)
+                        .unwrap_or_else(|| "a parent".to_string()),
+                    parent_type: columns[position].data_type.to_string(),
+                });
+            }
+            if let Some(inherited_metadata) =
+                inherited_column_metadata_for(&column.name, column_metadata)
+                && let Some(error) = local_collation_conflict(context, column, inherited_metadata)?
+            {
+                return Err(error);
+            }
+            columns[position] = merge_declarations(&columns[position], column);
+        } else {
+            columns.push(column.clone());
+        }
+    }
+    Ok(())
+}
+
 /// What a table took from its parents rather than declaring itself.
+#[derive(Default)]
 pub(super) struct Inherited {
     /// The names of the columns received.
     pub(super) columns: Vec<String>,
     /// The rendering of each table constraint received.
     pub(super) constraints: Vec<String>,
+    /// Metadata copied with inherited columns.
+    pub(super) column_metadata: Vec<super::PreservedColumnMetadata>,
 }
 
 /// Gives the node the columns and constraints its parents pass down, answering
@@ -650,22 +809,36 @@ pub(super) struct Inherited {
 pub(super) fn apply_parents(
     builder: &ParserDBBuilder,
     create_table: &mut CreateTable,
+    collations: &[super::CreatedCollationMetadata],
+    catalog: &super::PostgresCatalog,
 ) -> Result<Inherited, Error> {
     let parents: Vec<(ParentKind, ObjectName)> =
         parents_with_kind(create_table).map(|(kind, name)| (kind, name.clone())).collect();
     if parents.is_empty() {
-        return Ok(Inherited { columns: Vec::new(), constraints: Vec::new() });
+        return Ok(Inherited::default());
     }
 
+    let local_collations: Vec<Ident> = create_table
+        .columns
+        .iter()
+        .filter(|column| super::stored_column_collation_name(column).is_some())
+        .map(|column| column.name.clone())
+        .collect();
     let child_name = create_table.name.to_string();
     let local: Vec<Ident> = create_table.columns.iter().map(|column| column.name.clone()).collect();
     // The child is not in the stores yet, so the names it introduces itself
     // have to be spoken for before a generated one is built beside them.
     let mut taken: Vec<Ident> =
         super::relation_names_of(create_table).into_iter().map(|(_, name)| name.clone()).collect();
+    let search_path: Vec<_> =
+        builder.search_path().map(|(schema, quoted)| (schema.to_string(), quoted)).collect();
 
     let mut columns: Vec<ColumnDef> = Vec::new();
+    let mut column_metadata: Vec<super::PreservedColumnMetadata> = Vec::new();
     let mut constraints: Vec<TableConstraint> = Vec::new();
+
+    let context =
+        ParentApplication::new(builder, &parents, &child_name, collations, catalog, &search_path);
 
     for (kind, parent_name) in &parents {
         let parent = resolve_parent(builder, parent_name, &child_name)?;
@@ -674,7 +847,25 @@ pub(super) fn apply_parents(
             // A second parent declaring the same column merges into the one
             // already taken, keeping the position the first parent gave it.
             if !columns.iter().any(|held| same_column(&held.name, &column.name)) {
-                columns.push(inherited_column(builder, *kind, create_table, column, &mut taken));
+                let inherited = inherited_column(builder, *kind, create_table, column, &mut taken);
+                if let Some(metadata) =
+                    inherited_column_metadata(builder, parent, column, &inherited)
+                {
+                    column_metadata.push(metadata);
+                }
+                columns.push(inherited);
+            } else if let Some(inherited_metadata) =
+                inherited_column_metadata_for(&column.name, &column_metadata)
+                && let Some(incoming_metadata) =
+                    inherited_column_metadata(builder, parent, column, column)
+                && let Some(error) = inherited_collation_conflict(
+                    &context,
+                    &column.name,
+                    inherited_metadata,
+                    &incoming_metadata,
+                )
+            {
+                return Err(error);
             }
         }
 
@@ -708,25 +899,18 @@ pub(super) fn apply_parents(
         }
     }
 
-    for column in &create_table.columns {
-        if let Some(position) =
-            columns.iter().position(|held| same_column(&held.name, &column.name))
-        {
-            if types_conflict(&columns[position].data_type, &column.data_type) {
-                return Err(Error::InheritedColumnTypeConflict {
-                    column_name: column.name.value.clone(),
-                    child_table: child_name.clone(),
-                    child_type: column.data_type.to_string(),
-                    parent_table: parent_owning(builder, &parents, &column.name)
-                        .unwrap_or_else(|| "a parent".to_string()),
-                    parent_type: columns[position].data_type.to_string(),
-                });
-            }
-            columns[position] = merge_declarations(&columns[position], column);
-        } else {
-            columns.push(column.clone());
-        }
-    }
+    merge_local_columns(&context, &create_table.columns, &mut columns, &column_metadata)?;
+
+    column_metadata.retain(|metadata| {
+        !local_collations.iter().any(|local| {
+            super::identifiers_match(
+                &metadata.column_name,
+                metadata.column_name_quoted,
+                &local.value,
+                local.quote_style.is_some(),
+            )
+        })
+    });
 
     // Which columns and constraints came from a parent is not spelled by the
     // node once they join it, so the caller records it beside them, the way
@@ -739,6 +923,7 @@ pub(super) fn apply_parents(
             .map(|name| name.value.clone())
             .collect(),
         constraints: constraints.iter().map(TableConstraint::to_string).collect(),
+        column_metadata,
     };
 
     create_table.columns = columns;

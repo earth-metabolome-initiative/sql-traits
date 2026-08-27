@@ -7,7 +7,7 @@ pub mod table;
 pub mod type_match;
 use core::fmt::Debug;
 
-pub use column::ColumnLike;
+pub use column::{ColumnCollation, ColumnLike, MySqlCollationPadding, NamedColumnCollation};
 pub mod index;
 pub use database::DatabaseLike;
 pub use dialect::DialectLike;

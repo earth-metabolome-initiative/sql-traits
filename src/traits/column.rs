@@ -5,12 +5,81 @@ use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
     errors::LookupError,
+    structs::TargetName,
     traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
     utils::{
         fingerprint_type_token::match_known_type, identifier_resolution::normalize_identifier,
         normalize_postgres_type_cow,
     },
 };
+
+/// The padding rule MySQL exposes for a collation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MySqlCollationPadding {
+    /// Comparisons ignore trailing spaces.
+    PadSpace,
+    /// Comparisons keep trailing spaces significant.
+    NoPad,
+}
+
+/// Collation metadata for one named comparison rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NamedColumnCollation<'a> {
+    name: TargetName<'a>,
+    postgres_deterministic: Option<bool>,
+    mysql_padding: Option<MySqlCollationPadding>,
+}
+
+impl<'a> NamedColumnCollation<'a> {
+    /// Creates named collation metadata from the SQL name.
+    #[must_use]
+    pub fn new(name: TargetName<'a>) -> Self {
+        Self { name, postgres_deterministic: None, mysql_padding: None }
+    }
+
+    /// Stores PostgreSQL determinism, or `None` when it is unknown.
+    #[must_use]
+    pub fn with_postgres_deterministic(mut self, deterministic: Option<bool>) -> Self {
+        self.postgres_deterministic = deterministic;
+        self
+    }
+
+    /// Stores MySQL padding, or `None` when it is unknown.
+    #[must_use]
+    pub fn with_mysql_padding(mut self, padding: Option<MySqlCollationPadding>) -> Self {
+        self.mysql_padding = padding;
+        self
+    }
+
+    /// Returns the collation name.
+    #[must_use]
+    pub fn name(&self) -> TargetName<'a> {
+        self.name
+    }
+
+    /// Returns PostgreSQL determinism, or `None` when it is unknown.
+    #[must_use]
+    pub fn postgres_deterministic(&self) -> Option<bool> {
+        self.postgres_deterministic
+    }
+
+    /// Returns MySQL padding, or `None` when it is unknown.
+    #[must_use]
+    pub fn mysql_padding(&self) -> Option<MySqlCollationPadding> {
+        self.mysql_padding
+    }
+}
+
+/// How a column resolves text comparison rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ColumnCollation<'a> {
+    /// No declared rule is present, so the database default applies.
+    DatabaseDefault,
+    /// A declared `COLLATE` names the rule, with catalog facts when known.
+    Named(NamedColumnCollation<'a>),
+    /// The source changes comparison rules without a resolved collation name.
+    Unknown,
+}
 
 /// A trait for types that can be treated as SQL columns.
 pub trait ColumnLike:
@@ -144,6 +213,51 @@ pub trait ColumnLike:
     /// # }
     /// ```
     fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str>;
+
+    /// Returns the collation rule used for string comparison.
+    ///
+    /// A returned `Named` value always carries the declared `COLLATE` name. The
+    /// backend-specific facts are `None` when the implementation has no catalog
+    /// source for them. `ParserDB` fills PostgreSQL determinism from
+    /// `CREATE COLLATION`, but it does not infer MySQL padding from a name.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    ///     CREATE COLLATION ci (
+    ///         provider = icu,
+    ///         locale = 'und-u-ks-level2',
+    ///         deterministic = false
+    ///     );
+    ///     CREATE TABLE t (name TEXT COLLATE ci);
+    ///     ",
+    /// )?;
+    /// let table = db.table(None, "t").unwrap();
+    /// let column = table.column("name", &db)?.unwrap();
+    /// let ColumnCollation::Named(collation) = column.collation(&db)? else {
+    ///     panic!("expected a named collation");
+    /// };
+    /// assert_eq!(collation.name().name(), "ci");
+    /// assert_eq!(collation.postgres_deterministic(), Some(false));
+    /// assert_eq!(collation.mysql_padding(), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this column.
+    fn collation<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<ColumnCollation<'db>, LookupError>;
 
     /// Returns whether the data type of the column is generative, i.e., it
     /// generates values automatically (e.g., SERIAL in `PostgreSQL`).
@@ -1234,6 +1348,14 @@ where
     }
 
     #[inline]
+    fn collation<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<ColumnCollation<'db>, LookupError> {
+        (*self).collation(database)
+    }
+
+    #[inline]
     fn is_generated(&self) -> bool {
         (*self).is_generated()
     }
@@ -1285,6 +1407,14 @@ where
     #[inline]
     fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str> {
         (**self).data_type(database)
+    }
+
+    #[inline]
+    fn collation<'db>(
+        &'db self,
+        database: &'db Self::DB,
+    ) -> Result<ColumnCollation<'db>, LookupError> {
+        (**self).collation(database)
     }
 
     #[inline]

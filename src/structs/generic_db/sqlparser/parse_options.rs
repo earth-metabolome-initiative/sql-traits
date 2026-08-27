@@ -6,7 +6,11 @@ use std::path::Path;
 
 use sqlparser::{ast::Statement, dialect::Dialect};
 
-use crate::{errors::Error, impls::SqlparserDialect, structs::ParserDB};
+use crate::{
+    errors::Error,
+    impls::SqlparserDialect,
+    structs::{ParserDB, PostgresCatalog},
+};
 
 /// How an access control statement is resolved against the objects the parsed
 /// input creates.
@@ -56,25 +60,50 @@ pub enum AccessResolution {
 /// assert_eq!(db.table_grants().count(), 1);
 /// # Ok::<(), sql_traits::errors::Error>(())
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ParseOptions {
     access_resolution: AccessResolution,
+    postgres_catalog: PostgresCatalog,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        Self {
+            access_resolution: AccessResolution::ClosedWorld,
+            postgres_catalog: PostgresCatalog::default(),
+        }
+    }
 }
 
 impl ParseOptions {
     /// Sets how grants resolve against the objects the input creates.
     #[must_use]
     #[inline]
-    pub const fn with_access_resolution(mut self, access_resolution: AccessResolution) -> Self {
+    pub fn with_access_resolution(mut self, access_resolution: AccessResolution) -> Self {
         self.access_resolution = access_resolution;
+        self
+    }
+
+    /// Sets the PostgreSQL catalog used for collation and type validation.
+    #[must_use]
+    #[inline]
+    pub fn with_postgres_catalog(mut self, postgres_catalog: PostgresCatalog) -> Self {
+        self.postgres_catalog = postgres_catalog;
         self
     }
 
     /// Returns how grants resolve against the objects the input creates.
     #[must_use]
     #[inline]
-    pub const fn access_resolution(self) -> AccessResolution {
+    pub const fn access_resolution(&self) -> AccessResolution {
         self.access_resolution
+    }
+
+    /// Returns the PostgreSQL catalog used for collation and type validation.
+    #[must_use]
+    #[inline]
+    pub const fn postgres_catalog(&self) -> &PostgresCatalog {
+        &self.postgres_catalog
     }
 
     /// Parses SQL under these options using the specified dialect.
@@ -107,7 +136,7 @@ impl ParseOptions {
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```
     pub fn parse<D: Dialect + Default + 'static>(self, sql: &str) -> Result<ParserDB, Error> {
-        ParserDB::parse_with_options::<D>(sql, self)
+        ParserDB::parse_with_options::<D>(sql, &self)
     }
 
     /// Builds a [`ParserDB`] from already parsed statements under these
@@ -147,8 +176,22 @@ impl ParseOptions {
             statements,
             catalog_name,
             SqlparserDialect::default(),
-            self,
+            &self,
         )
+    }
+
+    /// Builds a [`ParserDB`] from parsed statements with an explicit dialect.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if validation fails.
+    pub fn from_statements_with_dialect(
+        self,
+        statements: Vec<Statement>,
+        catalog_name: String,
+        dialect: SqlparserDialect,
+    ) -> Result<ParserDB, Error> {
+        ParserDB::from_statements_with_options(statements, catalog_name, dialect, &self)
     }
 
     /// Parses SQL from a file or directory path under these options.
@@ -174,6 +217,6 @@ impl ParseOptions {
     /// parsing fails.
     #[cfg(feature = "std")]
     pub fn from_paths<D: Dialect + Default>(self, paths: &[&Path]) -> Result<ParserDB, Error> {
-        ParserDB::from_paths_with_options::<D>(paths, self)
+        ParserDB::from_paths_with_options::<D>(paths, &self)
     }
 }

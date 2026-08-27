@@ -1,6 +1,6 @@
 //! Error enumeration used in the `sql_traits` crate.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 
 use sqlparser::parser::ParserError;
 
@@ -9,6 +9,8 @@ use sqlparser::parser::ParserError;
 pub enum ObjectKind {
     /// A base table.
     Table,
+    /// A column declared inside a table.
+    Column,
     /// An index declared by a `CREATE INDEX` statement.
     Index,
     /// A unique constraint declared inside a `CREATE TABLE` statement.
@@ -31,6 +33,7 @@ impl core::fmt::Display for ObjectKind {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             Self::Table => "Table",
+            Self::Column => "Column",
             Self::Index => "Index",
             Self::UniqueIndex => "Unique index",
             Self::CheckConstraint => "Check constraint",
@@ -338,6 +341,80 @@ pub enum Error {
         /// Type the parent declares.
         parent_type: String,
     },
+    #[error(
+        "Column `{column_name}` of table `{child_table}` has collation `{child_collation}`, conflicting with collation `{parent_collation}` inherited from `{parent_table}`."
+    )]
+    /// Error indicating that a table redeclares an inherited column with a
+    /// different collation.
+    InheritedColumnCollationConflict {
+        /// Name of the column declared twice.
+        column_name: Box<str>,
+        /// Name of the table redeclaring the column.
+        child_table: Box<str>,
+        /// Collation the child declares.
+        child_collation: Box<str>,
+        /// Name of the parent the column comes from.
+        parent_table: Box<str>,
+        /// Collation the parent declares.
+        parent_collation: Box<str>,
+    },
+    #[error("Collation `{collation_name}` cannot be copied.")]
+    /// Error indicating that a built-in collation cannot be copied.
+    CollationCannotBeCopied {
+        /// Name of the collation the statement copies.
+        collation_name: Box<str>,
+    },
+    #[error("Collation `{collation_name}` not found.")]
+    /// Error indicating that a copied collation source does not exist.
+    CollationNotFound {
+        /// Name of the collation the statement copies.
+        collation_name: Box<str>,
+    },
+    #[error("Collation `{collation_name}` already exists.")]
+    /// Error indicating that a collation name is already taken.
+    CollationAlreadyExists {
+        /// Name of the collation the statement creates.
+        collation_name: Box<str>,
+    },
+    #[error("Invalid value `{option_value}` for collation option `{option_name}`.")]
+    /// Error indicating that a `CREATE COLLATION` option is malformed.
+    InvalidCollationOption {
+        /// Name of the option whose value is invalid.
+        option_name: Box<str>,
+        /// Value the statement supplied.
+        option_value: Box<str>,
+    },
+    #[error("Collation option `{option_name}` appears more than once.")]
+    /// Error indicating that a `CREATE COLLATION` option is repeated.
+    RepeatedCollationOption {
+        /// Name of the repeated option.
+        option_name: Box<str>,
+    },
+    #[error("Column `{column_name}` declares more than one collation.")]
+    /// Error indicating that a column declares multiple `COLLATE` clauses.
+    RepeatedColumnCollation {
+        /// Name of the column carrying repeated collation clauses.
+        column_name: Box<str>,
+    },
+    #[error("Column `{column_name}` of type `{type_name}` cannot use a collation.")]
+    /// Error indicating that a known PostgreSQL type is not collatable.
+    NonCollatableColumnType {
+        /// Name of the column carrying the collation.
+        column_name: Box<str>,
+        /// Type of the column carrying the collation.
+        type_name: Box<str>,
+    },
+    #[error(
+        "Column `{column_name}` uses custom type `{type_name}` whose collatability is not in the PostgreSQL catalog."
+    )]
+    /// Error indicating that a custom type is missing from the PostgreSQL
+    /// catalog.
+    ColumnTypeCollatabilityNotInCatalog {
+        /// Name of the column carrying the collation.
+        column_name: Box<str>,
+        /// Type missing from the configured catalog.
+        type_name: Box<str>,
+    },
     #[error("Cannot drop table `{parent_table}` because table `{child_table}` inherits from it.")]
     /// Error indicating that a `DROP TABLE` would leave a child naming a
     /// parent that no longer exists.
@@ -582,6 +659,14 @@ pub enum Error {
         /// Name of the table qualified with it.
         table_name: String,
     },
+    #[error("Schema `{schema_name}` not found for collation `{collation_name}`.")]
+    /// Error indicating that a collation is created in an absent schema.
+    SchemaNotFoundForCollation {
+        /// Name of the schema that was not found.
+        schema_name: String,
+        /// Name of the collation qualified with it.
+        collation_name: String,
+    },
     #[error("No schema has been selected to create table `{table_name}` in.")]
     /// Error indicating that a `CREATE TABLE` statement names no schema at a
     /// point where the search path selects none either, because `SET
@@ -589,6 +674,13 @@ pub enum Error {
     NoSchemaSelectedForTable {
         /// Name of the table that named no schema.
         table_name: String,
+    },
+    #[error("No schema has been selected to create collation `{collation_name}` in.")]
+    /// Error indicating that a `CREATE COLLATION` statement names no creatable
+    /// schema.
+    NoSchemaSelectedForCollation {
+        /// Name of the collation that named no schema.
+        collation_name: String,
     },
     #[error("Role `{role_name}` not found for policy `{policy_name}`.")]
     /// Error indicating that a `CREATE POLICY` statement applies to a role no

@@ -1,5 +1,7 @@
 //! Submodule containing metadata structs.
 
+mod column_metadata;
+pub use column_metadata::ColumnMetadata;
 mod table_metadata;
 pub use table_metadata::TableMetadata;
 mod table_attribute;

@@ -13,7 +13,8 @@ use core::fmt::Debug;
 
 pub use builder::GenericDBBuilder;
 pub use sqlparser::{
-    AccessResolution, ParseOptions, ParserDB, ParserDBBuilder, UnresolvedAccessReference,
+    AccessResolution, ParseOptions, ParserDB, ParserDBBuilder, PostgresCatalog,
+    PostgresCatalogCollation, PostgresCatalogType, UnresolvedAccessReference,
 };
 
 use crate::{
@@ -240,8 +241,8 @@ where
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
     /// let table = db.table(None, "t").unwrap();
     /// let column = table.column("id", &db)?.unwrap();
-    /// // The metadata for columns in ParserDB is currently unit ()
-    /// assert_eq!(db.column_metadata(column), Some(&()));
+    /// let metadata = db.column_metadata(column).unwrap();
+    /// assert_eq!(metadata.postgres_deterministic(), None);
     /// # Ok(())
     /// # }
     /// ```

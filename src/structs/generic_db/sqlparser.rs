@@ -22,12 +22,13 @@ use sqlparser::{
         Action, AlterColumnOperation, AlterFunction, AlterFunctionAction, AlterFunctionKind,
         AlterFunctionOperation, AlterIndexOperation, AlterPolicy, AlterPolicyOperation,
         AlterRoleOperation, AlterSchema, AlterSchemaOperation, AlterTableOperation, ArgMode,
-        CheckConstraint, ColumnDef, ColumnOption, ColumnOptionDef, CreateFunction,
-        CreateFunctionBody, CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger,
-        DataType, DropBehavior, ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionDesc,
-        FunctionReturnType, GeneratedAs, Grant, GrantObjects, Grantee, GranteeName, GranteesType,
-        Ident, IndexColumn, MySQLColumnPosition, ObjectName, ObjectNamePart, OperateFunctionArg,
-        OrderByExpr, OrderByOptions, Owner, Privileges, Query, RenameTableNameKind, SchemaName,
+        ArrayElemTypeDef, CheckConstraint, ColumnDef, ColumnOption, ColumnOptionDef,
+        CreateCollation, CreateCollationDefinition, CreateFunction, CreateFunctionBody,
+        CreateIndex, CreatePolicy, CreateRole, CreateTable, CreateTrigger, DataType, DropBehavior,
+        ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionDesc, FunctionReturnType, GeneratedAs,
+        Grant, GrantObjects, Grantee, GranteeName, GranteesType, Ident, IndexColumn,
+        MySQLColumnPosition, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr,
+        OrderByOptions, Owner, Privileges, Query, RenameTableNameKind, SchemaName, SqlOption,
         Statement, TableConstraint, TimezoneInfo, TriggerEvent, UniqueConstraint, Value,
         ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut, visit_relations,
     },
@@ -40,7 +41,7 @@ use crate::{
     errors::{LookupError, ObjectKind},
     impls::SqlparserDialect,
     structs::{
-        GenericDB, Schema, TableAttribute, TableMetadata,
+        ColumnMetadata, GenericDB, Schema, TableAttribute, TableMetadata,
         metadata::{
             CheckMetadata, FunctionMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata,
         },
@@ -63,8 +64,11 @@ mod functions_in_expression;
 mod inheritance;
 mod like;
 mod parse_options;
+mod postgres_catalog;
+mod postgres_icu_collations;
 
 pub use parse_options::{AccessResolution, ParseOptions};
+pub use postgres_catalog::{PostgresCatalog, PostgresCatalogCollation, PostgresCatalogType};
 
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
 /// `CreateTable`.
@@ -84,6 +88,683 @@ pub type ParserDBBuilder = super::GenericDBBuilder<
     Grant,
     SqlparserDialect,
 >;
+
+#[derive(Debug, Clone)]
+struct CreatedCollationMetadata {
+    name: ObjectName,
+    postgres_deterministic: Option<bool>,
+}
+
+#[derive(Clone, Copy)]
+struct ActiveCollations<'a> {
+    created: &'a [CreatedCollationMetadata],
+    catalog: &'a PostgresCatalog,
+}
+
+enum CollationResolution<'a> {
+    Created(&'a CreatedCollationMetadata),
+    Catalog(&'a PostgresCatalogCollation),
+}
+
+impl CollationResolution<'_> {
+    fn into_column_metadata(self) -> ColumnMetadata {
+        match self {
+            Self::Created(metadata) => column_metadata_from_created_collation(metadata),
+            Self::Catalog(metadata) => column_metadata_from_catalog_collation(metadata),
+        }
+    }
+
+    fn matches_catalog_default(&self) -> bool {
+        matches!(
+            self,
+            Self::Catalog(metadata)
+                if identifiers_match("default", false, metadata.name(), metadata.name_is_quoted())
+                    && metadata.schema().is_some_and(|schema| {
+                        identifiers_match(
+                            "pg_catalog",
+                            false,
+                            schema,
+                            metadata.schema_is_quoted(),
+                        )
+                    })
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreservedColumnMetadata {
+    column_name: String,
+    column_name_quoted: bool,
+    collation: Option<ObjectName>,
+    metadata: ColumnMetadata,
+}
+
+fn qualify_created_collation_name(
+    builder: &ParserDBBuilder,
+    name: &ObjectName,
+) -> Result<ObjectName, crate::errors::Error> {
+    if name.0.len() != 1 {
+        return Ok(name.clone());
+    }
+    for (schema, schema_quoted) in builder.search_path().filter(|(schema, _)| !schema.is_empty()) {
+        if identifiers_match("public", false, schema, schema_quoted) {
+            return Ok(name.clone());
+        }
+        if identifiers_match("pg_catalog", false, schema, schema_quoted) {
+            return Ok(ObjectName(vec![
+                ObjectNamePart::Identifier(Ident::new("pg_catalog")),
+                name.0[0].clone(),
+            ]));
+        }
+        if let Some(schema) = declared_schema(builder, schema, schema_quoted) {
+            let schema = if schema.is_quoted() {
+                Ident::with_quote('"', schema.name())
+            } else {
+                Ident::new(schema.name())
+            };
+            return Ok(ObjectName(vec![ObjectNamePart::Identifier(schema), name.0[0].clone()]));
+        }
+    }
+    Err(crate::errors::Error::NoSchemaSelectedForCollation { collation_name: name.to_string() })
+}
+
+fn create_collation_metadata(
+    builder: &ParserDBBuilder,
+    create_collation: &CreateCollation,
+    collations: &[CreatedCollationMetadata],
+    catalog: &PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> Result<Option<CreatedCollationMetadata>, crate::errors::Error> {
+    validate_created_collation_schema(builder, &create_collation.name)?;
+    let name = qualify_created_collation_name(builder, &create_collation.name)?;
+    let postgres_deterministic = create_collation_deterministic(
+        &create_collation.definition,
+        collations,
+        catalog,
+        search_path,
+    )?;
+    if collation_already_exists(&name, collations, catalog) {
+        if create_collation.if_not_exists {
+            return Ok(None);
+        }
+        return Err(crate::errors::Error::CollationAlreadyExists {
+            collation_name: name.to_string().into_boxed_str(),
+        });
+    }
+    Ok(Some(CreatedCollationMetadata { name, postgres_deterministic }))
+}
+
+fn create_collation_deterministic(
+    definition: &CreateCollationDefinition,
+    collations: &[CreatedCollationMetadata],
+    catalog: &PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> Result<Option<bool>, crate::errors::Error> {
+    match definition {
+        CreateCollationDefinition::Options(options) => {
+            create_collation_options_deterministic(options)
+        }
+        CreateCollationDefinition::From(source) => {
+            if collation_source_is_pg_catalog_default(source, collations, catalog, search_path) {
+                return Err(crate::errors::Error::CollationCannotBeCopied {
+                    collation_name: source.to_string().into_boxed_str(),
+                });
+            }
+            column_metadata_for_collation_name(source, collations, catalog, search_path)
+                .map(|metadata| metadata.postgres_deterministic())
+                .ok_or_else(|| {
+                    crate::errors::Error::CollationNotFound {
+                        collation_name: source.to_string().into_boxed_str(),
+                    }
+                })
+        }
+    }
+}
+
+fn create_collation_options_deterministic(
+    options: &[SqlOption],
+) -> Result<Option<bool>, crate::errors::Error> {
+    let mut seen: Vec<&Ident> = Vec::new();
+    let mut deterministic = Some(true);
+    for option in options {
+        let SqlOption::KeyValue { key, value } = option else {
+            return Err(invalid_collation_option("option", option.to_string()));
+        };
+        if seen.iter().any(|seen| idents_match(seen, key)) {
+            return Err(crate::errors::Error::RepeatedCollationOption {
+                option_name: key.to_string().into_boxed_str(),
+            });
+        }
+        seen.push(key);
+        if collation_option_key_matches(key, "provider") {
+            validate_collation_provider(key, value)?;
+        } else if collation_option_key_matches(key, "deterministic") {
+            deterministic = Some(collation_option_bool(key, value)?);
+        } else if !collation_option_key_matches(key, "locale")
+            && !collation_option_key_matches(key, "lc_collate")
+            && !collation_option_key_matches(key, "lc_ctype")
+            && !collation_option_key_matches(key, "rules")
+            && !collation_option_key_matches(key, "version")
+        {
+            return Err(invalid_collation_option(&key.to_string(), value.to_string()));
+        }
+    }
+    Ok(deterministic)
+}
+
+fn collation_option_key_matches(key: &Ident, lookup: &str) -> bool {
+    identifiers_match(lookup, false, &key.value, key.quote_style.is_some())
+}
+
+fn collation_option_bool(key: &Ident, value: &Expr) -> Result<bool, crate::errors::Error> {
+    match value {
+        Expr::Value(ValueWithSpan { value: Value::Boolean(value), .. }) => Ok(*value),
+        Expr::Identifier(ident) if ident.quote_style.is_none() => {
+            if ident.value.eq_ignore_ascii_case("true") {
+                Ok(true)
+            } else if ident.value.eq_ignore_ascii_case("false") {
+                Ok(false)
+            } else {
+                Err(invalid_collation_option(&key.to_string(), value.to_string()))
+            }
+        }
+        _ => Err(invalid_collation_option(&key.to_string(), value.to_string())),
+    }
+}
+
+fn validate_collation_provider(key: &Ident, value: &Expr) -> Result<(), crate::errors::Error> {
+    let Expr::Identifier(provider) = value else {
+        return Err(invalid_collation_option(&key.to_string(), value.to_string()));
+    };
+    if provider.quote_style.is_none()
+        && (provider.value.eq_ignore_ascii_case("builtin")
+            || provider.value.eq_ignore_ascii_case("libc")
+            || provider.value.eq_ignore_ascii_case("icu"))
+    {
+        Ok(())
+    } else {
+        Err(invalid_collation_option(&key.to_string(), value.to_string()))
+    }
+}
+
+fn invalid_collation_option(
+    option_name: &str,
+    option_value: impl Into<Box<str>>,
+) -> crate::errors::Error {
+    crate::errors::Error::InvalidCollationOption {
+        option_name: option_name.into(),
+        option_value: option_value.into(),
+    }
+}
+
+fn column_collation_name(
+    column: &ColumnDef,
+    validate_postgres: bool,
+) -> Result<Option<&ObjectName>, crate::errors::Error> {
+    if !validate_postgres {
+        return Ok(stored_column_collation_name(column));
+    }
+    let mut collation = None;
+    for option in &column.options {
+        if let ColumnOption::Collation(name) = &option.option {
+            if collation.is_some() {
+                return Err(crate::errors::Error::RepeatedColumnCollation {
+                    column_name: column.name.to_string().into_boxed_str(),
+                });
+            }
+            collation = Some(name);
+        }
+    }
+    Ok(collation)
+}
+
+pub(super) fn stored_column_collation_name(column: &ColumnDef) -> Option<&ObjectName> {
+    column.options.iter().find_map(|option| {
+        match &option.option {
+            ColumnOption::Collation(name) => Some(name),
+            _ => None,
+        }
+    })
+}
+fn collation_names_match(stored: &ObjectName, lookup: &ObjectName) -> bool {
+    let Some((stored_name, stored_quoted)) = object_name_last_part(stored) else {
+        return false;
+    };
+    let Some((lookup_name, lookup_quoted)) = object_name_last_part(lookup) else {
+        return false;
+    };
+    identifiers_match(stored_name, stored_quoted, lookup_name, lookup_quoted)
+}
+
+fn collation_names_match_parts(
+    stored_name: &str,
+    stored_quoted: bool,
+    lookup: &ObjectName,
+) -> bool {
+    let Some((lookup_name, lookup_quoted)) = object_name_last_part(lookup) else {
+        return false;
+    };
+    identifiers_match(stored_name, stored_quoted, lookup_name, lookup_quoted)
+}
+
+fn collation_schema_matches(stored: &ObjectName, lookup_schema: &str, lookup_quoted: bool) -> bool {
+    match schema_from_object_name(stored) {
+        Some((stored_schema, stored_quoted)) => {
+            identifiers_match(stored_schema, stored_quoted, lookup_schema, lookup_quoted)
+        }
+        None => identifiers_match("public", false, lookup_schema, lookup_quoted),
+    }
+}
+
+fn created_collation_metadata_for_schema<'a>(
+    lookup: &ObjectName,
+    collations: &'a [CreatedCollationMetadata],
+    schema: &str,
+    schema_quoted: bool,
+) -> Option<&'a CreatedCollationMetadata> {
+    collations.iter().rev().find(|metadata| {
+        collation_names_match(&metadata.name, lookup)
+            && collation_schema_matches(&metadata.name, schema, schema_quoted)
+    })
+}
+
+fn rename_created_collation_schemas(
+    collations: &mut [CreatedCollationMetadata],
+    from: &str,
+    from_quoted: bool,
+    to: &str,
+    to_quoted: bool,
+) {
+    for metadata in collations {
+        if let Some((schema, schema_quoted)) = schema_from_object_name(&metadata.name) {
+            if identifiers_match(schema, schema_quoted, from, from_quoted) {
+                let ident = if to_quoted { Ident::with_quote('"', to) } else { Ident::new(to) };
+                metadata.name.0[0] = ObjectNamePart::Identifier(ident);
+            }
+        } else if identifiers_match("public", false, from, from_quoted) {
+            let ident = if to_quoted { Ident::with_quote('"', to) } else { Ident::new(to) };
+            metadata.name.0.insert(0, ObjectNamePart::Identifier(ident));
+        }
+    }
+}
+
+fn collation_effective_schema(name: &ObjectName) -> (&str, bool) {
+    schema_from_object_name(name).unwrap_or(("public", false))
+}
+
+fn collation_already_exists(
+    name: &ObjectName,
+    collations: &[CreatedCollationMetadata],
+    catalog: &PostgresCatalog,
+) -> bool {
+    let (schema, schema_quoted) = collation_effective_schema(name);
+    collation_resolution_for_schema(name, collations, catalog, schema, schema_quoted).is_some()
+}
+
+fn search_path_names_pg_catalog(search_path: &[(String, bool)]) -> bool {
+    search_path
+        .iter()
+        .any(|(schema, quoted)| identifiers_match("pg_catalog", false, schema, *quoted))
+}
+
+fn collation_name_is_default_builtin(lookup: &ObjectName) -> bool {
+    object_name_last_part(lookup)
+        .is_some_and(|(name, quoted)| identifiers_match("default", false, name, quoted))
+}
+
+fn collation_source_is_pg_catalog_default(
+    source: &ObjectName,
+    collations: &[CreatedCollationMetadata],
+    catalog: &PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> bool {
+    if !collation_name_is_default_builtin(source) {
+        return false;
+    }
+    collation_resolution_for_name(source, collations, catalog, search_path)
+        .is_some_and(|resolution| resolution.matches_catalog_default())
+}
+
+fn preserved_column_metadata_for_table(
+    builder: &ParserDBBuilder,
+    table: &CreateTable,
+) -> Vec<PreservedColumnMetadata> {
+    builder
+        .columns()
+        .iter()
+        .filter(|(column, _)| TableAttribute::table(column) == table)
+        .map(|(column, metadata)| {
+            PreservedColumnMetadata {
+                column_name: column.column_name().to_string(),
+                column_name_quoted: column.column_name_is_quoted(),
+                collation: stored_column_collation_name(column.attribute()).cloned(),
+                metadata: metadata.clone(),
+            }
+        })
+        .collect()
+}
+
+fn preserved_column_metadata_for_column(
+    column: &ColumnDef,
+    preserved: &[PreservedColumnMetadata],
+) -> Option<ColumnMetadata> {
+    let collation = stored_column_collation_name(column).cloned();
+    preserved
+        .iter()
+        .find(|metadata| {
+            identifiers_match(
+                &metadata.column_name,
+                metadata.column_name_quoted,
+                column.name.value.as_str(),
+                column.name.quote_style.is_some(),
+            ) && metadata.collation == collation
+        })
+        .map(|metadata| metadata.metadata.clone())
+}
+
+fn rename_preserved_column_metadata(
+    preserved: &mut [PreservedColumnMetadata],
+    from: &NamedColumn,
+    to: &Ident,
+) {
+    for metadata in preserved {
+        if identifiers_match(
+            &metadata.column_name,
+            metadata.column_name_quoted,
+            &from.name,
+            from.quoted,
+        ) {
+            metadata.column_name.clone_from(&to.value);
+            metadata.column_name_quoted = to.quote_style.is_some();
+        }
+    }
+}
+
+fn column_metadata_from_created_collation(metadata: &CreatedCollationMetadata) -> ColumnMetadata {
+    let Some(name) = object_name_last_part(&metadata.name) else {
+        return ColumnMetadata::default()
+            .with_postgres_deterministic(metadata.postgres_deterministic);
+    };
+    ColumnMetadata::default()
+        .with_postgres_deterministic(metadata.postgres_deterministic)
+        .with_postgres_collation(schema_from_object_name(&metadata.name), name)
+}
+
+fn column_metadata_from_catalog_collation(metadata: &PostgresCatalogCollation) -> ColumnMetadata {
+    let base =
+        ColumnMetadata::default().with_postgres_deterministic(Some(metadata.deterministic()));
+    if identifiers_match("default", false, metadata.name(), metadata.name_is_quoted())
+        && metadata.schema().is_some_and(|schema| {
+            identifiers_match("pg_catalog", false, schema, metadata.schema_is_quoted())
+        })
+    {
+        return base.with_postgres_default_collation();
+    }
+    base.with_postgres_collation(
+        metadata.schema().map(|schema| (schema, metadata.schema_is_quoted())),
+        (metadata.name(), metadata.name_is_quoted()),
+    )
+}
+
+fn collation_resolution_for_schema<'a>(
+    lookup: &ObjectName,
+    collations: &'a [CreatedCollationMetadata],
+    catalog: &'a PostgresCatalog,
+    schema: &str,
+    schema_quoted: bool,
+) -> Option<CollationResolution<'a>> {
+    created_collation_metadata_for_schema(lookup, collations, schema, schema_quoted)
+        .map(CollationResolution::Created)
+        .or_else(|| {
+            catalog_collation_for_schema(lookup, catalog, schema, schema_quoted)
+                .map(CollationResolution::Catalog)
+        })
+}
+
+fn catalog_collation_for_schema<'a>(
+    lookup: &ObjectName,
+    catalog: &'a PostgresCatalog,
+    schema: &str,
+    schema_quoted: bool,
+) -> Option<&'a PostgresCatalogCollation> {
+    catalog.collations().rev().find(|metadata| {
+        let Some(metadata_schema) = metadata.schema() else {
+            return false;
+        };
+        collation_names_match_parts(metadata.name(), metadata.name_is_quoted(), lookup)
+            && identifiers_match(
+                metadata_schema,
+                metadata.schema_is_quoted(),
+                schema,
+                schema_quoted,
+            )
+    })
+}
+
+fn collation_resolution_for_name<'a>(
+    name: &ObjectName,
+    collations: &'a [CreatedCollationMetadata],
+    catalog: &'a PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> Option<CollationResolution<'a>> {
+    if let Some((schema, schema_quoted)) = schema_from_object_name(name) {
+        return collation_resolution_for_schema(name, collations, catalog, schema, schema_quoted);
+    }
+
+    if !search_path_names_pg_catalog(search_path)
+        && let Some(resolution) =
+            collation_resolution_for_schema(name, collations, catalog, "pg_catalog", false)
+    {
+        return Some(resolution);
+    }
+
+    for (schema, schema_quoted) in search_path {
+        if let Some(resolution) =
+            collation_resolution_for_schema(name, collations, catalog, schema, *schema_quoted)
+        {
+            return Some(resolution);
+        }
+    }
+
+    None
+}
+fn catalog_type_for_schema<'a>(
+    lookup: &ObjectName,
+    catalog: &'a PostgresCatalog,
+    schema: &str,
+    schema_quoted: bool,
+) -> Option<&'a PostgresCatalogType> {
+    catalog.collatable_types().find(|metadata| {
+        let Some(metadata_schema) = metadata.schema() else {
+            return false;
+        };
+        collation_names_match_parts(metadata.name(), metadata.name_is_quoted(), lookup)
+            && identifiers_match(
+                metadata_schema,
+                metadata.schema_is_quoted(),
+                schema,
+                schema_quoted,
+            )
+    })
+}
+
+fn catalog_type_for_name<'a>(
+    name: &ObjectName,
+    catalog: &'a PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> Option<&'a PostgresCatalogType> {
+    if let Some((schema, schema_quoted)) = schema_from_object_name(name) {
+        return catalog_type_for_schema(name, catalog, schema, schema_quoted);
+    }
+    if !search_path_names_pg_catalog(search_path)
+        && let Some(metadata) = catalog_type_for_schema(name, catalog, "pg_catalog", false)
+    {
+        return Some(metadata);
+    }
+    for (schema, schema_quoted) in search_path {
+        if let Some(metadata) = catalog_type_for_schema(name, catalog, schema, *schema_quoted) {
+            return Some(metadata);
+        }
+    }
+    None
+}
+
+fn postgres_builtin_type_name(data_type: &DataType) -> Option<&'static str> {
+    match data_type {
+        DataType::Text => Some("text"),
+        DataType::Varchar(_) | DataType::CharacterVarying(_) | DataType::CharVarying(_) => {
+            Some("varchar")
+        }
+        DataType::Char(_) | DataType::Character(_) => Some("bpchar"),
+        _ => None,
+    }
+}
+
+fn array_element_data_type(data_type: &DataType) -> Option<&DataType> {
+    match data_type {
+        DataType::Array(
+            ArrayElemTypeDef::AngleBracket(element) | ArrayElemTypeDef::SquareBracket(element, _),
+        ) => Some(element),
+        _ => None,
+    }
+}
+
+fn object_name_from_unquoted_ident(name: &str) -> ObjectName {
+    ObjectName(vec![ObjectNamePart::Identifier(Ident::new(name))])
+}
+
+fn validate_postgres_column_collation_type(
+    column: &ColumnDef,
+    catalog: &PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> Result<(), crate::errors::Error> {
+    validate_postgres_collatable_type(&column.data_type, catalog, search_path).map_err(|error| {
+        error.into_column_error(
+            &column.name.to_string(),
+            &normalize_sqlparser_type(&column.data_type),
+        )
+    })
+}
+
+enum CollatableTypeError {
+    NonCollatable,
+    MissingCatalogFact,
+}
+
+impl CollatableTypeError {
+    fn into_column_error(self, column_name: &str, type_name: &str) -> crate::errors::Error {
+        match self {
+            Self::NonCollatable => {
+                crate::errors::Error::NonCollatableColumnType {
+                    column_name: column_name.into(),
+                    type_name: type_name.into(),
+                }
+            }
+            Self::MissingCatalogFact => {
+                crate::errors::Error::ColumnTypeCollatabilityNotInCatalog {
+                    column_name: column_name.into(),
+                    type_name: type_name.into(),
+                }
+            }
+        }
+    }
+}
+
+fn validate_postgres_collatable_type(
+    data_type: &DataType,
+    catalog: &PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> Result<(), CollatableTypeError> {
+    if let Some(element) = array_element_data_type(data_type) {
+        return validate_postgres_collatable_type(element, catalog, search_path);
+    }
+    if let Some(name) = postgres_builtin_type_name(data_type) {
+        let lookup = object_name_from_unquoted_ident(name);
+        return catalog_type_for_schema(&lookup, catalog, "pg_catalog", false)
+            .map(|_| ())
+            .ok_or(CollatableTypeError::NonCollatable);
+    }
+    if let DataType::Custom(name, _) = data_type {
+        return catalog_type_for_name(name, catalog, search_path)
+            .map(|_| ())
+            .ok_or(CollatableTypeError::MissingCatalogFact);
+    }
+    Err(CollatableTypeError::NonCollatable)
+}
+
+fn column_metadata_for_collation_name(
+    name: &ObjectName,
+    collations: &[CreatedCollationMetadata],
+    catalog: &PostgresCatalog,
+    search_path: &[(String, bool)],
+) -> Option<ColumnMetadata> {
+    collation_resolution_for_name(name, collations, catalog, search_path)
+        .map(CollationResolution::into_column_metadata)
+}
+
+fn should_validate_missing_collations(dialect: SqlparserDialect) -> bool {
+    matches!(dialect, SqlparserDialect::PostgreSql)
+}
+
+fn column_metadata_for_collations(
+    column: &ColumnDef,
+    collations: &[CreatedCollationMetadata],
+    catalog: &PostgresCatalog,
+    search_path: &[(String, bool)],
+    preserved: &[PreservedColumnMetadata],
+    validate_missing: bool,
+) -> Result<ColumnMetadata, crate::errors::Error> {
+    if let Some(metadata) = preserved_column_metadata_for_column(column, preserved) {
+        return Ok(metadata);
+    }
+    let Some(name) = column_collation_name(column, validate_missing)? else {
+        return Ok(ColumnMetadata::default().with_postgres_default_collation());
+    };
+    let metadata = column_metadata_for_collation_name(name, collations, catalog, search_path)
+        .map_or_else(
+            || {
+                if validate_missing {
+                    Err(crate::errors::Error::CollationNotFound {
+                        collation_name: name.to_string().into_boxed_str(),
+                    })
+                } else {
+                    Ok(ColumnMetadata::default())
+                }
+            },
+            Ok,
+        )?;
+    if validate_missing {
+        validate_postgres_column_collation_type(column, catalog, search_path)?;
+    }
+    Ok(metadata)
+}
+
+fn existing_child_column_collation_conflict(
+    builder: &ParserDBBuilder,
+    parent: &StoredTable,
+    child: &StoredTable,
+    added: &NamedColumn,
+    inherited_def: &ColumnDef,
+    inherited_metadata: &ColumnMetadata,
+) -> Option<crate::errors::Error> {
+    let (child_column, child_metadata) = builder.columns().iter().find(|(column, _)| {
+        child.matches(TableAttribute::table(column)) && added.matches(&column.attribute().name)
+    })?;
+    if child_metadata.postgres_collation_matches(inherited_metadata) != Some(false) {
+        return None;
+    }
+    Some(crate::errors::Error::InheritedColumnCollationConflict {
+        column_name: added.name.clone().into_boxed_str(),
+        child_table: child.name.clone().into_boxed_str(),
+        child_collation: stored_column_collation_name(child_column.attribute())
+            .map_or_else(|| "default".to_string(), ObjectName::to_string)
+            .into_boxed_str(),
+        parent_table: parent.name.clone().into_boxed_str(),
+        parent_collation: stored_column_collation_name(inherited_def)
+            .map_or_else(|| "default".to_string(), ObjectName::to_string)
+            .into_boxed_str(),
+    })
+}
 
 impl ParserDBBuilder {
     /// Checks if a function with the given name is referenced by any schema
@@ -217,7 +898,7 @@ impl ParserDBBuilder {
         });
 
         // Remove columns belonging to this table
-        self.columns_mut().retain(|(c, ())| {
+        self.columns_mut().retain(|(c, _)| {
             !table_matches_resolved_identity(
                 TableAttribute::table(c),
                 table_name,
@@ -505,7 +1186,7 @@ impl ParserDBBuilder {
             true
         });
 
-        self.columns_mut().retain(|(column, ())| !belongs_to(TableAttribute::table(column)));
+        self.columns_mut().retain(|(column, _)| !belongs_to(TableAttribute::table(column)));
         self.unique_indices_mut().retain(|(index, _)| !belongs_to(TableAttribute::table(index)));
         self.foreign_keys_mut().retain(|(fk, ())| !belongs_to(TableAttribute::table(fk)));
         self.check_constraints_mut().retain(|(check, _)| !belongs_to(TableAttribute::table(check)));
@@ -1651,6 +2332,27 @@ fn schema_is_declared(builder: &ParserDBBuilder, name: &str, quoted: bool) -> bo
         || declared_schema(builder, name, quoted).is_some()
 }
 
+fn collation_schema_is_declared(builder: &ParserDBBuilder, name: &str, quoted: bool) -> bool {
+    identifiers_match(name, quoted, "pg_catalog", false)
+        || schema_is_declared(builder, name, quoted)
+}
+
+fn validate_created_collation_schema(
+    builder: &ParserDBBuilder,
+    name: &ObjectName,
+) -> Result<(), crate::errors::Error> {
+    let Some((schema_name, schema_quoted)) = schema_from_object_name(name) else {
+        return Ok(());
+    };
+    if collation_schema_is_declared(builder, schema_name, schema_quoted) {
+        return Ok(());
+    }
+    Err(crate::errors::Error::SchemaNotFoundForCollation {
+        schema_name: schema_name.to_string(),
+        collation_name: name.to_string(),
+    })
+}
+
 /// Checks that a table qualified with a schema names one the input creates.
 fn validate_table_schema(
     builder: &ParserDBBuilder,
@@ -2579,7 +3281,7 @@ impl ParserDB {
     ///
     /// let options = ParseOptions::default().with_access_resolution(AccessResolution::OpenWorld);
     ///
-    /// let db = options.parse::<PostgreSqlDialect>(
+    /// let db = options.clone().parse::<PostgreSqlDialect>(
     ///     "CREATE TABLE docs (id uuid PRIMARY KEY);
     ///      GRANT SELECT ON docs TO app;
     ///      CREATE POLICY docs_app ON docs TO app USING (true);
@@ -2767,8 +3469,19 @@ impl ParserDB {
     /// because they do not follow from it. An index names its table, so a node
     /// whose name changed takes its indexes with it.
     fn replace_table_node(
+        builder: ParserDBBuilder,
+        stored: &StoredTable,
+        edit: impl FnOnce(&CreateTable, &mut CreateTable) -> Result<(), crate::errors::Error>,
+    ) -> Result<ParserDBBuilder, crate::errors::Error> {
+        Self::replace_table_node_with_collations(builder, stored, &[], None, |_| {}, edit)
+    }
+
+    fn replace_table_node_with_collations(
         mut builder: ParserDBBuilder,
         stored: &StoredTable,
+        collations: &[CreatedCollationMetadata],
+        catalog: Option<&PostgresCatalog>,
+        preserve: impl FnOnce(&mut Vec<PreservedColumnMetadata>),
         edit: impl FnOnce(&CreateTable, &mut CreateTable) -> Result<(), crate::errors::Error>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         let Some(position) =
@@ -2776,6 +3489,8 @@ impl ParserDB {
         else {
             return Err(ObjectKind::Table.not_in_database(&stored.name).into());
         };
+        let empty_catalog = PostgresCatalog::empty();
+        let catalog = catalog.unwrap_or(&empty_catalog);
 
         let (previous_node, previous_metadata) = builder.tables_mut().remove(position);
         let mut replacement = (*previous_node).clone();
@@ -2795,6 +3510,10 @@ impl ParserDB {
             &replacement.constraints,
         ));
 
+        let mut preserved_collations =
+            preserved_column_metadata_for_table(&builder, &previous_node);
+        preserve(&mut preserved_collations);
+
         let detached_indices = builder.take_table_derived_objects(
             &stored.name,
             stored.name_quoted,
@@ -2803,8 +3522,7 @@ impl ParserDB {
         );
 
         let replacement = Arc::new(replacement);
-        // An index names its table, so it follows a changed name. An edit that
-        // leaves the name alone leaves the spelling the caller wrote alone too.
+
         let renamed = !stored.matches(&replacement);
         for (mut index, expression) in detached_indices {
             if renamed {
@@ -2818,7 +3536,14 @@ impl ParserDB {
             builder = builder.add_index(index, IndexMetadata::new(expression, replacement.clone()));
         }
 
-        builder = Self::ingest_table_node(builder, replacement, metadata)?;
+        builder = Self::ingest_table_node_with_collations(
+            builder,
+            replacement,
+            metadata,
+            collations,
+            catalog,
+            &preserved_collations,
+        )?;
         builder.tables_mut().sort_by(|(a, _), (b, _)| {
             (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name()))
         });
@@ -3169,14 +3894,21 @@ impl ParserDB {
     ///
     /// `table_metadata` carries the state the node does not express: row level
     /// security flags and `CREATE INDEX` indexes.
-    fn ingest_table_node(
+    fn ingest_table_node_with_collations(
         mut builder: ParserDBBuilder,
         create_table: Arc<CreateTable>,
         mut table_metadata: TableMetadata<CreateTable>,
+        collations: &[CreatedCollationMetadata],
+        catalog: &PostgresCatalog,
+        preserved: &[PreservedColumnMetadata],
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         validate_table_schema(&builder, &create_table)?;
         validate_distinct_columns(&create_table)?;
         validate_relation_names(&builder, &create_table)?;
+
+        let search_path: Vec<_> =
+            builder.search_path().map(|(schema, quoted)| (schema.to_string(), quoted)).collect();
+        let validate_missing = should_validate_missing_collations(*builder.dialect());
 
         for column in create_table.columns.clone() {
             table_metadata.add_column(Arc::new(TableAttribute::new(create_table.clone(), column)));
@@ -3185,7 +3917,15 @@ impl ParserDB {
         for column in table_metadata.clone().column_arcs() {
             builder =
                 Self::process_column_options(column, &create_table, &mut table_metadata, builder)?;
-            builder = builder.add_column(column.clone(), ());
+            let metadata = column_metadata_for_collations(
+                column.attribute(),
+                collations,
+                catalog,
+                &search_path,
+                preserved,
+                validate_missing,
+            )?;
+            builder = builder.add_column(column.clone(), metadata);
         }
 
         builder = Self::process_table_constraints(
@@ -3752,6 +4492,7 @@ impl ParserDB {
         column_def: ColumnDef,
         if_not_exists: bool,
         position: Option<&MySQLColumnPosition>,
+        active_collations: ActiveCollations<'_>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
@@ -3796,34 +4537,68 @@ impl ParserDB {
         inherited_def.options.retain(
             |option| !matches!(&option.option, ColumnOption::Check(check) if check.no_inherit),
         );
+        let search_path: Vec<_> =
+            builder.search_path().map(|(schema, quoted)| (schema.to_string(), quoted)).collect();
+        let inherited_metadata = column_metadata_for_collations(
+            &inherited_def,
+            active_collations.created,
+            active_collations.catalog,
+            &search_path,
+            &[],
+            should_validate_missing_collations(*builder.dialect()),
+        )?;
 
-        let mut builder = Self::replace_table_node(builder, &stored, |_, node| {
-            let at = match position {
-                Some(MySQLColumnPosition::First) => 0,
-                Some(MySQLColumnPosition::After(after)) => {
-                    let after = NamedColumn::of(after);
-                    node.columns
-                        .iter()
-                        .position(|declared| after.matches(&declared.name))
-                        .map_or(node.columns.len(), |index| index + 1)
-                }
-                None => node.columns.len(),
-            };
-            node.columns.insert(at, column_def);
-            Ok(())
-        })?;
+        let mut builder = Self::replace_table_node_with_collations(
+            builder,
+            &stored,
+            active_collations.created,
+            Some(active_collations.catalog),
+            |_| {},
+            |_, node| {
+                let at = match position {
+                    Some(MySQLColumnPosition::First) => 0,
+                    Some(MySQLColumnPosition::After(after)) => {
+                        let after = NamedColumn::of(after);
+                        node.columns
+                            .iter()
+                            .position(|declared| after.matches(&declared.name))
+                            .map_or(node.columns.len(), |index| index + 1)
+                    }
+                    None => node.columns.len(),
+                };
+                node.columns.insert(at, column_def);
+                Ok(())
+            },
+        )?;
 
         for child in &inheritors {
             // A child already declaring the name keeps its own, the way
             // PostgreSQL merges the two rather than adding a second.
             if added.declared_by(Self::stored_node(&builder, child)?) {
+                if let Some(error) = existing_child_column_collation_conflict(
+                    &builder,
+                    &stored,
+                    child,
+                    &added,
+                    &inherited_def,
+                    &inherited_metadata,
+                ) {
+                    return Err(error);
+                }
                 continue;
             }
             let inherited_def = inherited_def.clone();
-            builder = Self::replace_table_node(builder, child, |_, node| {
-                node.columns.push(inherited_def);
-                Ok(())
-            })?;
+            builder = Self::replace_table_node_with_collations(
+                builder,
+                child,
+                active_collations.created,
+                Some(active_collations.catalog),
+                |_| {},
+                |_, node| {
+                    node.columns.push(inherited_def);
+                    Ok(())
+                },
+            )?;
             inheritance::mark_inherited(&mut builder, child, &added.name);
         }
 
@@ -3980,10 +4755,17 @@ impl ParserDB {
         let inheritors = inheritance::descendants(&builder, &stored);
 
         builder.rewrite_column_references(&stored, &declaring, &from, new_column_name);
-        builder = Self::replace_table_node(builder, &stored, |_, node| {
-            rename_column_in_node(node, &stored, &declaring, &from, new_column_name);
-            Ok(())
-        })?;
+        builder = Self::replace_table_node_with_collations(
+            builder,
+            &stored,
+            &[],
+            None,
+            |preserved| rename_preserved_column_metadata(preserved, &from, new_column_name),
+            |_, node| {
+                rename_column_in_node(node, &stored, &declaring, &from, new_column_name);
+                Ok(())
+            },
+        )?;
         for host in &hosts {
             builder = Self::replace_table_node(builder, host, |_, node| {
                 rename_referred_columns(node, &stored, &from, new_column_name);
@@ -3993,10 +4775,17 @@ impl ParserDB {
         for child in &inheritors {
             let declaring = tables_declaring_column(&builder, child, &from);
             builder.rewrite_column_references(child, &declaring, &from, new_column_name);
-            builder = Self::replace_table_node(builder, child, |_, node| {
-                rename_column_in_node(node, child, &declaring, &from, new_column_name);
-                Ok(())
-            })?;
+            builder = Self::replace_table_node_with_collations(
+                builder,
+                child,
+                &[],
+                None,
+                |preserved| rename_preserved_column_metadata(preserved, &from, new_column_name),
+                |_, node| {
+                    rename_column_in_node(node, child, &declaring, &from, new_column_name);
+                    Ok(())
+                },
+            )?;
             inheritance::rename_inherited(&mut builder, child, &from.name, new_column_name);
         }
 
@@ -4301,12 +5090,8 @@ impl ParserDB {
         catalog_name: String,
         dialect: SqlparserDialect,
     ) -> Result<Self, crate::errors::Error> {
-        Self::from_statements_with_options(
-            statements,
-            catalog_name,
-            dialect,
-            ParseOptions::default(),
-        )
+        let options = ParseOptions::default();
+        Self::from_statements_with_options(statements, catalog_name, dialect, &options)
     }
 
     /// Same as [`Self::from_statements_with_dialect`] but under caller-chosen
@@ -4316,9 +5101,14 @@ impl ParserDB {
         statements: Vec<Statement>,
         catalog_name: String,
         dialect: SqlparserDialect,
-        options: ParseOptions,
+        options: &ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
         let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect);
+        let mut active_postgres_catalog = if matches!(dialect, SqlparserDialect::PostgreSql) {
+            options.postgres_catalog().clone()
+        } else {
+            PostgresCatalog::empty()
+        };
 
         let any_type = DataType::Custom(
             ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
@@ -4409,6 +5199,8 @@ impl ParserDB {
             };
             builder = builder.add_function(Arc::new(create_function), FunctionMetadata::default());
         }
+
+        let mut collation_metadata = Vec::new();
 
         for statement in statements {
             match statement {
@@ -5073,6 +5865,10 @@ impl ParserDB {
                                     column_def,
                                     if_not_exists,
                                     column_position.as_ref(),
+                                    ActiveCollations {
+                                        created: &collation_metadata,
+                                        catalog: &active_postgres_catalog,
+                                    },
                                 )?;
                             }
                             AlterTableOperation::DropColumn {
@@ -5294,6 +6090,23 @@ impl ParserDB {
                         }
                     }
                 }
+                Statement::CreateCollation(create_collation) => {
+                    if matches!(dialect, SqlparserDialect::PostgreSql) {
+                        let search_path: Vec<_> = builder
+                            .search_path()
+                            .map(|(schema, quoted)| (schema.to_string(), quoted))
+                            .collect();
+                        if let Some(metadata) = create_collation_metadata(
+                            &builder,
+                            &create_collation,
+                            &collation_metadata,
+                            &active_postgres_catalog,
+                            &search_path,
+                        )? {
+                            collation_metadata.push(metadata);
+                        }
+                    }
+                }
                 Statement::CreateTable(mut create_table) => {
                     require_named(&create_table.name, crate::errors::ObjectKind::Table)?;
                     // Where the table lands is decided before the name is read,
@@ -5327,13 +6140,25 @@ impl ParserDB {
                     // from it sees them. A parent has to exist by now, the
                     // way a foreign key target does, which is also what
                     // leaves the edges acyclic.
-                    let inherited = inheritance::apply_parents(&builder, &mut create_table)?;
+                    let inherited = inheritance::apply_parents(
+                        &builder,
+                        &mut create_table,
+                        &collation_metadata,
+                        &active_postgres_catalog,
+                    )?;
                     refuse_no_inherit_check_on_partitioned(&create_table)?;
                     record_implied_not_null(&mut create_table);
                     let mut metadata = TableMetadata::default();
                     metadata.set_inherited_column_names(inherited.columns);
                     metadata.set_inherited_constraints(inherited.constraints);
-                    builder = Self::ingest_table_node(builder, Arc::new(create_table), metadata)?;
+                    builder = Self::ingest_table_node_with_collations(
+                        builder,
+                        Arc::new(create_table),
+                        metadata,
+                        &collation_metadata,
+                        &active_postgres_catalog,
+                        &inherited.column_metadata,
+                    )?;
                 }
                 Statement::CreatePolicy(policy) => {
                     require_named(&policy.table_name, crate::errors::ObjectKind::Table)?;
@@ -5815,6 +6640,19 @@ impl ParserDB {
                                 };
                                 schemas.push((Arc::new(new_schema), ()));
                                 schemas.sort_by(|(a, ()), (b, ())| a.name().cmp(b.name()));
+                                rename_created_collation_schemas(
+                                    &mut collation_metadata,
+                                    &current_schema_name,
+                                    current_schema_quoted,
+                                    &new_schema_name,
+                                    new_schema_quoted,
+                                );
+                                active_postgres_catalog.rename_schema(
+                                    &current_schema_name,
+                                    current_schema_quoted,
+                                    &new_schema_name,
+                                    new_schema_quoted,
+                                );
                                 current_schema_name = new_schema_name;
                                 current_schema_quoted = new_schema_quoted;
                             }
@@ -5903,13 +6741,14 @@ impl ParserDB {
     /// # }
     /// ```
     pub fn parse<D: Dialect + Default + 'static>(sql: &str) -> Result<Self, crate::errors::Error> {
-        Self::parse_with_options::<D>(sql, ParseOptions::default())
+        let options = ParseOptions::default();
+        Self::parse_with_options::<D>(sql, &options)
     }
 
     /// Same as [`Self::parse`] but under caller-chosen [`ParseOptions`].
     pub(crate) fn parse_with_options<D: Dialect + Default + 'static>(
         sql: &str,
-        options: ParseOptions,
+        options: &ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
         let dialect = D::default();
         let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
@@ -6013,14 +6852,15 @@ impl ParserDB {
     /// parsing fails.
     #[cfg(feature = "std")]
     pub fn from_paths<D: Dialect + Default>(paths: &[&Path]) -> Result<Self, crate::errors::Error> {
-        Self::from_paths_with_options::<D>(paths, ParseOptions::default())
+        let options = ParseOptions::default();
+        Self::from_paths_with_options::<D>(paths, &options)
     }
 
     /// Same as [`Self::from_paths`] but under caller-chosen [`ParseOptions`].
     #[cfg(feature = "std")]
     pub(crate) fn from_paths_with_options<D: Dialect + Default>(
         paths: &[&Path],
-        options: ParseOptions,
+        options: &ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
         let mut statements = Vec::new();
         let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
@@ -6061,7 +6901,7 @@ impl ParserDB {
         let mut db = Self::from_statements_with_options(
             statements,
             "unknown_catalog".to_string(),
-            SqlparserDialect::default(),
+            SqlparserDialect::of::<D>(),
             options,
         )?;
 
