@@ -9,7 +9,11 @@ use sqlparser::ast::CreateRole;
 use crate::{
     structs::ParserDB,
     traits::{DatabaseLike, Metadata, PolicyLike, RoleLike},
-    utils::last_str,
+    utils::{
+        identifier_resolution::{identifiers_match, is_public_pseudo_role, normalize_identifier},
+        last_str,
+        object_name::object_name_last_part,
+    },
 };
 
 impl Metadata for CreateRole {
@@ -21,6 +25,10 @@ impl RoleLike for CreateRole {
 
     fn name(&self) -> &str {
         last_str(self.names.first().expect("CREATE ROLE must have a name"))
+    }
+
+    fn name_is_quoted(&self) -> bool {
+        self.names.first().and_then(object_name_last_part).is_some_and(|(_, quoted)| quoted)
     }
 
     fn is_superuser(&self) -> bool {
@@ -70,26 +78,42 @@ impl RoleLike for CreateRole {
         &'db self,
         database: &'db Self::DB,
     ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Role> {
-        // IN ROLE clause specifies roles this role is a member of
-        self.in_role.iter().filter_map(move |role_ident| database.role(&role_ident.value))
+        self.in_role.iter().filter_map(move |role_ident| {
+            let stored_name =
+                normalize_identifier(&role_ident.value, role_ident.quote_style.is_some());
+            database.role(stored_name.as_ref())
+        })
     }
 
     fn policies<'db>(
         &'db self,
         database: &'db Self::DB,
     ) -> impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Policy> {
-        let role_name = self.name();
         database.policies().filter(move |policy| {
-            policy.roles(database).any(|owner| owner_matches_role(owner, role_name))
+            policy.roles(database).any(|owner| owner_matches_role(owner, self))
         })
     }
 }
 
-/// Helper function to check if an Owner matches a role name.
-fn owner_matches_role(owner: &sqlparser::ast::Owner, role_name: &str) -> bool {
+/// Returns whether an owner identifier names the role.
+fn owner_matches_role(owner: &sqlparser::ast::Owner, role: &CreateRole) -> bool {
     match owner {
-        sqlparser::ast::Owner::Ident(ident) => ident.value == role_name,
-        sqlparser::ast::Owner::CurrentUser
+        sqlparser::ast::Owner::Ident(owner_ident)
+            if !is_public_pseudo_role(&owner_ident.value, owner_ident.quote_style.is_some()) =>
+        {
+            role.names.iter().any(|role_name| {
+                object_name_last_part(role_name).is_some_and(|(role_name, role_quoted)| {
+                    identifiers_match(
+                        role_name,
+                        role_quoted,
+                        &owner_ident.value,
+                        owner_ident.quote_style.is_some(),
+                    )
+                })
+            })
+        }
+        sqlparser::ast::Owner::Ident(_)
+        | sqlparser::ast::Owner::CurrentUser
         | sqlparser::ast::Owner::CurrentRole
         | sqlparser::ast::Owner::SessionUser => false,
     }
@@ -99,7 +123,10 @@ fn owner_matches_role(owner: &sqlparser::ast::Owner, role_name: &str) -> bool {
 mod tests {
     use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
 
-    use crate::{structs::ParserDB, traits::RoleLike};
+    use crate::{
+        structs::ParserDB,
+        traits::{PolicyLike, RoleLike},
+    };
 
     /// Helper to parse SQL using PostgreSQL dialect
     fn parse_postgres(sql: &str) -> ParserDB {
@@ -122,6 +149,39 @@ mod tests {
         assert!(!role.can_bypass_rls());
         assert!(!role.is_replication());
         assert!(role.connection_limit().is_none());
+    }
+
+    #[test]
+    fn role_identity_uses_canonical_stored_names() {
+        let db = parse_postgres(
+            "CREATE ROLE App_Reader;
+             CREATE ROLE \"ACTOR\";",
+        );
+
+        let unquoted = db.role("app_reader").expect("unquoted role resolves");
+        assert_eq!(unquoted.name(), "App_Reader");
+        assert!(!unquoted.name_is_quoted());
+        assert_eq!(unquoted.stored_name(), "app_reader");
+        assert!(db.role("App_Reader").is_none());
+
+        let quoted = db.role("ACTOR").expect("quoted role resolves");
+        assert_eq!(quoted.name(), "ACTOR");
+        assert!(quoted.name_is_quoted());
+        assert_eq!(quoted.stored_name(), "ACTOR");
+    }
+
+    #[test]
+    fn role_metadata_uses_canonical_sort_order() {
+        let db = parse_postgres(
+            "CREATE ROLE Zed;
+             CREATE ROLE \"alpha\";
+             CREATE ROLE \"middle\";",
+        );
+
+        for name in ["zed", "alpha", "middle"] {
+            let role = db.role(name).expect("role resolves");
+            assert!(db.role_metadata(role).is_some(), "{name} metadata is unreachable");
+        }
     }
 
     #[test]
@@ -151,38 +211,47 @@ mod tests {
     #[test]
     fn test_role_membership() {
         let db = parse_postgres(
-            r"
-            CREATE ROLE parent1;
-            CREATE ROLE parent2;
-            CREATE ROLE child IN ROLE parent1, parent2;
-        ",
+            r#"
+            CREATE ROLE Parent_One;
+            CREATE ROLE "Parent_Two";
+            CREATE ROLE Child_Role IN ROLE Parent_One, "Parent_Two";
+        "#,
         );
 
-        let child = db.role("child").unwrap();
+        let child = db.role("child_role").expect("child resolves");
         let memberships: Vec<_> = child.member_of(&db).collect();
+        let stored_names: Vec<_> = memberships.iter().map(|role| role.stored_name()).collect();
 
-        assert_eq!(memberships.len(), 2);
-        let names: Vec<_> = memberships.iter().map(RoleLike::name).collect();
-        assert!(names.contains(&"parent1"));
-        assert!(names.contains(&"parent2"));
+        assert_eq!(stored_names, ["parent_one", "Parent_Two"]);
     }
 
     #[test]
     fn test_role_policies() {
         let db = parse_postgres(
-            r"
-            CREATE ROLE my_role;
+            r#"
+            CREATE ROLE My_Role;
+            CREATE ROLE "MY_ROLE";
+            CREATE ROLE "public";
             CREATE TABLE t1 (id INT);
             CREATE TABLE t2 (id INT);
-            CREATE POLICY p1 ON t1 TO my_role USING (true);
-            CREATE POLICY p2 ON t2 TO my_role USING (true);
+            CREATE POLICY p1 ON t1 TO My_Role USING (true);
+            CREATE POLICY p2 ON t2 TO "MY_ROLE" USING (true);
             CREATE POLICY p3 ON t1 TO PUBLIC USING (true);
-        ",
+            CREATE POLICY p4 ON t2 TO "public" USING (true);
+        "#,
         );
 
-        let role = db.role("my_role").unwrap();
-        let policies: Vec<_> = role.policies(&db).collect();
+        let unquoted = db.role("my_role").expect("unquoted role resolves");
+        let unquoted_policies: Vec<_> = unquoted.policies(&db).map(PolicyLike::name).collect();
+        assert_eq!(unquoted_policies, ["p1"]);
 
-        assert_eq!(policies.len(), 2);
+        let quoted = db.role("MY_ROLE").expect("quoted role resolves");
+        let quoted_policies: Vec<_> = quoted.policies(&db).map(PolicyLike::name).collect();
+        assert_eq!(quoted_policies, ["p2"]);
+
+        let quoted_public = db.role("public").expect("quoted public role resolves");
+        let quoted_public_policies: Vec<_> =
+            quoted_public.policies(&db).map(PolicyLike::name).collect();
+        assert_eq!(quoted_public_policies, ["p4"]);
     }
 }

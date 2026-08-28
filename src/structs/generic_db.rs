@@ -500,11 +500,11 @@ where
             .map(|index| &self.policies[index].1)
     }
 
-    /// Returns a reference of the role by name.
+    /// Returns a reference to the role with the canonical stored name.
     ///
     /// # Arguments
     ///
-    /// * `name` - The name of the role to retrieve.
+    /// * `name` - The canonical stored name of the role to retrieve.
     ///
     /// # Example
     ///
@@ -524,7 +524,7 @@ where
     #[must_use]
     pub fn role(&self, name: &str) -> Option<&R> {
         self.roles
-            .binary_search_by(|(r, _)| r.name().cmp(name))
+            .binary_search_by(|(role, _)| role.stored_name().as_ref().cmp(name))
             .ok()
             .map(|index| self.roles[index].0.as_ref())
     }
@@ -549,8 +549,9 @@ where
     /// # }
     /// ```
     pub fn role_metadata(&self, role: &R) -> Option<&R::Meta> {
+        let stored_name = role.stored_name();
         self.roles
-            .binary_search_by(|(r, _)| r.name().cmp(role.name()))
+            .binary_search_by(|(candidate, _)| candidate.stored_name().cmp(&stored_name))
             .ok()
             .map(|index| &self.roles[index].1)
     }

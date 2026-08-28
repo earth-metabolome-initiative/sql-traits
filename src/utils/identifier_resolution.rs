@@ -5,7 +5,7 @@
 //! Unicode-NFC-normalized and whitespace-trimmed per
 //! FINGERPRINT_SPEC §7.1.
 
-use alloc::borrow::Cow;
+use alloc::{borrow::Cow, string::String};
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -99,20 +99,18 @@ pub fn is_public_pseudo_role(value: &str, quoted: bool) -> bool {
 #[must_use]
 pub fn normalize_identifier(value: &str, quoted: bool) -> Cow<'_, str> {
     let trimmed = value.trim();
-    let needs_nfc = !trimmed.is_ascii();
-    let after_nfc: Cow<'_, str> =
-        if needs_nfc { Cow::Owned(trimmed.nfc().collect()) } else { Cow::Borrowed(trimmed) };
-
-    if quoted {
-        // Preserve case; only the trim+NFC pass applies.
-        if needs_nfc || trimmed.len() != value.len() {
-            Cow::Owned(after_nfc.into_owned())
-        } else {
+    if trimmed.is_ascii() {
+        if quoted || !trimmed.bytes().any(|byte| byte.is_ascii_uppercase()) {
             Cow::Borrowed(trimmed)
+        } else {
+            Cow::Owned(trimmed.to_ascii_lowercase())
         }
     } else {
-        // PostgreSQL-style ASCII lowercase folding.
-        Cow::Owned(after_nfc.to_ascii_lowercase())
+        let mut normalized: String = trimmed.nfc().collect();
+        if !quoted {
+            normalized.make_ascii_lowercase();
+        }
+        Cow::Owned(normalized)
     }
 }
 
