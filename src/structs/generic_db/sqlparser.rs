@@ -28,8 +28,8 @@ use sqlparser::{
         ExactNumberInfo, Expr, ForeignKeyConstraint, FunctionDesc, FunctionReturnType, GeneratedAs,
         Grant, GrantObjects, Grantee, GranteeName, GranteesType, Ident, IndexColumn,
         MySQLColumnPosition, ObjectName, ObjectNamePart, OperateFunctionArg, OrderByExpr,
-        OrderByOptions, Owner, Privileges, Query, RenameTableNameKind, SchemaName, SqlOption,
-        Statement, TableConstraint, TimezoneInfo, TriggerEvent, UniqueConstraint, Value,
+        OrderByOptions, Owner, Privileges, Query, RenameTableNameKind, ResetConfig, SchemaName,
+        SqlOption, Statement, TableConstraint, TimezoneInfo, TriggerEvent, UniqueConstraint, Value,
         ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut, visit_relations,
     },
     dialect::Dialect,
@@ -2052,6 +2052,20 @@ fn object_names_match(left: &ObjectName, right: &ObjectName) -> bool {
         }
         _ => false,
     }
+}
+
+fn object_name_part_ident(part: &ObjectNamePart) -> &Ident {
+    match part {
+        ObjectNamePart::Identifier(ident) => ident,
+        ObjectNamePart::Function(function) => &function.name,
+    }
+}
+
+fn function_configuration_names_match(left: &ObjectName, right: &ObjectName) -> bool {
+    left.0.len() == right.0.len()
+        && left.0.iter().zip(&right.0).all(|(left, right)| {
+            idents_match(object_name_part_ident(left), object_name_part_ident(right))
+        })
 }
 
 /// Returns the argument types that make up a function's identity.
@@ -6466,12 +6480,8 @@ impl ParserDB {
                     operation,
                     ..
                 }) => {
-                    // Two operations change state this model tracks: the
-                    // security clause and the owner. Both are applied to the
-                    // stored function, held to the closed world the way ALTER
-                    // POLICY is. Every other operation and action keeps being
-                    // ignored the way the catch-all arm ignored the whole
-                    // statement before.
+                    // Owner, security, and configuration changes update the
+                    // stored function. Other operations remain ignored.
                     match operation {
                         AlterFunctionOperation::OwnerTo(new_owner) => {
                             // An aggregate reaches here as this same statement,
@@ -6517,28 +6527,55 @@ impl ParserDB {
                             builder.functions_mut()[position].1.set_owner(owner);
                         }
                         AlterFunctionOperation::Actions { actions, .. } => {
-                            let Some(security) = actions.into_iter().rev().find_map(|action| {
-                                match action {
-                                    AlterFunctionAction::Security { security, .. } => {
-                                        Some(security)
-                                    }
-                                    _ => None,
-                                }
-                            }) else {
+                            let tracked = actions.iter().any(|action| {
+                                matches!(
+                                    action,
+                                    AlterFunctionAction::Security { .. }
+                                        | AlterFunctionAction::Set(_)
+                                        | AlterFunctionAction::Reset(_)
+                                )
+                            });
+                            if !tracked {
                                 continue;
-                            };
+                            }
 
                             let position = Self::alter_function_target(&builder, &func_desc)?;
-
                             let function_arc = &mut builder.functions_mut()[position].0;
                             let stale = Arc::clone(function_arc);
-                            Arc::make_mut(function_arc).security = Some(security);
+                            let function = Arc::make_mut(function_arc);
+                            for action in actions {
+                                match action {
+                                    AlterFunctionAction::Security { security, .. } => {
+                                        function.security = Some(security);
+                                    }
+                                    AlterFunctionAction::Set(parameter) => {
+                                        if let Some(position) =
+                                            function.set_params.iter().position(|stored| {
+                                                function_configuration_names_match(
+                                                    &stored.name,
+                                                    &parameter.name,
+                                                )
+                                            })
+                                        {
+                                            function.set_params[position] = parameter;
+                                        } else {
+                                            function.set_params.push(parameter);
+                                        }
+                                    }
+                                    AlterFunctionAction::Reset(ResetConfig::ALL) => {
+                                        function.set_params.clear();
+                                    }
+                                    AlterFunctionAction::Reset(ResetConfig::ConfigName(name)) => {
+                                        function.set_params.retain(|stored| {
+                                            !function_configuration_names_match(&stored.name, &name)
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
                             let fresh = Arc::clone(function_arc);
 
-                            // Policies and check constraints cache the function
-                            // nodes their expressions call, resolved at creation
-                            // time, so the rewritten node has to be swapped into
-                            // those caches as well.
+                            // Policies and check constraints cache function nodes.
                             for (_, metadata) in builder.policies_mut() {
                                 metadata.replace_function(&stale, &fresh);
                             }

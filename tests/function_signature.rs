@@ -233,3 +233,48 @@ fn the_readers_answer_under_another_dialect() {
         vec![Some(TargetName::new("doc_id", false))]
     );
 }
+
+#[test]
+fn configuration_parameters_follow_create_and_alter_order() {
+    let database = db("CREATE FUNCTION created() RETURNS INT LANGUAGE sql
+             SET search_path TO a, pg_temp SET work_mem TO '64kB' AS 'SELECT 1';
+         CREATE FUNCTION altered() RETURNS INT LANGUAGE sql
+             SET search_path TO a, pg_temp SET work_mem TO '64kB' AS 'SELECT 1';
+         ALTER FUNCTION altered() SET search_path TO b, pg_temp
+             SET statement_timeout TO '1s';
+         ALTER FUNCTION altered() RESET work_mem SET search_path TO c;
+         CREATE FUNCTION default_path() RETURNS INT LANGUAGE sql
+             SET search_path TO DEFAULT AS 'SELECT 1';
+         CREATE FUNCTION current_path() RETURNS INT LANGUAGE sql
+             SET search_path FROM CURRENT AS 'SELECT 1';");
+    let parameters = |name: &str| {
+        database
+            .function(name)
+            .expect("function exists")
+            .configuration_parameters()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(parameters("created"), ["SET search_path = a, pg_temp", "SET work_mem = '64kB'"]);
+    assert_eq!(parameters("altered"), ["SET search_path = c", "SET statement_timeout = '1s'"]);
+    assert_eq!(parameters("default_path"), ["SET search_path = DEFAULT"]);
+    assert_eq!(parameters("current_path"), ["SET search_path FROM CURRENT"]);
+}
+
+#[test]
+fn configuration_parameter_prefixes_remain_distinct() {
+    let database = db("CREATE FUNCTION f() RETURNS INT LANGUAGE sql
+             SET a.b.c TO x SET other.b.c TO y AS 'SELECT 1';
+         ALTER FUNCTION f() RESET a.b.c;");
+    let parameters = database
+        .function("f")
+        .expect("function exists")
+        .configuration_parameters()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    assert_eq!(parameters, ["SET other.b.c = y"]);
+}

@@ -4,8 +4,9 @@
 use alloc::{borrow::Cow, format, string::ToString};
 
 use sqlparser::ast::{
-    CreateFunction, CreateFunctionBody, DataType, Expr, FunctionCalledOnNull, FunctionReturnType,
-    FunctionSecurity, ObjectNamePart, Value, ValueWithSpan,
+    CreateFunction, CreateFunctionBody, DataType, Expr, FunctionCalledOnNull,
+    FunctionDefinitionSetParam, FunctionReturnType, FunctionSecurity, ObjectNamePart, Value,
+    ValueWithSpan,
 };
 
 use crate::{
@@ -143,6 +144,12 @@ impl FunctionLike for CreateFunction {
             _ => None,
         }
     }
+
+    #[inline]
+    fn configuration_parameters(&self) -> &[FunctionDefinitionSetParam] {
+        &self.set_params
+    }
+
     #[inline]
     fn null_input_behavior(&self) -> FunctionCalledOnNull {
         self.called_on_null.clone().unwrap_or(FunctionCalledOnNull::CalledOnNullInput)

@@ -3,7 +3,7 @@
 use alloc::{borrow::Cow, vec::Vec};
 use core::{fmt::Debug, hash::Hash};
 
-use sqlparser::ast::{Expr, FunctionCalledOnNull, FunctionSecurity};
+use sqlparser::ast::{Expr, FunctionCalledOnNull, FunctionDefinitionSetParam, FunctionSecurity};
 
 use crate::{
     errors::LookupError,
@@ -367,6 +367,10 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// # }
     /// ```
     fn body_expression(&self) -> Option<&Expr>;
+
+    /// Returns the function-local configuration after later alterations.
+    fn configuration_parameters(&self) -> &[FunctionDefinitionSetParam];
+
     /// Returns the null-input behavior with PostgreSQL's default folded in.
     fn null_input_behavior(&self) -> FunctionCalledOnNull;
 
