@@ -92,6 +92,7 @@ pedantic = { level = "deny", priority = -1 }
 
 [dev-dependencies]
 arbitrary = "1.4"
+proptest = "1.7"
 
 [workspace]
 members = ["fuzz"]
