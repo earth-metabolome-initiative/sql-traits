@@ -12,7 +12,7 @@ use crate::{
     errors::{LookupError, ObjectKind},
     structs::{FunctionMetadata, ParserDB, TargetName},
     traits::{FunctionLike, Metadata},
-    utils::{last_str, normalize_sqlparser_type},
+    utils::{last_str, normalize_sqlparser_type, object_name::target_name_of_object_name},
 };
 
 impl Metadata for CreateFunction {
@@ -39,6 +39,11 @@ impl FunctionLike for CreateFunction {
     #[inline]
     fn name(&self) -> &str {
         last_str(&self.name)
+    }
+
+    #[inline]
+    fn target_name(&self) -> TargetName<'_> {
+        target_name_of_object_name(&self.name)
     }
 
     #[inline]

@@ -317,3 +317,32 @@ fn a_generic_catalog_resolves_every_policy_target() {
         ]
     );
 }
+
+#[test]
+fn function_target_preserves_quoting_and_qualification() {
+    let db = parse(
+        "CREATE SCHEMA \"Auth\";
+         CREATE FUNCTION \"Auth\".\"UID\"() RETURNS TEXT LANGUAGE sql AS 'SELECT ''x''';",
+    );
+    let function =
+        db.functions().find(|function| function.name() == "UID").expect("the function exists");
+
+    let target = function.target_name();
+    assert_eq!(target.name(), "UID");
+    assert!(target.name_is_quoted());
+    assert_eq!(target.schema(), Some("Auth"));
+    assert!(target.schema_is_quoted());
+    assert_eq!(target.to_string(), "\"Auth\".\"UID\"");
+}
+
+#[test]
+fn function_target_reads_back_unqualified() {
+    let db = parse("CREATE FUNCTION uid() RETURNS TEXT LANGUAGE sql AS 'SELECT ''x''';");
+    let function =
+        db.functions().find(|function| function.name() == "uid").expect("the function exists");
+
+    let target = function.target_name();
+    assert_eq!(target.name(), "uid");
+    assert!(!target.name_is_quoted());
+    assert_eq!(target.schema(), None);
+}

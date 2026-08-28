@@ -37,6 +37,10 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// ```
     fn name(&self) -> &str;
 
+    /// Returns the function name exactly as declared, including its optional
+    /// schema.
+    fn target_name(&self) -> TargetName<'_>;
+
     /// Returns whether the function name was quoted in SQL.
     ///
     /// Quoted identifiers are resolved case-sensitively in PostgreSQL.
