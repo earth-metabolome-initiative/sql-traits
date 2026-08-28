@@ -3,7 +3,7 @@
 use alloc::{borrow::Cow, vec::Vec};
 use core::{fmt::Debug, hash::Hash};
 
-use sqlparser::ast::{Expr, FunctionSecurity};
+use sqlparser::ast::{Expr, FunctionCalledOnNull, FunctionSecurity};
 
 use crate::{
     errors::LookupError,
@@ -363,6 +363,8 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// # }
     /// ```
     fn body_expression(&self) -> Option<&Expr>;
+    /// Returns the null-input behavior with PostgreSQL's default folded in.
+    fn null_input_behavior(&self) -> FunctionCalledOnNull;
 
     /// Returns whether the function runs with the privileges of the user
     /// that defined it (`SECURITY DEFINER`) or of the user that calls it
@@ -491,7 +493,10 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
 
 #[cfg(test)]
 mod tests {
-    use sqlparser::{ast::FunctionSecurity, dialect::GenericDialect};
+    use sqlparser::{
+        ast::{FunctionCalledOnNull, FunctionSecurity},
+        dialect::{GenericDialect, PostgreSqlDialect},
+    };
 
     use crate::{errors::Error, prelude::*, traits::DatabaseLike};
 
@@ -930,5 +935,25 @@ mod tests {
         assert_eq!(via_using.security_mode(), FunctionSecurity::Definer);
         assert_eq!(via_check.security_mode(), FunctionSecurity::Definer);
         assert_eq!(via_constraint.security_mode(), FunctionSecurity::Definer);
+    }
+    #[test]
+    fn test_function_null_input_behavior_preserves_postgres_forms() {
+        let sql = r"
+            CREATE FUNCTION default_behavior(x INT) RETURNS BOOLEAN LANGUAGE sql
+                AS 'SELECT true';
+            CREATE FUNCTION called_on_null(x INT) RETURNS BOOLEAN LANGUAGE sql
+                CALLED ON NULL INPUT AS 'SELECT true';
+            CREATE FUNCTION returns_null(x INT) RETURNS BOOLEAN LANGUAGE sql
+                RETURNS NULL ON NULL INPUT AS 'SELECT true';
+            CREATE FUNCTION strict_behavior(x INT) RETURNS BOOLEAN LANGUAGE sql
+                STRICT AS 'SELECT true';
+        ";
+        let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
+        let behavior = |name| db.function(name).expect("function").null_input_behavior();
+
+        assert_eq!(behavior("default_behavior"), FunctionCalledOnNull::CalledOnNullInput);
+        assert_eq!(behavior("called_on_null"), FunctionCalledOnNull::CalledOnNullInput);
+        assert_eq!(behavior("returns_null"), FunctionCalledOnNull::ReturnsNullOnNullInput);
+        assert_eq!(behavior("strict_behavior"), FunctionCalledOnNull::Strict);
     }
 }
