@@ -486,11 +486,8 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Plan-driven coverage (audit gap-A): every DataType variant that
-    // maps cleanly to a canonical token family must normalize to a
-    // string accepted by `fingerprint_type_token::match_known_type`.
-    // -----------------------------------------------------------------
+    // Every `DataType` variant with a canonical scalar family must normalize to
+    // a string accepted by `scalar_family`.
 
     #[test]
     fn test_normalize_sqlparser_type_int_family() {

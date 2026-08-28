@@ -8,8 +8,9 @@ use crate::{
     structs::TargetName,
     traits::{CheckConstraintLike, DatabaseLike, ForeignKeyLike, IndexLike, Metadata, TableLike},
     utils::{
-        fingerprint_type_token::match_known_type, identifier_resolution::normalize_identifier,
+        identifier_resolution::normalize_identifier,
         normalize_postgres_type_cow,
+        scalar_family::{ScalarFamily, scalar_family as classify_scalar_family},
     },
 };
 
@@ -213,6 +214,32 @@ pub trait ColumnLike:
     /// # }
     /// ```
     fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str>;
+
+    /// Returns the builtin scalar family of the column's declared type.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::{prelude::*, utils::scalar_family::ScalarFamily};
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE measurements (id BIGINT, value NUMERIC(20, 4), label VARCHAR(255));",
+    /// )?;
+    /// let table = db.table(None, "measurements").unwrap();
+    /// let id = table.column("id", &db)?.unwrap();
+    /// let value = table.column("value", &db)?.unwrap();
+    /// let label = table.column("label", &db)?.unwrap();
+    /// assert_eq!(id.scalar_family(&db), Some(ScalarFamily::Int));
+    /// assert_eq!(value.scalar_family(&db), Some(ScalarFamily::Decimal));
+    /// assert_eq!(label.scalar_family(&db), Some(ScalarFamily::String));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn scalar_family(&self, database: &Self::DB) -> Option<ScalarFamily> {
+        classify_scalar_family(self.data_type(database).as_ref())
+    }
 
     /// Returns the collation rule used for string comparison.
     ///
@@ -432,7 +459,7 @@ pub trait ColumnLike:
     /// ```
     #[inline]
     fn is_textual(&self, database: &Self::DB) -> bool {
-        match_known_type(self.normalized_data_type(database).as_ref()) == Some("STRING")
+        self.scalar_family(database) == Some(ScalarFamily::String)
     }
 
     /// Returns whether the column is nullable.

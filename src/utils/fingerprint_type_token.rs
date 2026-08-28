@@ -5,6 +5,8 @@
 
 use alloc::{borrow::ToOwned, string::String};
 
+use super::scalar_family::scalar_family;
+
 /// Returns a canonical type token for the given SQL data type string.
 ///
 /// Known families map to fixed uppercase tokens (`INT`, `STRING`, …).
@@ -27,12 +29,9 @@ use alloc::{borrow::ToOwned, string::String};
 /// ```
 #[must_use]
 pub fn canonical_type_token(sql_type: &str) -> String {
-    // Trim and match case-insensitively against known families.
     let trimmed = sql_type.trim();
-
-    // Fast path: try to match against known canonical families.
-    if let Some(token) = match_known_type(trimmed) {
-        return token.to_owned();
+    if let Some(family) = scalar_family(trimmed) {
+        return family.token().to_owned();
     }
 
     // Unknown type: emit `OTHER:<lowercase-normalized-db-type>` with
@@ -54,151 +53,6 @@ pub fn canonical_type_token(sql_type: &str) -> String {
         }
     }
     result
-}
-
-/// Maps a trimmed SQL type string to its canonical family token
-/// (case-insensitive).
-///
-/// Returns `None` for types that have no defined family.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one flat table of type spellings, matching how the sqlparser type normalizer states the same knowledge"
-)]
-pub(crate) fn match_known_type(s: &str) -> Option<&'static str> {
-    // Integer family
-    if s.eq_ignore_ascii_case("INT")
-        || s.eq_ignore_ascii_case("INTEGER")
-        || s.eq_ignore_ascii_case("SMALLINT")
-        || s.eq_ignore_ascii_case("BIGINT")
-        || s.eq_ignore_ascii_case("TINYINT")
-        || s.eq_ignore_ascii_case("MEDIUMINT")
-        || s.eq_ignore_ascii_case("INT2")
-        || s.eq_ignore_ascii_case("INT4")
-        || s.eq_ignore_ascii_case("INT8")
-        || s.eq_ignore_ascii_case("SERIAL")
-        || s.eq_ignore_ascii_case("SMALLSERIAL")
-        || s.eq_ignore_ascii_case("BIGSERIAL")
-        || s.eq_ignore_ascii_case("HUGEINT")
-        || s.eq_ignore_ascii_case("INT16")
-        || s.eq_ignore_ascii_case("INT32")
-        || s.eq_ignore_ascii_case("INT64")
-        || s.eq_ignore_ascii_case("INT128")
-        || s.eq_ignore_ascii_case("INT256")
-        || s.eq_ignore_ascii_case("UINT8")
-        || s.eq_ignore_ascii_case("UINT16")
-        || s.eq_ignore_ascii_case("UINT32")
-        || s.eq_ignore_ascii_case("UINT64")
-        || s.eq_ignore_ascii_case("UINT128")
-        || s.eq_ignore_ascii_case("UINT256")
-    {
-        return Some("INT");
-    }
-
-    // Float family
-    if s.eq_ignore_ascii_case("FLOAT")
-        || s.eq_ignore_ascii_case("REAL")
-        || s.eq_ignore_ascii_case("DOUBLE")
-        || s.eq_ignore_ascii_case("DOUBLE PRECISION")
-        || s.eq_ignore_ascii_case("FLOAT4")
-        || s.eq_ignore_ascii_case("FLOAT8")
-        || s.eq_ignore_ascii_case("FLOAT32")
-        || s.eq_ignore_ascii_case("FLOAT64")
-    {
-        return Some("FLOAT");
-    }
-
-    // Decimal family
-    if s.eq_ignore_ascii_case("DECIMAL")
-        || s.eq_ignore_ascii_case("NUMERIC")
-        || s.eq_ignore_ascii_case("NUMBER")
-        || s.eq_ignore_ascii_case("MONEY")
-    {
-        return Some("DECIMAL");
-    }
-
-    // Boolean family
-    if s.eq_ignore_ascii_case("BOOL") || s.eq_ignore_ascii_case("BOOLEAN") {
-        return Some("BOOL");
-    }
-
-    // String family
-    if s.eq_ignore_ascii_case("TEXT")
-        || s.eq_ignore_ascii_case("VARCHAR")
-        || s.eq_ignore_ascii_case("CHAR")
-        || s.eq_ignore_ascii_case("CHARACTER")
-        || s.eq_ignore_ascii_case("CHARACTER VARYING")
-        || s.eq_ignore_ascii_case("NVARCHAR")
-        || s.eq_ignore_ascii_case("NCHAR")
-        || s.eq_ignore_ascii_case("CLOB")
-        || s.eq_ignore_ascii_case("STRING")
-        || s.eq_ignore_ascii_case("TINYTEXT")
-        || s.eq_ignore_ascii_case("MEDIUMTEXT")
-        || s.eq_ignore_ascii_case("LONGTEXT")
-        || s.eq_ignore_ascii_case("FIXEDSTRING")
-    {
-        return Some("STRING");
-    }
-
-    // Bytes family
-    if s.eq_ignore_ascii_case("BYTEA")
-        || s.eq_ignore_ascii_case("BLOB")
-        || s.eq_ignore_ascii_case("BINARY")
-        || s.eq_ignore_ascii_case("VARBINARY")
-        || s.eq_ignore_ascii_case("BYTES")
-        || s.eq_ignore_ascii_case("TINYBLOB")
-        || s.eq_ignore_ascii_case("MEDIUMBLOB")
-        || s.eq_ignore_ascii_case("LONGBLOB")
-    {
-        return Some("BYTES");
-    }
-
-    // Date family
-    if s.eq_ignore_ascii_case("DATE") || s.eq_ignore_ascii_case("DATE32") {
-        return Some("DATE");
-    }
-
-    // Time family
-    if s.eq_ignore_ascii_case("TIME")
-        || s.eq_ignore_ascii_case("TIME WITHOUT TIME ZONE")
-        || s.eq_ignore_ascii_case("TIME WITH TIME ZONE")
-        || s.eq_ignore_ascii_case("TIMETZ")
-    {
-        return Some("TIME");
-    }
-
-    // Timestamp-with-timezone family
-    if s.eq_ignore_ascii_case("TIMESTAMPTZ")
-        || s.eq_ignore_ascii_case("TIMESTAMP WITH TIME ZONE")
-        || s.eq_ignore_ascii_case("TIMESTAMP WITH TIMEZONE")
-    {
-        return Some("TIMESTAMPTZ");
-    }
-
-    // Timestamp family
-    if s.eq_ignore_ascii_case("TIMESTAMP")
-        || s.eq_ignore_ascii_case("TIMESTAMP WITHOUT TIME ZONE")
-        || s.eq_ignore_ascii_case("DATETIME")
-        || s.eq_ignore_ascii_case("DATETIME64")
-    {
-        return Some("TIMESTAMP");
-    }
-
-    // UUID family
-    if s.eq_ignore_ascii_case("UUID") {
-        return Some("UUID");
-    }
-
-    // JSONB family (Postgres binary JSON)
-    if s.eq_ignore_ascii_case("JSONB") {
-        return Some("JSONB");
-    }
-
-    // JSON family
-    if s.eq_ignore_ascii_case("JSON") {
-        return Some("JSON");
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -386,5 +240,28 @@ mod tests {
     fn test_whitespace_trimming() {
         assert_eq!(canonical_type_token("  INT  "), "INT");
         assert_eq!(canonical_type_token(" text "), "STRING");
+    }
+
+    #[test]
+    fn canonical_outputs_remain_stable() {
+        for (declared_type, expected) in [
+            ("INT", "INT"),
+            ("DOUBLE PRECISION", "FLOAT"),
+            ("NUMERIC", "DECIMAL"),
+            ("BOOLEAN", "BOOL"),
+            ("CHARACTER VARYING", "STRING"),
+            ("VARBINARY", "BYTES"),
+            ("UUID", "UUID"),
+            ("DATE", "DATE"),
+            ("TIME WITH TIME ZONE", "TIME"),
+            ("TIMESTAMP WITHOUT TIME ZONE", "TIMESTAMP"),
+            ("TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ"),
+            ("JSON", "JSON"),
+            ("JSONB", "JSONB"),
+            (" Geometry ", "OTHER:geometry"),
+            ("INTERVAL  YEAR  TO  MONTH", "OTHER:interval year to month"),
+        ] {
+            assert_eq!(canonical_type_token(declared_type), expected);
+        }
     }
 }
