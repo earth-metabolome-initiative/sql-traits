@@ -1,8 +1,12 @@
 //! Submodule providing a trait for describing SQL Role-like entities.
 
+use alloc::borrow::Cow;
 use core::fmt::Debug;
 
-use crate::traits::{DatabaseLike, Metadata};
+use crate::{
+    traits::{DatabaseLike, Metadata},
+    utils::identifier_resolution::normalize_identifier,
+};
 
 /// A trait for types that can be treated as SQL roles.
 ///
@@ -28,6 +32,16 @@ pub trait RoleLike: Debug + Clone + Ord + Eq + Metadata + Send + Sync {
     /// # }
     /// ```
     fn name(&self) -> &str;
+
+    /// Returns whether the role name was quoted.
+    fn name_is_quoted(&self) -> bool {
+        false
+    }
+
+    /// Returns the canonical stored role name.
+    fn stored_name(&self) -> Cow<'_, str> {
+        normalize_identifier(self.name(), self.name_is_quoted())
+    }
 
     /// Returns whether this role has the `SUPERUSER` attribute.
     ///
@@ -296,6 +310,14 @@ impl<T: RoleLike> RoleLike for &T {
         (*self).name()
     }
 
+    fn name_is_quoted(&self) -> bool {
+        (*self).name_is_quoted()
+    }
+
+    fn stored_name(&self) -> Cow<'_, str> {
+        (*self).stored_name()
+    }
+
     fn is_superuser(&self) -> bool {
         (*self).is_superuser()
     }
@@ -375,6 +397,8 @@ mod tests {
         let role_ref: &<ParserDB as DatabaseLike>::Role = role;
 
         assert_eq!(<&_ as RoleLike>::name(&role_ref), "test_role");
+        assert!(!<&_ as RoleLike>::name_is_quoted(&role_ref));
+        assert_eq!(<&_ as RoleLike>::stored_name(&role_ref), "test_role");
         assert!(<&_ as RoleLike>::is_superuser(&role_ref));
         assert!(<&_ as RoleLike>::can_create_db(&role_ref));
         assert!(<&_ as RoleLike>::can_create_role(&role_ref));

@@ -49,7 +49,7 @@ use crate::{
     traits::{ColumnLike, FunctionLike, IndexLike, TableLike},
     utils::{
         columns_in_expression,
-        identifier_resolution::{identifiers_match, is_public_pseudo_role},
+        identifier_resolution::{identifiers_match, is_public_pseudo_role, normalize_identifier},
         last_str, normalize_postgres_type_cow, normalize_sqlparser_type,
         object_name::{
             object_name_identifiers, object_name_last_part, resolve_table_object_name_in_iter,
@@ -1194,42 +1194,38 @@ impl ParserDBBuilder {
         detached_indices
     }
 
-    /// Checks if a role with the given name is referenced by any grants.
-    ///
-    /// Returns `true` if the role is a grantee in any table or column grant.
-    fn is_role_referenced(&self, role_name: &str, role_quoted: bool) -> bool {
-        let check_grantees = |grantees: &[sqlparser::ast::Grantee]| -> bool {
-            grantees.iter().any(|g| {
-                matches!(
-                    &g.name,
-                    Some(GranteeName::ObjectName(name))
-                        if object_name_last_identifier(name).is_some_and(|grantee_ident| {
-                            identifiers_match(
-                                grantee_ident.value.as_str(),
-                                grantee_ident.quote_style.is_some(),
-                                role_name,
-                                role_quoted,
-                            )
-                        })
-                )
+    /// Returns whether a modeled blocking dependency names the role.
+    fn is_role_referenced(&self, role_ident: &Ident) -> bool {
+        let stored_name = stored_role_name(role_ident);
+        let grantees_name_role = |grantees: &[Grantee]| {
+            grantees.iter().any(|grantee| {
+                grantee_role_ident(grantee)
+                    .is_some_and(|grantee_ident| idents_match(grantee_ident, role_ident))
             })
         };
 
-        // Check table grants
-        for (grant, ()) in self.table_grants() {
-            if check_grantees(&grant.grantees) {
-                return true;
-            }
-        }
-
-        // Check column grants
-        for (grant, ()) in self.column_grants() {
-            if check_grantees(&grant.grantees) {
-                return true;
-            }
-        }
-
-        false
+        self.table_grants().iter().any(|(grant, ())| grantees_name_role(&grant.grantees))
+            || self.column_grants().iter().any(|(grant, ())| grantees_name_role(&grant.grantees))
+            || self
+                .tables()
+                .iter()
+                .any(|(_, metadata)| metadata.owner() == Some(stored_name.as_str()))
+            || self
+                .functions()
+                .iter()
+                .any(|(_, metadata)| metadata.owner() == Some(stored_name.as_str()))
+            || self
+                .schemas()
+                .iter()
+                .any(|(schema, ())| schema.authorization() == Some(stored_name.as_str()))
+            || self.policies().iter().any(|(policy, _)| {
+                policy
+                    .to
+                    .iter()
+                    .flatten()
+                    .filter_map(policy_role_ident)
+                    .any(|policy_ident| idents_match(policy_ident, role_ident))
+            })
     }
 
     /// Checks if a schema contains any objects (tables).
@@ -2099,6 +2095,10 @@ fn role_matches_lookup_ident(role: &CreateRole, lookup_ident: &Ident) -> bool {
     })
 }
 
+fn stored_role_name(role_ident: &Ident) -> String {
+    normalize_identifier(&role_ident.value, role_ident.quote_style.is_some()).into_owned()
+}
+
 /// Returns the identifier a grantee resolves a role by, or `None` when the
 /// grantee names no role of its own: the `PUBLIC` pseudo-role, however
 /// spelled, or a grantee whose name is not a plain identifier.
@@ -2912,11 +2912,7 @@ fn remove_copied_column_constraint(
     }
 }
 
-/// Rewrites every grantee naming `previous` so that it names `replacement`.
-///
-/// A grant in PostgreSQL holds the role itself rather than its spelling, so it
-/// survives a rename. Grants are the references `DROP ROLE` refuses to strand,
-/// so they are the ones a rename carries along.
+/// Rewrites every grant grantee naming `previous`.
 fn rename_grantee_role(grants: &mut [(Arc<Grant>, ())], previous: &Ident, replacement: &Ident) {
     let names_previous = |grantee: &Grantee| {
         matches!(
@@ -2939,6 +2935,56 @@ fn rename_grantee_role(grants: &mut [(Arc<Grant>, ())], previous: &Ident, replac
                     )])));
             }
         }
+    }
+}
+
+fn rename_role_references(builder: &mut ParserDBBuilder, previous: &Ident, replacement: &Ident) {
+    let previous_name = stored_role_name(previous);
+    let replacement_name = stored_role_name(replacement);
+
+    for (_, metadata) in builder.tables_mut() {
+        if metadata.owner() == Some(previous_name.as_str()) {
+            metadata.set_owner(Some(replacement_name.clone()));
+        }
+    }
+    for (_, metadata) in builder.functions_mut() {
+        if metadata.owner() == Some(previous_name.as_str()) {
+            metadata.set_owner(Some(replacement_name.clone()));
+        }
+    }
+    for (schema, ()) in builder.schemas_mut() {
+        if schema.authorization() == Some(previous_name.as_str()) {
+            let replacement_schema = Schema::with_authorization_and_quoted(
+                schema.name().to_string(),
+                replacement_name.clone(),
+                schema.is_quoted(),
+            );
+            *schema = Arc::new(replacement_schema);
+        }
+    }
+    for (policy, _) in builder.policies_mut() {
+        if let Some(owners) = &mut Arc::make_mut(policy).to {
+            for owner in owners {
+                if let Owner::Ident(role_ident) = owner
+                    && idents_match(role_ident, previous)
+                {
+                    *role_ident = replacement.clone();
+                }
+            }
+        }
+    }
+    for (role, ()) in builder.roles_mut() {
+        for parent in &mut Arc::make_mut(role).in_role {
+            if idents_match(parent, previous) {
+                *parent = replacement.clone();
+            }
+        }
+    }
+}
+
+fn remove_role_memberships(roles: &mut [(Arc<CreateRole>, ())], removed: &Ident) {
+    for (role, ()) in roles {
+        Arc::make_mut(role).in_role.retain(|parent| !idents_match(parent, removed));
     }
 }
 
@@ -5580,7 +5626,6 @@ impl ParserDB {
                             continue;
                         };
                         let role_name = role_ident.value.as_str();
-                        let role_quoted = role_ident.quote_style.is_some();
 
                         // Check if role exists
                         let role_exists = builder
@@ -5597,17 +5642,16 @@ impl ParserDB {
                             });
                         }
 
-                        // Check for references from grants
-                        if builder.is_role_referenced(role_name, role_quoted) {
+                        if builder.is_role_referenced(role_ident) {
                             return Err(crate::errors::Error::RoleReferenced {
                                 role_name: role_name.to_string(),
                             });
                         }
 
-                        // Remove the role
+                        remove_role_memberships(builder.roles_mut(), role_ident);
                         builder
                             .roles_mut()
-                            .retain(|(r, ())| !role_matches_lookup_ident(r, role_ident));
+                            .retain(|(role, ())| !role_matches_lookup_ident(role, role_ident));
                     }
                 }
                 Statement::AlterRole {
@@ -5644,10 +5688,7 @@ impl ParserDB {
                         }
                     }
 
-                    // A grant survives a rename in PostgreSQL because it holds
-                    // the role itself rather than its spelling. Grants are the
-                    // references `DROP ROLE` refuses to strand, so they are the
-                    // ones a rename carries along.
+                    rename_role_references(&mut builder, &name, &new_name);
                     rename_grantee_role(builder.table_grants_mut(), &name, &new_name);
                     rename_grantee_role(builder.column_grants_mut(), &name, &new_name);
                 }
@@ -5991,7 +6032,7 @@ impl ParserDB {
                                     _ => None,
                                 };
                                 let owner = match new_owner {
-                                    Owner::Ident(ident) => Some(ident.value),
+                                    Owner::Ident(ident) => Some(stored_role_name(&ident)),
                                     // These name whoever runs the statement,
                                     // so the owner changed to one the input
                                     // never spells and the model can no longer
@@ -6262,7 +6303,7 @@ impl ParserDB {
                             (
                                 auth.value.clone(),
                                 auth.quote_style.is_some(),
-                                Some(auth.value.clone()),
+                                Some(stored_role_name(auth)),
                             )
                         }
                         SchemaName::NamedAuthorization(name, auth) => {
@@ -6273,7 +6314,7 @@ impl ParserDB {
                                     |ident| ident.value.clone(),
                                 ),
                                 schema_ident.is_some_and(|ident| ident.quote_style.is_some()),
-                                Some(auth.value.clone()),
+                                Some(stored_role_name(auth)),
                             )
                         }
                     };
@@ -6465,7 +6506,7 @@ impl ParserDB {
                             }
 
                             let owner = match new_owner {
-                                Owner::Ident(ident) => Some(ident.value),
+                                Owner::Ident(ident) => Some(stored_role_name(&ident)),
                                 // These name whoever runs the statement, so the
                                 // owner changed to one the input never spells
                                 // and the model can no longer name it either.
@@ -6662,7 +6703,7 @@ impl ParserDB {
                                 }
                                 // Update the authorization
                                 let owner_name = match owner {
-                                    sqlparser::ast::Owner::Ident(ident) => ident.value.clone(),
+                                    sqlparser::ast::Owner::Ident(ident) => stored_role_name(ident),
                                     sqlparser::ast::Owner::CurrentRole
                                     | sqlparser::ast::Owner::CurrentUser
                                     | sqlparser::ast::Owner::SessionUser => continue,

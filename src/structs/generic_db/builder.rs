@@ -608,7 +608,9 @@ where
         builder.triggers.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         builder.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
-        builder.roles.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        builder
+            .roles
+            .sort_unstable_by(|(left, _), (right, _)| left.stored_name().cmp(&right.stored_name()));
         builder.schemas.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         // Grants are not sorted as their order may be significant
 

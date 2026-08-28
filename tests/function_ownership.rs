@@ -85,27 +85,47 @@ fn a_session_dependent_owner_leaves_no_role_named() {
     }
 }
 
-/// The role is reported as written, quoted or not, which is what `role` does
-/// with the names it stores too, so a caller comparing the two agrees with
-/// itself.
+/// Unquoted owners fold while quoted owners retain case.
 #[test]
-fn the_role_is_reported_as_the_statement_spelled_it() {
-    for spelling in ["App_Reader", "\"App_Reader\""] {
+fn owner_preserves_role_identity() {
+    for (spelling, expected) in [("App_Reader", "app_reader"), ("\"App_Reader\"", "App_Reader")] {
         let database = db(&format!(
             "CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';
              ALTER FUNCTION f() OWNER TO {spelling};"
         ));
         let function = database.function("f").expect("f exists");
 
-        assert_eq!(function.owner(&database), Ok(Some("App_Reader")), "{spelling} was folded");
+        assert_eq!(function.owner(&database), Ok(Some(expected)));
     }
 
-    let database = db("CREATE ROLE App_Reader;
+    let database = parse(
+        "CREATE ROLE actor;
+         CREATE ROLE \"ACTOR\" BYPASSRLS;
          CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';
-         ALTER FUNCTION f() OWNER TO App_Reader;");
-    let owner = database.function("f").expect("f exists").owner(&database);
-    assert_eq!(owner, Ok(Some("App_Reader")));
-    assert!(database.role("App_Reader").is_some(), "the owner names a role `role` also finds");
+         ALTER FUNCTION f() OWNER TO ACTOR;",
+    )
+    .expect("schema builds");
+    let function = database.function("f").expect("f exists");
+    let owner = function.owner(&database).expect("f is in this database").expect("owner exists");
+    let role = database.role(owner).expect("owner resolves");
+
+    assert_eq!(owner, "actor");
+    assert_eq!(role.name(), "actor");
+    assert!(!role.can_bypass_rls());
+
+    let database = parse(
+        "CREATE ROLE App_Reader BYPASSRLS;
+         CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';
+         ALTER FUNCTION f() OWNER TO App_Reader;",
+    )
+    .expect("schema builds");
+    let function = database.function("f").expect("f exists");
+    let owner = function.owner(&database).expect("f is in this database").expect("owner exists");
+    let role = database.role(owner).expect("owner resolves");
+
+    assert_eq!(owner, "app_reader");
+    assert_eq!(role.name(), "App_Reader");
+    assert!(role.can_bypass_rls());
 }
 
 /// A statement naming no argument list reaches the only function carrying the

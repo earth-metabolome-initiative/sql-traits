@@ -679,7 +679,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ```
     fn roles(&self) -> impl Iterator<Item = &Self::Role>;
 
-    /// Returns a role by name, if it exists.
+    /// Returns a role by canonical stored name, if it exists.
     ///
     /// # Example
     ///
@@ -700,7 +700,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// # }
     /// ```
     fn role(&self, name: &str) -> Option<&Self::Role> {
-        self.roles().find(|r| r.name() == name)
+        self.roles().find(|role| role.stored_name().as_ref() == name)
     }
 
     /// Returns whether the database has any roles defined.

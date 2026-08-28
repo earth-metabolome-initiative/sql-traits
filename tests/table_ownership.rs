@@ -81,27 +81,47 @@ fn a_session_dependent_owner_leaves_no_role_named() {
     }
 }
 
-/// The role is reported as written, quoted or not, which is what `role` does
-/// with the names it stores too, so a caller comparing the two agrees with
-/// itself.
+/// Unquoted owners fold while quoted owners retain case.
 #[test]
-fn the_role_is_reported_as_the_statement_spelled_it() {
-    for spelling in ["App_Owner", "\"App_Owner\""] {
+fn owner_preserves_role_identity() {
+    for (spelling, expected) in [("App_Owner", "app_owner"), ("\"App_Owner\"", "App_Owner")] {
         let database = db(&format!(
             "CREATE TABLE docs (id uuid PRIMARY KEY);
              ALTER TABLE docs OWNER TO {spelling};"
         ));
         let docs = database.table(None, "docs").expect("docs exists");
 
-        assert_eq!(docs.owner(&database), Ok(Some("App_Owner")), "{spelling} was folded");
+        assert_eq!(docs.owner(&database), Ok(Some(expected)));
     }
 
-    let database = db("CREATE ROLE App_Owner;
+    let database = parse(
+        "CREATE ROLE actor;
+         CREATE ROLE \"ACTOR\" BYPASSRLS;
          CREATE TABLE docs (id uuid PRIMARY KEY);
-         ALTER TABLE docs OWNER TO App_Owner;");
-    let owner = database.table(None, "docs").expect("docs exists").owner(&database);
-    assert_eq!(owner, Ok(Some("App_Owner")));
-    assert!(database.role("App_Owner").is_some(), "the owner names a role `role` also finds");
+         ALTER TABLE docs OWNER TO ACTOR;",
+    )
+    .expect("schema builds");
+    let docs = database.table(None, "docs").expect("docs exists");
+    let owner = docs.owner(&database).expect("docs is in this database").expect("owner exists");
+    let role = database.role(owner).expect("owner resolves");
+
+    assert_eq!(owner, "actor");
+    assert_eq!(role.name(), "actor");
+    assert!(!role.can_bypass_rls());
+
+    let database = parse(
+        "CREATE ROLE App_Owner BYPASSRLS;
+         CREATE TABLE docs (id uuid PRIMARY KEY);
+         ALTER TABLE docs OWNER TO App_Owner;",
+    )
+    .expect("schema builds");
+    let docs = database.table(None, "docs").expect("docs exists");
+    let owner = docs.owner(&database).expect("docs is in this database").expect("owner exists");
+    let role = database.role(owner).expect("owner resolves");
+
+    assert_eq!(owner, "app_owner");
+    assert_eq!(role.name(), "App_Owner");
+    assert!(role.can_bypass_rls());
 }
 
 /// A rename rebuilds the stored node, so anything hung off the old one has to
