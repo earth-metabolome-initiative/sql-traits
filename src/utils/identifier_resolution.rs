@@ -168,8 +168,8 @@ mod tests {
         let normalized = normalize_identifier(s, true);
         assert!(normalized.contains('c'));
         // Quoted should keep the lowercase 'c' from the input;
-        // and should NOT lowercase any letter (it's a no-op on already-lowercase
-        // here, but the contract is "preserve case").
+        // and should NOT lowercase any letter (it's a no-op on
+        // already-lowercase here, but the contract is "preserve case").
         assert_eq!(normalize_identifier("Foo", true), "Foo");
     }
 

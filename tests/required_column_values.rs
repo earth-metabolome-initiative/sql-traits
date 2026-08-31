@@ -74,8 +74,9 @@ fn a_child_requires_a_value_however_the_parents_key_was_written() {
 
 #[test]
 fn a_key_added_later_reaches_a_grandchild_too() {
-    // The key itself stays with the parent, because an `INHERITS` child receives
-    // no key, but the requirement it implies travels the whole chain.
+    // The key itself stays with the parent, because an `INHERITS` child
+    // receives no key, but the requirement it implies travels the whole
+    // chain.
     let database = database(
         "CREATE TABLE par (id INT, code TEXT);
          CREATE TABLE chi () INHERITS (par);

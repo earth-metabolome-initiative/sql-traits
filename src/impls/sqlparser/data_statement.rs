@@ -238,8 +238,8 @@ mod tests {
         let db = schema_db();
         let statement =
             parse_one("WITH recent AS (SELECT user_id FROM orders) SELECT user_id FROM recent");
-        // `orders` (CTE body) resolves; `recent` (the CTE name) does not match a
-        // base table and is skipped.
+        // `orders` (CTE body) resolves; `recent` (the CTE name) does not match
+        // a base table and is skipped.
         assert_eq!(referenced_names(as_query(&statement), &db), vec!["orders".to_string()]);
     }
 

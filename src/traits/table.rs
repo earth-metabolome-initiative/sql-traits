@@ -4431,10 +4431,12 @@ mod tests {
             let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
 
             let display = format!("{fp}");
-            // Format: "<algorithm>:v<canonicalization_version>:p<profile_id>:<hex>"
+            // Format: "<algorithm>:v<canonicalization_version>:p<profile_id>:
+            // <hex>"
             assert!(display.starts_with("sha2-256:v1:p1:"));
             assert!(display.ends_with(&fp.to_hex()));
-            // "sha2-256" (8) + ":" + "v1" (2) + ":" + "p1" (2) + ":" + 64 hex chars
+            // "sha2-256" (8) + ":" + "v1" (2) + ":" + "p1" (2) + ":" + 64 hex
+            // chars
             assert_eq!(display.len(), 8 + 1 + 2 + 1 + 2 + 1 + 64);
         }
 
@@ -4934,7 +4936,8 @@ mod tests {
             let baseline_sql =
                 "CREATE TABLE users (id INT PRIMARY KEY, name TEXT, score INT NOT NULL);";
 
-            // (mutated_field_label, mutated_sql, lookup_schema, lookup_table_name)
+            // (mutated_field_label, mutated_sql, lookup_schema,
+            // lookup_table_name)
             let mutations: &[(&str, &str, Option<&str>, &str)] = &[
                 (
                     "schema_name",

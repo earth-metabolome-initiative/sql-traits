@@ -44,7 +44,8 @@ impl RoleLike for CreateRole {
     }
 
     fn inherits(&self) -> bool {
-        // Default is INHERIT in PostgreSQL, so we check if explicitly set to false
+        // Default is INHERIT in PostgreSQL, so we check if explicitly set to
+        // false
         self.inherit != Some(false)
     }
 

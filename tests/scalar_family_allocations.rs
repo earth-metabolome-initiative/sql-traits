@@ -19,13 +19,15 @@ static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        // SAFETY: The caller provides the allocation contract required by `System`.
+        // SAFETY: The caller provides the allocation contract required by
+        // `System`.
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        // SAFETY: The caller provides the allocation contract required by `System`.
+        // SAFETY: The caller provides the allocation contract required by
+        // `System`.
         unsafe { System.alloc_zeroed(layout) }
     }
 
@@ -37,7 +39,8 @@ unsafe impl GlobalAlloc for CountingAllocator {
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        // SAFETY: The caller provides the reallocation contract required by `System`.
+        // SAFETY: The caller provides the reallocation contract required by
+        // `System`.
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }

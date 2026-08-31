@@ -36,7 +36,8 @@ fn evaluate_constant_expr<C: ColumnLike>(columns: &[(&C, bool)], expr: &Expr) ->
                 for (column, is_nullable) in columns {
                     if column.column_name() == ident.value {
                         // If column is NOT NULL, IS NOT NULL is TRUE.
-                        // If column is NULLABLE, IS NOT NULL is variable (None).
+                        // If column is NULLABLE, IS NOT NULL is variable
+                        // (None).
                         return if *is_nullable { None } else { Some(true) };
                     }
                 }
@@ -300,9 +301,11 @@ where
                     inner_col_ident,
                 ))) = &inner_args_list[0]
             {
-                // We need to resolve the bound for `inner_col` with the SAME direction.
-                // len(A) < len(B) AND len(B) < 10 => len(A) < 10 (Upper transitive)
-                // len(A) > len(B) AND len(B) > 10 => len(A) > 10 (Lower transitive)
+                // We need to resolve the bound for `inner_col` with the SAME
+                // direction. len(A) < len(B) AND len(B) < 10 =>
+                // len(A) < 10 (Upper transitive)
+                // len(A) > len(B) AND len(B) > 10 => len(A) > 10 (Lower
+                // transitive)
 
                 // Avoid cycles
                 if visited_cols.contains(&inner_col_ident.value) {
@@ -358,9 +361,10 @@ where
                 return Ok(Some(bound));
             }
             // Check reversed comparison: right <op> func(col)
-            // If checking Upper Bound (func(col) < N), we might see N > func(col).
-            // N > func(col) is equivalent to func(col) < N.
-            // If `op` is Gt, `swap` is Lt. `get_length_bound` accepts `Lt` for `Upper`.
+            // If checking Upper Bound (func(col) < N), we might see N >
+            // func(col). N > func(col) is equivalent to func(col) <
+            // N. If `op` is Gt, `swap` is Lt. `get_length_bound`
+            // accepts `Lt` for `Upper`.
             if let Some(bound) = get_length_bound(
                 database,
                 right,
@@ -1088,8 +1092,8 @@ pub trait CheckConstraintLike:
             return false;
         };
 
-        // Left side should be all NULL checks, right side all NOT NULL checks (or vice
-        // versa)
+        // Left side should be all NULL checks, right side all NOT NULL checks
+        // (or vice versa)
         if let (Some(null_cols), Some(not_null_cols)) =
             (extract_null_columns(left, true), extract_null_columns(right, false))
         {

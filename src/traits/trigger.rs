@@ -756,7 +756,8 @@ mod tests {
         let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT);")
             .expect("Failed to create DB");
 
-        // function() should return None because "non_existent_function" is not in db
+        // function() should return None because "non_existent_function" is not
+        // in db
         assert!(trigger.function(&db).is_none());
         assert!(!trigger.is_maintenance_trigger(&db).expect("maintenance check"));
         assert_eq!(
@@ -767,9 +768,9 @@ mod tests {
 
     #[test]
     fn test_trigger_function_no_body() {
-        // Defines a function with RETURN expression which is not a string literal
-        // block. FunctionLike implementation returns None for body() in this
-        // case.
+        // Defines a function with RETURN expression which is not a string
+        // literal block. FunctionLike implementation returns None for
+        // body() in this case.
         let sql = r"
             CREATE TABLE users (id INT, val INT);
             CREATE FUNCTION atomic_calc() RETURNS INT RETURN 1;
@@ -787,8 +788,8 @@ mod tests {
         // Function exists
         assert!(trigger_ref.function(&db).is_some());
 
-        // But body() is None because it's not a string literal body (internal logic of
-        // impls/sqlparser/create_function.rs)
+        // But body() is None because it's not a string literal body (internal
+        // logic of impls/sqlparser/create_function.rs)
         assert!(trigger_ref.function(&db).unwrap().body().is_none());
 
         assert!(!trigger_ref.is_maintenance_trigger(&db).expect("maintenance check"));

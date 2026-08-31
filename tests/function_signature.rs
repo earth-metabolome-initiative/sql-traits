@@ -14,6 +14,12 @@ fn db(sql: &str) -> ParserDB {
     ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema builds")
 }
 
+/// Reads the written names out of collected argument targets, borrowing from
+/// the collected values instead of from the iterator item.
+fn names_of<'a>(arguments: &'a [Option<TargetName<'_>>]) -> Vec<Option<&'a str>> {
+    arguments.iter().map(|name| name.as_ref().map(TargetName::name)).collect()
+}
+
 #[test]
 fn the_language_clause_is_reported_as_written_and_as_stored() {
     let database = db("CREATE FUNCTION one() RETURNS INT LANGUAGE SQL AS 'SELECT 1';
@@ -62,8 +68,8 @@ fn arguments_report_the_names_they_are_declared_under() {
              LANGUAGE sql AS 'SELECT true';");
     let function = database.function("is_member").expect("is_member exists");
 
-    let names: Vec<Option<&str>> =
-        function.argument_names(&database).map(|name| name.map(|name| name.name())).collect();
+    let arguments: Vec<_> = function.argument_names(&database).collect();
+    let names: Vec<Option<&str>> = names_of(&arguments);
     assert_eq!(names, vec![Some("doc_id"), Some("role")]);
 
     let stored: Vec<Option<String>> = function
@@ -81,8 +87,8 @@ fn a_quoted_argument_name_keeps_its_case() {
              AS 'SELECT true';"#);
     let function = database.function("f").expect("f exists");
 
-    let names: Vec<Option<&str>> =
-        function.argument_names(&database).map(|name| name.map(|name| name.name())).collect();
+    let arguments: Vec<_> = function.argument_names(&database).collect();
+    let names: Vec<Option<&str>> = names_of(&arguments);
     assert_eq!(names, vec![Some("DocId"), Some("Role")]);
     assert!(
         function
@@ -116,8 +122,8 @@ fn argument_names_line_up_with_argument_types() {
              AS 'SELECT true';");
     let function = database.function("f").expect("f exists");
 
-    let names: Vec<Option<&str>> =
-        function.argument_names(&database).map(|name| name.map(|name| name.name())).collect();
+    let arguments: Vec<_> = function.argument_names(&database).collect();
+    let names: Vec<Option<&str>> = names_of(&arguments);
     let types: Vec<String> =
         function.argument_type_names(&database).map(|name| name.to_string()).collect();
 
@@ -193,8 +199,8 @@ fn out_and_default_carrying_arguments_keep_their_positions() {
              RETURNS INT LANGUAGE sql AS 'SELECT 1';");
     let function = database.function("f").expect("f exists");
 
-    let names: Vec<Option<&str>> =
-        function.argument_names(&database).map(|name| name.map(|name| name.name())).collect();
+    let arguments: Vec<_> = function.argument_names(&database).collect();
+    let names: Vec<Option<&str>> = names_of(&arguments);
     let types: Vec<String> =
         function.argument_type_names(&database).map(|name| name.to_string()).collect();
 

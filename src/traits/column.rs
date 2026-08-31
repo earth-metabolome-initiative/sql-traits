@@ -24,7 +24,7 @@ pub enum MySqlCollationPadding {
 }
 
 /// Collation metadata for one named comparison rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NamedColumnCollation<'a> {
     name: TargetName<'a>,
     postgres_deterministic: Option<bool>,
@@ -55,7 +55,7 @@ impl<'a> NamedColumnCollation<'a> {
     /// Returns the collation name.
     #[must_use]
     pub fn name(&self) -> TargetName<'a> {
-        self.name
+        self.name.clone()
     }
 
     /// Returns PostgreSQL determinism, or `None` when it is unknown.
@@ -72,7 +72,7 @@ impl<'a> NamedColumnCollation<'a> {
 }
 
 /// How a column resolves text comparison rules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ColumnCollation<'a> {
     /// No declared rule is present, so the database default applies.
     DatabaseDefault,
