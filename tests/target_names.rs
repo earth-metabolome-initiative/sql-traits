@@ -218,7 +218,8 @@ fn column_grant_lists_every_table_target() {
          GRANT SELECT (id, name) ON users, posts TO reader;",
     );
     let grant = db.column_grants().next().expect("the grant exists");
-    let names: Vec<_> = grant.target_table_names().map(|target| target.name()).collect();
+    let targets: Vec<_> = grant.target_table_names().collect();
+    let names: Vec<_> = targets.iter().map(TargetName::name).collect();
 
     assert_eq!(names, ["users", "posts"]);
 }
@@ -285,7 +286,7 @@ fn policy_targets_by_schema<DB: DatabaseLike>(database: &DB) -> Vec<(String, Opt
         .map(|policy| {
             let target = policy.target_table_name();
             let schema = database
-                .resolve_target_table(target)
+                .resolve_target_table(target.clone())
                 .expect("the target is unambiguous")
                 .and_then(|table| table.table_schema().map(ToString::to_string));
             (target.to_string(), schema)

@@ -520,7 +520,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
         &self,
         target: TargetName<'_>,
     ) -> Result<Option<&Self::Table>, LookupError> {
-        resolve_target_on_search_path_in_iter(self.tables(), target, self.search_path())
+        resolve_target_on_search_path_in_iter(self.tables(), &target, self.search_path())
     }
 
     /// Returns the table ID for the given table object according to its

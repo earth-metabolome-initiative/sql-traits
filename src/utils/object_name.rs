@@ -195,7 +195,7 @@ fn target_name_of_idents<'a>(
 
 /// Returns whether a table matches a written target name, reading a table
 /// stored without a schema as residing in the default schema `public`.
-pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: TargetName<'_>) -> bool {
+pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: &TargetName<'_>) -> bool {
     if !identifiers_match(
         table.table_name(),
         table.table_name_is_quoted(),
@@ -237,7 +237,7 @@ pub(crate) fn render_table_candidate<T: TableLike>(table: &T) -> String {
 /// Returns [`LookupError::AmbiguousTableLookup`] when more than one candidate
 /// matches.
 pub(crate) fn resolve_target_from_candidates<'a, T: TableLike>(
-    target: TargetName<'_>,
+    target: &TargetName<'_>,
     candidates: &[&'a T],
 ) -> Result<Option<&'a T>, LookupError> {
     match candidates {
@@ -265,7 +265,7 @@ pub(crate) fn resolve_target_from_candidates<'a, T: TableLike>(
 /// than one table.
 pub(crate) fn resolve_target_in_iter<'a, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
-    target: TargetName<'_>,
+    target: &TargetName<'_>,
 ) -> Result<Option<&'a T>, LookupError> {
     let candidates: Vec<&T> = tables.filter(|table| table_matches_target(*table, target)).collect();
     resolve_target_from_candidates(target, &candidates)
@@ -283,7 +283,7 @@ pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
     object_name: &ObjectName,
 ) -> Result<Option<&'a T>, LookupError> {
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-    resolve_target_in_iter(tables, target_name_of_idents(schema_ident, table_ident))
+    resolve_target_in_iter(tables, &target_name_of_idents(schema_ident, table_ident))
 }
 
 /// Resolves a written target name, trying each schema on `search_path` in turn
@@ -301,7 +301,7 @@ pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
 /// statement wrote.
 pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
-    target: TargetName<'_>,
+    target: &TargetName<'_>,
     search_path: impl Iterator<Item = (&'path str, bool)>,
 ) -> Result<Option<&'a T>, LookupError> {
     if target.schema().is_some() {
@@ -310,11 +310,11 @@ pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
 
     let table_refs: Vec<&T> = tables.collect();
     for (schema_name, schema_quoted) in search_path {
-        let qualified = target.with_schema(schema_name, schema_quoted);
+        let qualified = target.clone().with_schema(schema_name, schema_quoted);
         let candidates: Vec<&T> = table_refs
             .iter()
             .copied()
-            .filter(|table| table_matches_target(*table, qualified))
+            .filter(|table| table_matches_target(*table, &qualified))
             .collect();
         if !candidates.is_empty() {
             // Reported under the written name: the entry qualifier is
@@ -341,7 +341,7 @@ pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, 'path, T: Tab
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
     resolve_target_on_search_path_in_iter(
         tables,
-        target_name_of_idents(schema_ident, table_ident),
+        &target_name_of_idents(schema_ident, table_ident),
         search_path,
     )
 }
@@ -524,26 +524,26 @@ mod tests {
         let users = find(&tables, "users");
         let scoped = find(&tables, "scoped");
 
-        assert!(table_matches_target(users, TargetName::new("users", false)));
-        assert!(!table_matches_target(users, TargetName::new("orders", false)));
+        assert!(table_matches_target(users, &TargetName::new("users", false)));
+        assert!(!table_matches_target(users, &TargetName::new("orders", false)));
         assert!(table_matches_target(
             scoped,
-            TargetName::new("scoped", false).with_schema("s", false)
+            &TargetName::new("scoped", false).with_schema("s", false)
         ));
         // The two spellings of the default schema are one place.
         assert!(table_matches_target(
             users,
-            TargetName::new("users", false).with_schema("public", false)
+            &TargetName::new("users", false).with_schema("public", false)
         ));
         assert!(table_matches_target(
             find(&tables, "only_pub"),
-            TargetName::new("only_pub", false)
+            &TargetName::new("only_pub", false)
         ));
         // A table in another schema stays unreachable without its qualifier.
-        assert!(!table_matches_target(scoped, TargetName::new("scoped", false)));
+        assert!(!table_matches_target(scoped, &TargetName::new("scoped", false)));
         assert!(!table_matches_target(
             users,
-            TargetName::new("users", false).with_schema("s", false)
+            &TargetName::new("users", false).with_schema("s", false)
         ));
     }
 
@@ -564,10 +564,10 @@ mod tests {
         let target = TargetName::new("users", false);
 
         let empty: [&CreateTable; 0] = [];
-        assert!(resolve_target_from_candidates(target, &empty).unwrap().is_none());
-        assert!(resolve_target_from_candidates(target, &[users]).unwrap().is_some());
+        assert!(resolve_target_from_candidates(&target, &empty).unwrap().is_none());
+        assert!(resolve_target_from_candidates(&target, &[users]).unwrap().is_some());
         assert!(matches!(
-            resolve_target_from_candidates(target, &[users, scoped]),
+            resolve_target_from_candidates(&target, &[users, scoped]),
             Err(LookupError::AmbiguousTableLookup { .. })
         ));
     }

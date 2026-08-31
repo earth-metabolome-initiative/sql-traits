@@ -162,9 +162,9 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// )?;
     /// let is_member = db.function("is_member").expect("Function should exist");
     /// let names: Vec<_> = is_member.argument_names(&db).collect();
-    /// assert_eq!(names[0].map(|name| name.name()), Some("doc_id"));
-    /// assert_eq!(names[1].map(|name| name.name()), Some("Role"));
-    /// assert!(names[1].expect("Argument should be named").name_is_quoted());
+    /// assert_eq!(names[0].as_ref().map(|name| name.name()), Some("doc_id"));
+    /// assert_eq!(names[1].as_ref().map(|name| name.name()), Some("Role"));
+    /// assert!(names[1].as_ref().expect("Argument should be named").name_is_quoted());
     ///
     /// // An unquoted identifier folds to lowercase, a quoted one keeps its case.
     /// let stored: Vec<_> = is_member.stored_argument_names(&db).collect();
@@ -191,7 +191,9 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
         database: &'db Self::DB,
     ) -> impl Iterator<Item = Option<Cow<'db, str>>> {
         self.argument_names(database).map(|argument| {
-            argument.map(|name| normalize_identifier(name.name(), name.name_is_quoted()))
+            argument.map(|name| {
+                Cow::Owned(normalize_identifier(name.name(), name.name_is_quoted()).into_owned())
+            })
         })
     }
 
