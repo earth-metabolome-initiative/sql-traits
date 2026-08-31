@@ -26,10 +26,10 @@ use crate::{
 
 /// A `FROM` relation that resolved to a base table, paired with the identifier
 /// (alias, or table name when unaliased) used to qualify it in the projection.
-struct FromTableRef<'a, 'db, DB: DatabaseLike> {
-    key_value: &'a str,
-    key_quoted: bool,
-    table: &'db DB::Table,
+pub(crate) struct FromTableRef<'a, 'db, DB: DatabaseLike> {
+    pub(crate) key_value: &'a str,
+    pub(crate) key_quoted: bool,
+    pub(crate) table: &'db DB::Table,
 }
 
 /// Collects the CTE names introduced by the query's outer `WITH` clause.
@@ -129,7 +129,7 @@ fn unqualified_column_source<'db, DB: DatabaseLike>(
 
 /// Resolves a single projected expression to the base table it passes through,
 /// or `Ok(None)` when it is not a pass-through column of a base table.
-fn column_source<'db, DB: DatabaseLike>(
+pub(crate) fn column_source<'db, DB: DatabaseLike>(
     expr: &Expr,
     bases: &[FromTableRef<'_, 'db, DB>],
     has_opaque: bool,
@@ -189,6 +189,52 @@ fn collect_factor<'a, 'db, DB: DatabaseLike>(
     Ok(())
 }
 
+/// The `FROM` scope of a query's outer `SELECT`: the resolved base tables,
+/// the number of `FROM` entries seen (opaque ones counted), and whether any
+/// entry is opaque.
+pub(crate) struct FromScope<'a, 'db, DB: DatabaseLike> {
+    pub(crate) bases: Vec<FromTableRef<'a, 'db, DB>>,
+    pub(crate) from_entry_count: usize,
+    pub(crate) has_opaque: bool,
+}
+
+/// Collects the `FROM` relations of the query's outer `SELECT` into the
+/// resolver's shared shape. Returns `Ok(None)` when the body is not a plain
+/// `SELECT`, so a caller has no outer scope to work with.
+pub(crate) fn collect_from_clause<'a, 'db, DB: DatabaseLike>(
+    query: &'a Query,
+    database: &'db DB,
+) -> Result<Option<FromScope<'a, 'db, DB>>, LookupError> {
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return Ok(None);
+    };
+    let cte_names = collect_cte_names(query);
+    let mut bases: Vec<FromTableRef<'_, 'db, DB>> = Vec::new();
+    let mut from_entry_count: usize = 0;
+    let mut has_opaque = false;
+    for table_with_joins in &select.from {
+        collect_factor(
+            &table_with_joins.relation,
+            database,
+            &cte_names,
+            &mut bases,
+            &mut from_entry_count,
+            &mut has_opaque,
+        )?;
+        for join in &table_with_joins.joins {
+            collect_factor(
+                &join.relation,
+                database,
+                &cte_names,
+                &mut bases,
+                &mut from_entry_count,
+                &mut has_opaque,
+            )?;
+        }
+    }
+    Ok(Some(FromScope { bases, from_entry_count, has_opaque }))
+}
+
 impl<DB: DatabaseLike> DQLLike<DB> for Query {
     fn projection_source_table<'db>(
         &self,
@@ -212,31 +258,11 @@ impl<DB: DatabaseLike> DQLLike<DB> for Query {
             GroupByExpr::Expressions(_, _) => {}
         }
 
-        let cte_names = collect_cte_names(self);
-
-        let mut bases: Vec<FromTableRef<'_, 'db, DB>> = Vec::new();
-        let mut from_entry_count: usize = 0;
-        let mut has_opaque = false;
-        for table_with_joins in &select.from {
-            collect_factor(
-                &table_with_joins.relation,
-                database,
-                &cte_names,
-                &mut bases,
-                &mut from_entry_count,
-                &mut has_opaque,
-            )?;
-            for join in &table_with_joins.joins {
-                collect_factor(
-                    &join.relation,
-                    database,
-                    &cte_names,
-                    &mut bases,
-                    &mut from_entry_count,
-                    &mut has_opaque,
-                )?;
-            }
-        }
+        let Some(FromScope { bases, from_entry_count, has_opaque }) =
+            collect_from_clause(self, database)?
+        else {
+            return Ok(None);
+        };
 
         let mut source: Option<&'db DB::Table> = None;
         for item in &select.projection {

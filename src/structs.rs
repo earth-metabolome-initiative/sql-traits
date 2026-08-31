@@ -1,5 +1,6 @@
 //! Submodule providing general structs for representing database schemas.
 
+mod column_scope;
 pub(crate) mod fingerprint;
 pub mod generic_db;
 pub use generic_db::{
@@ -10,6 +11,7 @@ pub mod metadata;
 mod schema;
 mod target_name;
 
+pub use column_scope::ColumnScope;
 pub use fingerprint::{AlgorithmId, FingerprintError, SchemaFingerprint, canonical_bytes_v1};
 pub use metadata::{ColumnMetadata, FunctionMetadata, TableAttribute, TableMetadata};
 pub use schema::Schema;
