@@ -12,7 +12,7 @@ mod create_trigger;
 mod data_statement;
 mod dialect;
 mod dml;
-mod dql;
+pub(crate) mod dql;
 mod foreign_key_constraint;
 mod grant;
 mod schema;
