@@ -134,11 +134,23 @@ fn set_operation_is_not_eligible_but_routes_all_tables() {
 }
 
 #[test]
-fn cte_body_routes_but_cte_reference_is_not_a_base_table() {
+fn cte_body_routes_and_row_preserving_reference_resolves() {
     let db = schema_db();
     let sql = "WITH high AS (SELECT id FROM orders WHERE total > 100) SELECT id FROM high";
     // `orders` (CTE body) is routed; `high` (the CTE name) is not a base table.
     assert_eq!(referenced_names(&query(sql), &db), vec!["orders".to_string()]);
+    // The CTE passes rows of `orders` through a filter, so the projection is
+    // still rows of `orders`.
+    assert_eq!(projection_name(sql, &db), Some("orders".to_string()));
+}
+
+#[test]
+fn grouped_cte_body_is_not_eligible() {
+    let db = schema_db();
+    // Grouped rows are not orders rows, so re-execution against `orders` is
+    // not eligible even though the column passes through.
+    let sql = "WITH s AS (SELECT user_id, count(*) AS n FROM orders GROUP BY user_id) \
+               SELECT s.user_id FROM s";
     assert_eq!(projection_name(sql, &db), None);
 }
 
