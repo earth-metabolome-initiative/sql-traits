@@ -54,7 +54,7 @@ use crate::{
         object_name::{
             object_name_identifiers, object_name_last_part, resolve_table_object_name_in_iter,
             resolve_table_object_name_on_search_path_in_iter, schema_from_object_name,
-            table_matches_object_name,
+            table_matches_object_name, target_name_of_idents,
         },
     },
 };
@@ -3190,10 +3190,8 @@ impl ParserDB {
         &self,
         object_name: &ObjectName,
     ) -> Result<Option<&CreateTable>, LookupError> {
-        resolve_table_object_name_in_iter(
-            self.tables.iter().map(|(table, _)| table.as_ref()),
-            object_name,
-        )
+        let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
+        self.resolve_target_table_strict(&target_name_of_idents(schema_ident, table_ident))
     }
 
     /// Resolves a table from an SQL object name, trying each schema on the
@@ -3211,11 +3209,8 @@ impl ParserDB {
         &self,
         object_name: &ObjectName,
     ) -> Result<Option<&CreateTable>, LookupError> {
-        resolve_table_object_name_on_search_path_in_iter(
-            self.tables.iter().map(|(table, _)| table.as_ref()),
-            object_name,
-            self.search_path.iter().map(|(name, quoted)| (name.as_str(), *quoted)),
-        )
+        let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
+        self.resolve_target_table_on_path(&target_name_of_idents(schema_ident, table_ident))
     }
 
     /// Reports the roles and table targets that this database's access control

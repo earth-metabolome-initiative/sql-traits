@@ -9,6 +9,7 @@
 //! implementation.
 
 use alloc::{
+    borrow::Cow,
     string::{String, ToString},
     vec::Vec,
 };
@@ -19,7 +20,9 @@ use crate::{
     errors::LookupError,
     structs::TargetName,
     traits::{DatabaseLike, TableLike},
-    utils::identifier_resolution::identifiers_match,
+    utils::identifier_resolution::{
+        identifiers_match, normalize_identifier, parse_lookup_identifier,
+    },
 };
 
 /// Returns the written identifier of a single object name part.
@@ -180,7 +183,7 @@ pub(crate) fn target_name_of_table<T: TableLike>(table: &T) -> TargetName<'_> {
 }
 
 /// Builds a [`TargetName`] from the identifiers a strict table lookup yields.
-fn target_name_of_idents<'a>(
+pub(crate) fn target_name_of_idents<'a>(
     schema_ident: Option<&'a Ident>,
     table_ident: &'a Ident,
 ) -> TargetName<'a> {
@@ -193,35 +196,75 @@ fn target_name_of_idents<'a>(
     }
 }
 
-/// Returns whether a table matches a written target name, reading a table
-/// stored without a schema as residing in the default schema `public`.
-pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: &TargetName<'_>) -> bool {
-    if !identifiers_match(
-        table.table_name(),
-        table.table_name_is_quoted(),
-        target.name(),
-        target.name_is_quoted(),
-    ) {
-        return false;
-    }
+/// Normalized identity a table is found under.
+///
+/// A table stored without a schema and one stored in `public` share a key,
+/// mirroring that the two spellings name one place.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct TableTargetKey {
+    /// Normalized schema, `public` for a schema-less table.
+    pub schema: String,
+    /// Normalized table name.
+    pub name: String,
+}
 
-    match (target.schema(), table.table_schema()) {
-        (None, None) => true,
-        (Some(target_schema), Some(table_schema)) => {
-            identifiers_match(
-                table_schema,
-                table.table_schema_is_quoted(),
-                target_schema,
-                target.schema_is_quoted(),
-            )
-        }
-        (Some(target_schema), None) => {
-            identifiers_match("public", false, target_schema, target.schema_is_quoted())
-        }
-        (None, Some(table_schema)) => {
-            identifiers_match(table_schema, table.table_schema_is_quoted(), "public", false)
-        }
+/// Normalizes a stored schema, folding a schema-less table into `public`.
+fn stored_schema_key<T: TableLike>(table: &T) -> Cow<'_, str> {
+    table.table_schema().map_or(Cow::Borrowed("public"), |schema| {
+        normalize_identifier(schema, table.table_schema_is_quoted())
+    })
+}
+
+/// Normalizes a stored table name.
+fn stored_name_key<T: TableLike>(table: &T) -> Cow<'_, str> {
+    normalize_identifier(table.table_name(), table.table_name_is_quoted())
+}
+
+/// Key of a written target name, normalizing each part once.
+pub(crate) fn target_key(target: &TargetName<'_>) -> TableTargetKey {
+    TableTargetKey {
+        schema: target.schema().map_or_else(
+            || String::from("public"),
+            |schema| normalize_identifier(schema, target.schema_is_quoted()).into_owned(),
+        ),
+        name: normalize_identifier(target.name(), target.name_is_quoted()).into_owned(),
     }
+}
+
+/// Key of a textual lookup, parsing quoting out of each part first.
+pub(crate) fn lookup_key(schema: Option<&str>, name: &str) -> TableTargetKey {
+    let name_ident = parse_lookup_identifier(name);
+    TableTargetKey {
+        schema: schema.map_or_else(
+            || String::from("public"),
+            |schema| {
+                let schema_ident = parse_lookup_identifier(schema);
+                normalize_identifier(schema_ident.value(), schema_ident.is_quoted()).into_owned()
+            },
+        ),
+        name: normalize_identifier(name_ident.value(), name_ident.is_quoted()).into_owned(),
+    }
+}
+
+/// Key a stored table is indexed under.
+pub(crate) fn stored_table_key<T: TableLike>(table: &T) -> TableTargetKey {
+    TableTargetKey {
+        schema: stored_schema_key(table).into_owned(),
+        name: stored_name_key(table).into_owned(),
+    }
+}
+
+/// Returns whether a stored table answers a normalized key, normalizing only
+/// the stored side.
+pub(crate) fn table_matches_key<T: TableLike>(table: &T, key: &TableTargetKey) -> bool {
+    key.name == stored_name_key(table) && key.schema == stored_schema_key(table)
+}
+
+/// Reference matcher used by tests: compares a table against a written target
+/// without precomputing a key.
+#[cfg(test)]
+pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: &TargetName<'_>) -> bool {
+    table_matches_key(table, &target_key(target))
 }
 
 /// Renders a table for inclusion in an ambiguity error, quoting parts that were
@@ -267,7 +310,8 @@ pub(crate) fn resolve_target_in_iter<'a, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
     target: &TargetName<'_>,
 ) -> Result<Option<&'a T>, LookupError> {
-    let candidates: Vec<&T> = tables.filter(|table| table_matches_target(*table, target)).collect();
+    let key = target_key(target);
+    let candidates: Vec<&T> = tables.filter(|table| table_matches_key(*table, &key)).collect();
     resolve_target_from_candidates(target, &candidates)
 }
 
@@ -308,22 +352,36 @@ pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
         return resolve_target_in_iter(tables, target);
     }
 
-    let table_refs: Vec<&T> = tables.collect();
-    for (schema_name, schema_quoted) in search_path {
-        let qualified = target.clone().with_schema(schema_name, schema_quoted);
-        let candidates: Vec<&T> = table_refs
-            .iter()
-            .copied()
-            .filter(|table| table_matches_target(*table, &qualified))
-            .collect();
-        if !candidates.is_empty() {
-            // Reported under the written name: the entry qualifier is
-            // resolution machinery, not something the statement spelled.
-            return resolve_target_from_candidates(target, &candidates);
+    let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
+    let path: Vec<String> = search_path
+        .map(|(schema, quoted)| normalize_identifier(schema, quoted).into_owned())
+        .collect();
+    let mut winner = usize::MAX;
+    let mut candidates: Vec<&'a T> = Vec::new();
+    for table in tables {
+        if name != stored_name_key(table) {
+            continue;
+        }
+        let table_schema = stored_schema_key(table);
+        for (entry, path_schema) in path.iter().take(winner.saturating_add(1)).enumerate() {
+            if path_schema == &table_schema {
+                if entry < winner {
+                    winner = entry;
+                    candidates = vec![table];
+                } else {
+                    candidates.push(table);
+                }
+                break;
+            }
         }
     }
 
-    Ok(None)
+    if winner == usize::MAX {
+        return Ok(None);
+    }
+    // Reported under the written name: the entry qualifier is resolution
+    // machinery, not something the statement spelled.
+    resolve_target_from_candidates(target, &candidates)
 }
 
 /// Resolves a table from a one-part or two-part object name, honouring
