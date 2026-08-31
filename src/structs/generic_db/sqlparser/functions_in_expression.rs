@@ -42,7 +42,8 @@ pub(super) fn functions_in_expression<DB: DatabaseLike>(
 
     match expr {
         Expr::Function(func) => {
-            // Match by function identifier, ignoring optional schema qualifiers.
+            // Match by function identifier, ignoring optional schema
+            // qualifiers.
             result.extend(
                 functions
                     .iter()

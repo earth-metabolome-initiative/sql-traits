@@ -698,8 +698,9 @@ mod tests {
     #[test]
     fn test_drop_function_after_dropping_dependent_succeeds() {
         // This test verifies that if a check constraint is part of a table,
-        // and the table is created with the function, but then we drop and recreate
-        // the function after, the DROP succeeds when no references remain
+        // and the table is created with the function, but then we drop and
+        // recreate the function after, the DROP succeeds when no
+        // references remain
         let sql = r"
             CREATE FUNCTION helper_func() RETURNS INT AS 'SELECT 1;';
             CREATE FUNCTION other_func() RETURNS INT AS 'SELECT 2;';

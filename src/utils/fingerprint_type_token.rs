@@ -227,7 +227,8 @@ mod tests {
 
     #[test]
     fn test_unknown_type_collapses_whitespace() {
-        // Spec §7.2.1: internal whitespace runs collapse to a single ASCII space.
+        // Spec §7.2.1: internal whitespace runs collapse to a single ASCII
+        // space.
         assert_eq!(
             canonical_type_token("INTERVAL  YEAR  TO  MONTH"),
             "OTHER:interval year to month"

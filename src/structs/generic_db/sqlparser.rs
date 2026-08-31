@@ -826,7 +826,8 @@ impl ParserDBBuilder {
     ) -> bool {
         for (fk, ()) in self.foreign_keys() {
             // Check if this FK references the table being dropped
-            // and is NOT from the same table (self-referential FKs are OK to drop)
+            // and is NOT from the same table (self-referential FKs are OK to
+            // drop)
             let Some(referenced_table) = resolve_table_object_name_in_iter(
                 self.tables().iter().map(|(table, _)| table.as_ref()),
                 &fk.attribute().foreign_table,
@@ -3740,9 +3741,9 @@ impl ParserDB {
         let referenced_table_name = fk.foreign_table.to_string();
 
         // An unqualified target resolves through the search path, which carries
-        // `public`, so a bare `parent` reaches `public.parent` as it does in the
-        // database. The table being created is chained in so a table may
-        // reference itself.
+        // `public`, so a bare `parent` reaches `public.parent` as it does in
+        // the database. The table being created is chained in so a
+        // table may reference itself.
         let referenced_table = resolve_table_object_name_on_search_path_in_iter(
             builder
                 .tables()
@@ -4437,8 +4438,9 @@ impl ParserDB {
             )
         }) else {
             // The identity came from a table this builder resolved, so this is
-            // unreachable. `IF EXISTS` does not apply: the statement's table was
-            // found, and it is the stored entry that went missing.
+            // unreachable. `IF EXISTS` does not apply: the statement's table
+            // was found, and it is the stored entry that went
+            // missing.
             return Err(ObjectKind::Table.not_in_database(&resolved_table_name).into());
         };
 
@@ -5361,7 +5363,8 @@ impl ParserDB {
                             });
                         }
 
-                        // Check for references in check constraints, policies, or triggers
+                        // Check for references in check constraints, policies,
+                        // or triggers
                         if builder.is_function_used(function_name, function_quoted) {
                             return Err(crate::errors::Error::FunctionReferenced {
                                 function_name: function_name.to_string(),
@@ -5381,7 +5384,8 @@ impl ParserDB {
                     for name in names {
                         let table_name = last_str(&name);
 
-                        // Check if table exists and resolve the canonical stored table.
+                        // Check if table exists and resolve the canonical
+                        // stored table.
                         let maybe_table = builder.resolve_table_object_name(&name)?;
 
                         let Some(table) = maybe_table else {
@@ -5417,7 +5421,8 @@ impl ParserDB {
                             );
                         }
 
-                        // Check for references from other tables (unless CASCADE)
+                        // Check for references from other tables (unless
+                        // CASCADE)
                         if !cascade
                             && builder.is_table_referenced(
                                 &resolved_table_name,
@@ -5633,8 +5638,9 @@ impl ParserDB {
                     names,
                     ..
                 } => {
-                    // Note: DROP ROLE doesn't support CASCADE/RESTRICT in PostgreSQL syntax.
-                    // We always use RESTRICT semantics (fail if role is referenced).
+                    // Note: DROP ROLE doesn't support CASCADE/RESTRICT in
+                    // PostgreSQL syntax. We always use
+                    // RESTRICT semantics (fail if role is referenced).
                     for name in names {
                         let Some(role_ident) = object_name_last_identifier(&name) else {
                             continue;
@@ -5729,7 +5735,8 @@ impl ParserDB {
                         let resolved_schema_name = schema.name().to_string();
                         let resolved_schema_quoted = schema.is_quoted();
 
-                        // Check for contained objects unless CASCADE is specified
+                        // Check for contained objects unless CASCADE is
+                        // specified
                         if !cascade
                             && builder
                                 .is_schema_non_empty(&resolved_schema_name, resolved_schema_quoted)
@@ -6313,7 +6320,8 @@ impl ParserDB {
                             )
                         }
                         SchemaName::UnnamedAuthorization(auth) => {
-                            // CREATE SCHEMA AUTHORIZATION admin creates schema named "admin"
+                            // CREATE SCHEMA AUTHORIZATION admin creates schema
+                            // named "admin"
                             (
                                 auth.value.clone(),
                                 auth.quote_style.is_some(),
@@ -6575,7 +6583,8 @@ impl ParserDB {
                             }
                             let fresh = Arc::clone(function_arc);
 
-                            // Policies and check constraints cache function nodes.
+                            // Policies and check constraints cache function
+                            // nodes.
                             for (_, metadata) in builder.policies_mut() {
                                 metadata.replace_function(&stale, &fresh);
                             }
@@ -8065,12 +8074,13 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            // Parent should exist with no foreign keys (parent doesn't have any FKs
-            // pointing out)
+            // Parent should exist with no foreign keys (parent doesn't have any
+            // FKs pointing out)
             let parent = db.table(None, "parent").expect("parent should exist");
             assert_eq!(parent.foreign_keys(&db).expect("foreign keys").count(), 0);
 
-            // No foreign keys in the database (child's FK was removed with child)
+            // No foreign keys in the database (child's FK was removed with
+            // child)
             let total_fks: usize =
                 db.tables().map(|t| t.foreign_keys(&db).expect("foreign keys").count()).sum();
             assert_eq!(total_fks, 0);

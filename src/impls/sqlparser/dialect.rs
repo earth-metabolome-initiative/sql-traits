@@ -564,7 +564,8 @@ mod tests {
     fn parser_db_debug_and_clone_round_trip() {
         let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (id INT);").expect("parse");
 
-        // Exercise the manual `Debug` impl on `GenericDB<..., SqlparserDialect>`.
+        // Exercise the manual `Debug` impl on `GenericDB<...,
+        // SqlparserDialect>`.
         let rendered = alloc::format!("{db:?}");
         assert!(rendered.contains("GenericDB"), "debug output shape: {rendered}");
         assert!(rendered.contains("dialect"), "debug output must surface the dialect field");

@@ -84,9 +84,9 @@ fn a_redeclared_column_still_receives_the_parents_check() {
 
 #[test]
 fn a_redeclared_column_keeps_its_own_where_only_one_may_be_stated() {
-    // PostgreSQL leaves the child on its own default and lets both checks stand,
-    // each under its own name, because a check may be written any number of
-    // times while a default may not.
+    // PostgreSQL leaves the child on its own default and lets both checks
+    // stand, each under its own name, because a check may be written any
+    // number of times while a default may not.
     let database = database(
         "CREATE TABLE par (v INT DEFAULT 1 CONSTRAINT c1 CHECK (v > 0));
          CREATE TABLE chi (v INT DEFAULT 9 CONSTRAINT c2 CHECK (v < 100)) INHERITS (par);",
@@ -101,8 +101,8 @@ fn a_redeclared_column_keeps_its_own_where_only_one_may_be_stated() {
 #[test]
 fn a_redeclared_column_receives_no_key_and_no_reference() {
     // The same rule as for a column the child does not redeclare: a key, a
-    // unique constraint and a reference stay with the parent, because each would
-    // otherwise become one of the child's own.
+    // unique constraint and a reference stay with the parent, because each
+    // would otherwise become one of the child's own.
     let database = database(
         "CREATE TABLE tgt (id INT PRIMARY KEY);
          CREATE TABLE par (u INT CONSTRAINT uq UNIQUE, r INT CONSTRAINT fk REFERENCES tgt (id));
