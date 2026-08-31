@@ -1,13 +1,19 @@
 //! Implementation of the `DatabaseLike` trait for `GenericDB`.
 
+use alloc::vec::Vec;
+
 use crate::{
-    structs::GenericDB,
+    errors::LookupError,
+    structs::{GenericDB, TargetName},
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, DatabaseLike, DialectLike,
         ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike,
         TableLike, TriggerLike, UniqueIndexLike,
     },
-    utils::identifier_resolution::{identifiers_match, stored_identifier_matches_lookup},
+    utils::{
+        identifier_resolution::{normalize_identifier, stored_identifier_matches_lookup},
+        object_name::{TableTargetKey, lookup_key, resolve_target_from_candidates, target_key},
+    },
 };
 
 impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> DatabaseLike
@@ -69,30 +75,11 @@ where
     }
 
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table> {
-        self.tables.iter().map(|(table, _)| table.as_ref()).find(|table| {
-            stored_identifier_matches_lookup(
-                table.table_name(),
-                table.table_name_is_quoted(),
-                table_name,
-            ) && match (schema, table.table_schema()) {
-                (None, None) => true,
-                (Some(lookup_schema), Some(table_schema)) => {
-                    stored_identifier_matches_lookup(
-                        table_schema,
-                        table.table_schema_is_quoted(),
-                        lookup_schema,
-                    )
-                }
-                // A table stored without a schema resides in `public`, and one
-                // stored in `public` answers a lookup that names no schema.
-                (Some(lookup_schema), None) => {
-                    stored_identifier_matches_lookup("public", false, lookup_schema)
-                }
-                (None, Some(table_schema)) => {
-                    identifiers_match(table_schema, table.table_schema_is_quoted(), "public", false)
-                }
-            }
-        })
+        let key = lookup_key(schema, table_name);
+        self.indexed_table_positions(&key)
+            .next()
+            .and_then(|position| self.tables.get(position))
+            .map(|(table, _)| table.as_ref())
     }
 
     fn table_id(&self, table: &Self::Table) -> Option<usize> {
@@ -101,6 +88,13 @@ where
                 (t.table_schema(), t.table_name())
             })
             .ok()
+    }
+
+    fn resolve_target_table(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::Table>, LookupError> {
+        self.resolve_target_table_on_path(&target)
     }
 
     fn table_by_id(&self, table_id: usize) -> Option<&Self::Table> {
@@ -152,5 +146,85 @@ where
 
     fn schemas(&self) -> impl Iterator<Item = &Self::Schema> {
         self.schemas.iter().map(|(s, _)| s.as_ref())
+    }
+}
+
+impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
+    GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
+where
+    T: TableLike,
+    C: ColumnLike,
+    I: IndexLike,
+    U: UniqueIndexLike,
+    F: ForeignKeyLike,
+    Func: FunctionLike,
+    Ch: CheckConstraintLike,
+    Tr: TriggerLike,
+    P: PolicyLike,
+    R: RoleLike,
+    S: SchemaLike,
+    TG: TableGrantLike,
+    CG: ColumnGrantLike,
+    D: DialectLike,
+{
+    /// Positions in `tables` whose stored identity equals `key`, ascending.
+    fn indexed_table_positions(&self, key: &TableTargetKey) -> impl Iterator<Item = usize> {
+        self.table_index.get(key).map_or(&[][..], Vec::as_slice).iter().copied()
+    }
+
+    /// Tables whose stored identity equals `key`, in storage order.
+    pub(super) fn indexed_tables(&self, key: &TableTargetKey) -> impl Iterator<Item = &T> {
+        self.indexed_table_positions(key)
+            .filter_map(|position| self.tables.get(position))
+            .map(|(table, _)| table.as_ref())
+    }
+
+    /// Resolves a written target against the index, ignoring any search path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches
+    /// more than one table.
+    pub(super) fn resolve_target_table_strict(
+        &self,
+        target: &TargetName<'_>,
+    ) -> Result<Option<&T>, LookupError> {
+        let candidates: Vec<&T> = self.indexed_tables(&target_key(target)).collect();
+        resolve_target_from_candidates(target, &candidates)
+    }
+
+    /// Resolves a written target through the index and the search path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches
+    /// more than one table in the schema that wins.
+    pub(super) fn resolve_target_table_on_path(
+        &self,
+        target: &TargetName<'_>,
+    ) -> Result<Option<&T>, LookupError> {
+        if target.schema().is_some() {
+            return self.resolve_target_table_strict(target);
+        }
+
+        let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
+        for (entry_schema, entry_quoted) in &self.search_path {
+            let key = TableTargetKey {
+                schema: normalize_identifier(entry_schema, *entry_quoted).into_owned(),
+                name: name.clone(),
+            };
+            if let Some(positions) = self.table_index.get(&key) {
+                let candidates: Vec<&T> = positions
+                    .iter()
+                    .filter_map(|position| self.tables.get(*position))
+                    .map(|(table, _)| table.as_ref())
+                    .collect();
+                // Reported under the written name: the entry qualifier is
+                // resolution machinery, not something the statement spelled.
+                return resolve_target_from_candidates(target, &candidates);
+            }
+        }
+
+        Ok(None)
     }
 }

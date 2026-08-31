@@ -1,6 +1,7 @@
 //! Builder for constructing a `GenericDB` instance.
 
 use alloc::{
+    collections::BTreeMap,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -14,7 +15,10 @@ use crate::{
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
         TriggerLike, UniqueIndexLike,
     },
-    utils::{identifier_resolution::identifiers_match, object_name::render_table_candidate},
+    utils::{
+        identifier_resolution::identifiers_match,
+        object_name::{render_table_candidate, stored_table_key},
+    },
 };
 
 fn table_names_match_semantically<T: TableLike>(left: &T, right: &T) -> bool {
@@ -614,11 +618,17 @@ where
         builder.schemas.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         // Grants are not sorted as their order may be significant
 
+        let mut table_index: BTreeMap<_, Vec<usize>> = BTreeMap::new();
+        for (position, (table, _)) in builder.tables.iter().enumerate() {
+            table_index.entry(stored_table_key(table.as_ref())).or_default().push(position);
+        }
+
         GenericDB {
             dialect: builder.dialect,
             catalog_name,
             timezone: builder.timezone,
             tables: builder.tables,
+            table_index,
             columns: builder.columns,
             indices: builder.indices,
             unique_indices: builder.unique_indices,

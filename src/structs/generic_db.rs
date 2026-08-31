@@ -5,6 +5,7 @@ mod database;
 mod sqlparser;
 
 use alloc::{
+    collections::BTreeMap,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -23,7 +24,7 @@ use crate::{
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
         TriggerLike, UniqueIndexLike,
     },
-    utils::identifier_resolution::stored_identifier_matches_lookup,
+    utils::{identifier_resolution::stored_identifier_matches_lookup, object_name::TableTargetKey},
 };
 
 /// A generic representation of a database schema.
@@ -52,6 +53,11 @@ where
     timezone: Option<String>,
     /// List of tables in the database.
     tables: Vec<(Arc<T>, T::Meta)>,
+    /// Tables by normalized `(schema, name)`, values positions in `tables`.
+    ///
+    /// Lists hold every table a key matched, ascending, so lookup answers and
+    /// ambiguity reporting agree with scanning the list.
+    table_index: BTreeMap<TableTargetKey, Vec<usize>>,
     /// List of columns in the database.
     columns: Vec<(Arc<C>, C::Meta)>,
     /// List of indices in the database.
@@ -117,6 +123,7 @@ where
             .field("column_grants", &self.column_grants.len())
             .field("schemas", &self.schemas.len())
             .field("search_path", &self.search_path)
+            .field("table_index", &self.table_index.len())
             .finish()
     }
 }
@@ -158,6 +165,7 @@ where
             column_grants: self.column_grants.clone(),
             schemas: self.schemas.clone(),
             search_path: self.search_path.clone(),
+            table_index: self.table_index.clone(),
         }
     }
 }
