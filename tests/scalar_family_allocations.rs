@@ -1,4 +1,5 @@
-//! Pins scalar family allocation behavior.
+//! Pins scalar family allocation behavior outside coverage instrumentation.
+#![cfg(not(tarpaulin))]
 
 use core::{
     hint::black_box,

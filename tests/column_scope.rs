@@ -1190,15 +1190,21 @@ fn duplicate_using_name_merges_once() {
     );
 }
 
-// Arms need equal widths, and the left arm must name the output.
+// Set arms must have equal enumerable widths, with the left arm naming output.
 #[test]
 fn set_operation_arms_that_cannot_pair_answer_nothing() {
     let db = schema_db();
     for body in [
         "SELECT id FROM a UNION ALL SELECT id, payload FROM a",
         "SELECT count(*) FROM a UNION ALL SELECT id FROM a",
+        "SELECT id FROM a UNION ALL VALUES (1)",
+        "VALUES (1) UNION ALL SELECT id FROM a",
     ] {
         let sql = format!("WITH v AS ({body}) SELECT v.id FROM v");
+        assert_eq!(resolve_projection(&sql, &db).expect("resolves"), None, "{body}");
+    }
+    for body in ["SELECT id FROM a UNION ALL VALUES (1)", "VALUES (1) UNION ALL SELECT id FROM a"] {
+        let sql = format!("WITH RECURSIVE v(id) AS ({body}) SELECT v.id FROM v");
         assert_eq!(resolve_projection(&sql, &db).expect("resolves"), None, "{body}");
     }
 }
