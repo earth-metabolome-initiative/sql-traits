@@ -25,7 +25,7 @@ use core::ops::ControlFlow;
 use sqlparser::ast::{
     Cte, Expr, GroupByExpr, Ident, JoinConstraint, JoinOperator, ObjectName, Query, Select,
     SelectItem, SelectItemQualifiedWildcardKind, SetExpr, SetOperator, SetQuantifier, TableAlias,
-    TableFactor, Visit, Visitor, WildcardAdditionalOptions, With,
+    TableAliasColumnDef, TableFactor, Visit, Visitor, WildcardAdditionalOptions, With,
 };
 
 use crate::{
@@ -147,6 +147,32 @@ pub(crate) struct DerivedColumn<'db, DB: DatabaseLike> {
 impl<DB: DatabaseLike> Clone for DerivedColumn<'_, DB> {
     fn clone(&self) -> Self {
         Self { name: self.name.clone(), quoted: self.quoted, source: self.source }
+    }
+}
+
+enum OutputNameSource<'names, 'db, DB: DatabaseLike> {
+    Columns(&'names [DerivedColumn<'db, DB>]),
+    AliasColumns(&'names [TableAliasColumnDef]),
+    Declared(&'names [(String, bool)]),
+}
+
+impl<'names, DB: DatabaseLike> OutputNameSource<'names, '_, DB> {
+    fn from_alias(alias: &'names TableAlias) -> Option<Self> {
+        (!alias.columns.is_empty()).then_some(Self::AliasColumns(&alias.columns))
+    }
+
+    fn get(&self, ordinal: usize) -> Option<(String, bool)> {
+        match self {
+            Self::Columns(columns) => {
+                columns.get(ordinal).map(|column| (column.name.clone(), column.quoted))
+            }
+            Self::AliasColumns(columns) => {
+                columns
+                    .get(ordinal)
+                    .map(|column| (column.name.value.clone(), column.name.quote_style.is_some()))
+            }
+            Self::Declared(names) => names.get(ordinal).cloned(),
+        }
     }
 }
 
@@ -620,7 +646,12 @@ fn derive_cte_shapes<'a, 'db, DB: DatabaseLike>(
                 quoted: cte.alias.name.quote_style.is_some(),
                 shape: None,
             });
-            let body = derive_query_shape(&cte.query, &shapes, deriving)?;
+            let body = derive_query_shape(
+                &cte.query,
+                &shapes,
+                OutputNameSource::from_alias(&cte.alias),
+                deriving,
+            )?;
             shapes[position].shape = apply_alias_columns(body, &cte.alias);
         }
     }
@@ -652,24 +683,32 @@ fn derive_recursive_cte_set_expr_shape<'a, 'db, DB: DatabaseLike>(
     alias: &TableAlias,
     deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    let output_names = OutputNameSource::from_alias(alias);
     match body {
         SetExpr::Query(query) => {
             derive_recursive_cte_query_shape(query, cte_scope, position, alias, deriving)
         }
         SetExpr::SetOperation { op: SetOperator::Union, left, right, set_quantifier } => {
-            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, deriving)? else {
+            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, output_names, deriving)?
+            else {
                 return Ok(None);
             };
             cte_scope[position].shape = apply_alias_columns(Some(left_shape), alias);
-            let Some(right_shape) = derive_set_expr_shape(right, cte_scope, deriving)? else {
+            let Some(left_shape) = cte_scope[position].shape.as_ref() else {
                 return Ok(None);
             };
-            let Some(left_shape) = cte_scope[position].shape.as_ref() else {
+            let Some(right_shape) = derive_set_expr_shape(
+                right,
+                cte_scope,
+                Some(OutputNameSource::Columns(&left_shape.columns)),
+                deriving,
+            )?
+            else {
                 return Ok(None);
             };
             Ok(merge_set_operation_shapes(left_shape, &right_shape, *set_quantifier, deriving))
         }
-        _ => derive_set_expr_shape(body, cte_scope, deriving),
+        _ => derive_set_expr_shape(body, cte_scope, output_names, deriving),
     }
 }
 
@@ -678,6 +717,7 @@ fn derive_recursive_cte_set_expr_shape<'a, 'db, DB: DatabaseLike>(
 fn derive_query_shape<'a, 'db, DB: DatabaseLike>(
     query: &'a Query,
     cte_scope: &[CteShape<'a, 'db, DB>],
+    output_names: Option<OutputNameSource<'_, 'db, DB>>,
     deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
     let scoped;
@@ -688,7 +728,7 @@ fn derive_query_shape<'a, 'db, DB: DatabaseLike>(
         }
         None => cte_scope,
     };
-    derive_set_expr_shape(&query.body, scope, deriving)
+    derive_set_expr_shape(&query.body, scope, output_names, deriving)
 }
 
 /// Derives the output shape of a body. A set operation merges its arms by
@@ -697,16 +737,26 @@ fn derive_query_shape<'a, 'db, DB: DatabaseLike>(
 fn derive_set_expr_shape<'a, 'db, DB: DatabaseLike>(
     body: &'a SetExpr,
     cte_scope: &[CteShape<'a, 'db, DB>],
+    output_names: Option<OutputNameSource<'_, 'db, DB>>,
     deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
     match body {
-        SetExpr::Select(select) => derive_select_shape(select, cte_scope, deriving),
-        SetExpr::Query(query) => derive_query_shape(query, cte_scope, deriving),
+        SetExpr::Select(select) => {
+            derive_select_shape(select, cte_scope, output_names.as_ref(), deriving)
+        }
+        SetExpr::Query(query) => derive_query_shape(query, cte_scope, output_names, deriving),
         SetExpr::SetOperation { left, right, set_quantifier, .. } => {
-            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, deriving)? else {
+            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, output_names, deriving)?
+            else {
                 return Ok(None);
             };
-            let Some(right_shape) = derive_set_expr_shape(right, cte_scope, deriving)? else {
+            let Some(right_shape) = derive_set_expr_shape(
+                right,
+                cte_scope,
+                Some(OutputNameSource::Columns(&left_shape.columns)),
+                deriving,
+            )?
+            else {
                 return Ok(None);
             };
             Ok(merge_set_operation_shapes(&left_shape, &right_shape, *set_quantifier, deriving))
@@ -837,12 +887,24 @@ fn wildcard_replaces_values(options: &WildcardAdditionalOptions) -> bool {
     options.opt_replace.is_some()
 }
 
+fn projection_output_name<DB: DatabaseLike>(
+    expr: &Expr,
+    bases: &[FromTableRef<'_, '_, DB>],
+    output_names: Option<&OutputNameSource<'_, '_, DB>>,
+    ordinal: usize,
+) -> Option<(String, bool)> {
+    projected_column_name(expr)
+        .or_else(|| three_part_output_name(expr, bases))
+        .or_else(|| output_names.and_then(|names| names.get(ordinal)))
+}
+
 /// Derives the output shape of a plain `SELECT`: each projected column's name
 /// and pass-through source, enumerated from the projection (wildcards expand
 /// over the `FROM` relations they stand for).
 fn derive_select_shape<'a, 'db, DB: DatabaseLike>(
     select: &'a Select,
     cte_scope: &[CteShape<'a, 'db, DB>],
+    output_names: Option<&OutputNameSource<'_, 'db, DB>>,
     deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
     // Dialect forms whose output columns this resolver does not enumerate.
@@ -858,14 +920,7 @@ fn derive_select_shape<'a, 'db, DB: DatabaseLike>(
     for item in &select.projection {
         match item {
             SelectItem::UnnamedExpr(expr) => {
-                // A computed item written without an alias has no output name
-                // this resolver models, so the whole relation stays opaque.
-                // A three-part reference carries PostgreSQL's label (the
-                // trailing column name) once it matches a base table.
-                let named = match projected_column_name(expr) {
-                    Some(name) => Some(name),
-                    None => three_part_output_name(expr, &scope.bases),
-                };
+                let named = projection_output_name(expr, &scope.bases, output_names, columns.len());
                 let Some((name, quoted)) = named else {
                     return Ok(None);
                 };
@@ -1555,7 +1610,8 @@ fn derive_view_shape<'db, DB: DatabaseLike>(
     let frame = DerivingFrame { view, parent: deriving.views };
     let inner = Deriving { database: deriving.database, views: Some(&frame) };
 
-    let Some(mut shape) = derive_query_shape(definition, &[], inner)? else {
+    let output_names = (!declared.is_empty()).then_some(OutputNameSource::Declared(declared));
+    let Some(mut shape) = derive_query_shape(definition, &[], output_names, inner)? else {
         return Ok(None);
     };
     if !declared.is_empty() {
@@ -1663,7 +1719,8 @@ fn collect_factor<'a, 'db, DB: DatabaseLike>(
             Ok(Some((output_names, vec![entry])))
         }
         TableFactor::Derived { subquery, alias, .. } => {
-            let body = derive_query_shape(subquery, cte_scope, deriving)?;
+            let output_names = alias.as_ref().and_then(|alias| OutputNameSource::from_alias(alias));
+            let body = derive_query_shape(subquery, cte_scope, output_names, deriving)?;
             // A derived table written without an alias (accepted since
             // PostgreSQL 16) has no key a reference could qualify with, but
             // its columns still answer bare references.
