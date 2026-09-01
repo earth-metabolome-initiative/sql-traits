@@ -226,6 +226,91 @@ fn set_operation_arms_agreeing_on_a_source_resolve() {
 }
 
 #[test]
+fn computed_recursive_arm_keeps_other_column_sources() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT, parent_id INT);")
+        .expect("schema parses");
+    let body = "WITH RECURSIVE tree AS (\
+        SELECT id, 0 AS depth FROM categories \
+        UNION ALL \
+        SELECT c.id, t.depth + 1 FROM categories c \
+        JOIN tree t ON c.parent_id = t.id\
+    )";
+    assert_eq!(
+        resolve_projection(&format!("{body} SELECT t.id FROM tree t"), &db)
+            .expect("resolves")
+            .as_deref(),
+        Some("categories")
+    );
+    assert_eq!(
+        resolve_projection(&format!("{body} SELECT t.depth FROM tree t"), &db).expect("resolves"),
+        None
+    );
+}
+
+#[test]
+fn computed_nested_set_arms_keep_other_column_sources() {
+    let db = schema_db();
+    let body = "WITH v AS (\
+        SELECT id, payload FROM a \
+        UNION ALL (\
+            SELECT id, count(*) FROM a \
+            UNION ALL SELECT id, count(*) FROM a\
+        )\
+    )";
+    assert_eq!(
+        resolve_projection(&format!("{body} SELECT v.id FROM v"), &db)
+            .expect("resolves")
+            .as_deref(),
+        Some("a")
+    );
+    assert_eq!(
+        resolve_projection(&format!("{body} SELECT v.payload FROM v"), &db).expect("resolves"),
+        None
+    );
+}
+
+#[test]
+fn alias_lists_name_computed_left_set_arm_outputs() {
+    let db = ParserDB::parse::<GenericDialect>(
+        "CREATE TABLE a(id INT);
+         CREATE TABLE categories(id INT, parent_id INT);
+         CREATE VIEW v(value, key) AS
+             SELECT 0, id FROM a UNION ALL SELECT 1, id FROM a;",
+    )
+    .expect("schema parses");
+    for (sql, expected) in [
+        (
+            "WITH c(value, key) AS (\
+                SELECT 0, id FROM a UNION ALL SELECT 1, id FROM a\
+             ) SELECT c.key FROM c",
+            "a",
+        ),
+        (
+            "SELECT s.key FROM (\
+                SELECT 0, id FROM a UNION ALL SELECT 1, id FROM a\
+             ) s(value, key)",
+            "a",
+        ),
+        ("SELECT v.key FROM v", "a"),
+        (
+            "WITH RECURSIVE tree(node, level) AS (\
+                SELECT id, 0 FROM categories \
+                UNION ALL \
+                SELECT c.id, t.level + 1 FROM categories c \
+                JOIN tree t ON c.parent_id = t.node\
+             ) SELECT t.node FROM tree t",
+            "categories",
+        ),
+    ] {
+        assert_eq!(
+            resolve_projection(sql, &db).expect("resolves").as_deref(),
+            Some(expected),
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn wildcard_cte_and_alias_lists_resolve() {
     let db = schema_db();
     let wildcard = resolve_projection("WITH v AS (SELECT * FROM b) SELECT v.payload FROM v", &db)
@@ -1105,16 +1190,13 @@ fn duplicate_using_name_merges_once() {
     );
 }
 
-// Set-operation arms that cannot be paired leave the relation unusable: a
-// differing column count has no ordinal mapping, and an arm with an unnamed
-// computed column has no output name to pair.
+// Arms need equal widths, and the left arm must name the output.
 #[test]
 fn set_operation_arms_that_cannot_pair_answer_nothing() {
     let db = schema_db();
     for body in [
         "SELECT id FROM a UNION ALL SELECT id, payload FROM a",
         "SELECT count(*) FROM a UNION ALL SELECT id FROM a",
-        "SELECT id FROM a UNION ALL SELECT count(*) FROM a",
     ] {
         let sql = format!("WITH v AS ({body}) SELECT v.id FROM v");
         assert_eq!(resolve_projection(&sql, &db).expect("resolves"), None, "{body}");
