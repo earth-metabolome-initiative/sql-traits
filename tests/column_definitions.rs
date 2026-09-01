@@ -7,11 +7,11 @@ use sql_traits::{errors::LookupError, prelude::*};
 use sqlparser::{
     ast::{
         Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select, SelectItem, SetExpr,
-        SetOperator, Statement, Visit, VisitMut, Visitor, VisitorMut,
+        SetOperator, Statement, Value, Visit, VisitMut, Visitor, VisitorMut,
     },
     dialect::{
-        BigQueryDialect, DatabricksDialect, Dialect, GenericDialect, HiveDialect,
-        PostgreSqlDialect, SnowflakeDialect,
+        BigQueryDialect, ClickHouseDialect, DatabricksDialect, Dialect, GenericDialect,
+        HiveDialect, PostgreSqlDialect, SnowflakeDialect,
     },
     parser::Parser,
 };
@@ -26,7 +26,8 @@ fn schema_db() -> ParserDB {
 }
 
 fn query_with<D: Dialect>(dialect: &D, sql: &str) -> Query {
-    let mut statements = Parser::parse_sql(dialect, sql).expect("statement parses");
+    let mut statements = Parser::parse_sql(dialect, sql)
+        .unwrap_or_else(|error| panic!("statement `{sql}` parses: {error}"));
     match statements.pop().expect("one statement") {
         Statement::Query(query) => *query,
         other => panic!("expected a query, got {other:?}"),
@@ -312,8 +313,12 @@ fn assert_opaque_resolution(from_clause: &str, reference_sql: &str, expected: bo
     let definition =
         scope.resolve_column_definition(&reference(reference_sql)).expect("definition resolves");
     match definition {
-        Some(ColumnDefinition::Opaque) => assert!(expected),
-        None => assert!(!expected),
+        Some(ColumnDefinition::Opaque) => {
+            assert!(expected, "{reference_sql} unexpectedly resolved opaque from {from_clause}");
+        }
+        None => {
+            assert!(!expected, "{reference_sql} unexpectedly had no definition from {from_clause}");
+        }
         Some(_) => panic!("expected an opaque or missing definition"),
     }
 }
@@ -333,6 +338,40 @@ fn opaque_relation_qualifiers_match_exactly() {
     assert_opaque_resolution("TABLE(1)", "value", true);
     assert_opaque_resolution("LATERAL generate_series(1)", "generate_series.value", true);
 }
+
+#[test]
+fn opaque_alias_shadows_the_parent_scope() {
+    let db =
+        ParserDB::parse::<GenericDialect>("CREATE TABLE a (payload INT)").expect("schema parses");
+    let query = query(
+        "SELECT d.nested_payload FROM (\
+             SELECT u.payload, \
+                    (SELECT u.payload FROM UNNEST(ARRAY[1]) AS u(payload)) \
+             FROM a AS u\
+         ) AS d(outer_payload, nested_payload)",
+    );
+    let scope = ColumnScope::from_query(&query, &db).expect("scope builds");
+    let Some(ColumnDefinition::Expression { expression, scope: defining_scope }) = scope
+        .resolve_column_definition(&reference("d.nested_payload"))
+        .expect("output definition resolves")
+    else {
+        panic!("expected a scalar subquery definition")
+    };
+    let nested_scope = defining_scope
+        .scope_for_select(scalar_nested_select(expression))
+        .expect("scalar subquery scope is indexed");
+    match nested_scope
+        .resolve_column_definition(&reference("u.payload"))
+        .expect("definition resolves")
+    {
+        Some(ColumnDefinition::Opaque) => {}
+        Some(ColumnDefinition::Base { table, .. }) => {
+            panic!("expected an opaque definition, got base table {}", table.table_name())
+        }
+        Some(_) => panic!("expected an opaque definition"),
+        None => panic!("expected an opaque definition, got no definition"),
+    }
+}
 #[test]
 fn opaque_relation_qualifiers_preserve_quotes() {
     for (reference_sql, expected) in [("\"G\".value", true), ("G.value", false), ("g.value", false)]
@@ -342,10 +381,58 @@ fn opaque_relation_qualifiers_preserve_quotes() {
 }
 
 #[test]
-fn anonymous_and_any_qualifier_opaque_relations_stay_distinct() {
-    assert_opaque_resolution("(SELECT count(*) FROM b)", "unknown.value", false);
-    assert_opaque_resolution("(b JOIN b AS b2 ON true)", "unknown.value", true);
-    assert_opaque_resolution("(b JOIN b AS b2 ON true) AS joined", "joined.value", true);
+fn unaliased_nested_join_preserves_outer_correlation() {
+    let db = ParserDB::parse::<GenericDialect>(
+        "CREATE TABLE a (payload TEXT);
+         CREATE TABLE b (id INT);",
+    )
+    .expect("schema parses");
+    let query = query(
+        "SELECT d.nested_payload FROM (\
+             SELECT (SELECT a.payload FROM (b JOIN b AS b2 ON true)) \
+             FROM a\
+         ) AS d(nested_payload)",
+    );
+    let scope = ColumnScope::from_query(&query, &db).expect("scope builds");
+    let Some(ColumnDefinition::Expression { expression, scope: defining_scope }) = scope
+        .resolve_column_definition(&reference("d.nested_payload"))
+        .expect("output definition resolves")
+    else {
+        panic!("expected a scalar subquery definition")
+    };
+    let nested_scope = defining_scope
+        .scope_for_select(scalar_nested_select(expression))
+        .expect("scalar subquery scope is indexed");
+    match nested_scope
+        .resolve_column_definition(&reference("a.payload"))
+        .expect("definition resolves")
+    {
+        Some(ColumnDefinition::Base { table, .. }) => assert_eq!(table.table_name(), "a"),
+        Some(ColumnDefinition::Opaque) => {
+            panic!("expected base table a, got an opaque definition")
+        }
+        Some(_) => panic!("expected base table a"),
+        None => panic!("expected base table a, got no definition"),
+    }
+}
+
+#[test]
+fn nested_join_opaque_qualifiers_match_exactly() {
+    for (reference_sql, expected) in
+        [("b.value", true), ("b2.value", true), ("unknown.value", false)]
+    {
+        assert_opaque_resolution("(b JOIN b AS b2 ON true)", reference_sql, expected);
+    }
+    for (reference_sql, expected) in
+        [("joined.value", true), ("b.value", false), ("b2.value", false)]
+    {
+        assert_opaque_resolution("(b JOIN b AS b2 ON true) AS joined", reference_sql, expected);
+    }
+    for (reference_sql, expected) in
+        [("\"B2\".value", true), ("B2.value", false), ("b2.value", false)]
+    {
+        assert_opaque_resolution("(b JOIN b AS \"B2\" ON true)", reference_sql, expected);
+    }
 }
 
 #[test]
@@ -732,13 +819,30 @@ struct IndexedSelectOracle<'scope, 'query, 'database> {
     scope: ColumnDefinitionScope<'scope, 'query, 'database, ParserDB>,
     select_count: usize,
     resolve_input: bool,
+    injected_only: bool,
+    context: Option<String>,
+}
+
+fn is_injected_select(select: &Select) -> bool {
+    matches!(
+        select.projection.as_slice(),
+        [SelectItem::UnnamedExpr(Expr::CompoundIdentifier(parts))]
+            if matches!(parts.as_slice(), [table, column]
+                if table.value == "a" && column.value == "payload")
+    )
 }
 
 impl Visitor for IndexedSelectOracle<'_, '_, '_> {
     type Break = ();
 
     fn pre_visit_select(&mut self, select: &Select) -> ControlFlow<Self::Break> {
-        let nested_scope = self.scope.scope_for_select(select).expect("nested scope is indexed");
+        if self.injected_only && !is_injected_select(select) {
+            return ControlFlow::Continue(());
+        }
+        let nested_scope = self.scope.scope_for_select(select).unwrap_or_else(|| {
+            let context = self.context.as_deref().unwrap_or("expression");
+            panic!("nested scope {} is indexed for `{select}` in `{context}`", self.select_count)
+        });
         if self.resolve_input {
             let Some(ColumnDefinition::Base { table, .. }) = nested_scope
                 .resolve_column_definition(&reference("a.payload"))
@@ -765,36 +869,104 @@ fn assert_expression_nested_selects_indexed(
     else {
         panic!("expected an expression definition")
     };
-    let mut oracle = IndexedSelectOracle { scope: defining_scope, select_count: 0, resolve_input };
+    let mut oracle = IndexedSelectOracle {
+        scope: defining_scope,
+        select_count: 0,
+        resolve_input,
+        injected_only: false,
+        context: None,
+    };
     assert!(matches!(expression.visit(&mut oracle), ControlFlow::Continue(())));
     assert_eq!(oracle.select_count, expected_select_count);
+}
+
+#[test]
+fn query_level_order_by_nested_select_is_indexed() {
+    let query = query(
+        "SELECT d.x FROM (\
+             SELECT (SELECT a.payload FROM a ORDER BY (SELECT b.id FROM b)) AS x\
+         ) AS d",
+    );
+    assert_expression_nested_selects_indexed(&query, 2, true);
 }
 
 #[derive(Default)]
 struct NestedQueryInjector {
     query_count: usize,
+    correlated: bool,
+}
+
+impl NestedQueryInjector {
+    fn correlated() -> Self {
+        Self { query_count: 0, correlated: true }
+    }
 }
 
 impl VisitorMut for NestedQueryInjector {
     type Break = ();
 
     fn pre_visit_expr(&mut self, expression: &mut Expr) -> ControlFlow<Self::Break> {
-        let Expr::Identifier(identifier) = expression else {
-            return ControlFlow::Continue(());
+        let is_needle = match expression {
+            Expr::Identifier(identifier) => identifier.value == "needle",
+            Expr::Value(value) => {
+                matches!(&value.value, Value::SingleQuotedString(text) if text == "needle")
+            }
+            _ => false,
         };
-        if identifier.value != "needle" {
+        if !is_needle {
             return ControlFlow::Continue(());
         }
-        *expression = Expr::Subquery(Box::new(query("SELECT a.payload FROM a")));
+        let sql = if self.correlated { "SELECT a.payload" } else { "SELECT a.payload FROM a" };
+        *expression = Expr::Subquery(Box::new(query(sql)));
         self.query_count += 1;
         ControlFlow::Continue(())
     }
 }
-fn assert_expression_children_indexed(mut query: Query) {
-    let mut injector = NestedQueryInjector::default();
+
+fn inject_nested_queries(mut query: Query, correlated: bool) -> (Query, usize) {
+    let mut injector =
+        if correlated { NestedQueryInjector::correlated() } else { NestedQueryInjector::default() };
     assert!(matches!(VisitMut::visit(&mut query, &mut injector), ControlFlow::Continue(())));
     assert!(injector.query_count > 0);
-    assert_expression_nested_selects_indexed(&query, injector.query_count, true);
+    (query, injector.query_count)
+}
+
+fn assert_expression_children_indexed(query: Query) {
+    let (query, query_count) = inject_nested_queries(query, false);
+    assert_expression_nested_selects_indexed(&query, query_count, true);
+}
+
+fn assert_injected_container_children_indexed(query: &Query, query_count: usize) {
+    let db = schema_db();
+    let scope = ColumnScope::from_query(query, &db).expect("scope builds");
+    let Some(ColumnDefinition::Expression { scope: defining_scope, .. }) =
+        scope.resolve_column_definition(&reference("d.x")).expect("output definition resolves")
+    else {
+        panic!("expected an expression definition for `{query}`")
+    };
+    let root = select_body(query);
+    let sqlparser::ast::TableFactor::Derived { subquery, .. } = &root.from[0].relation else {
+        panic!("expected a derived relation")
+    };
+    let mut oracle = IndexedSelectOracle {
+        scope: defining_scope,
+        select_count: 0,
+        resolve_input: true,
+        injected_only: true,
+        context: Some(query.to_string()),
+    };
+    assert!(matches!(subquery.visit(&mut oracle), ControlFlow::Continue(())));
+    assert_eq!(oracle.select_count, query_count);
+}
+
+fn assert_container_fixtures(fixtures: Vec<(Query, bool)>) {
+    let fixtures: Vec<_> = fixtures
+        .into_iter()
+        .map(|(query, correlated)| inject_nested_queries(query, correlated))
+        .collect();
+    for (query, query_count) in fixtures {
+        assert_injected_container_children_indexed(&query, query_count);
+    }
 }
 
 fn assert_dialect_expression_children_indexed<D: Dialect>(dialect: &D, expressions: &[&str]) {
@@ -803,6 +975,182 @@ fn assert_dialect_expression_children_indexed<D: Dialect>(dialect: &D, expressio
             query_with(dialect, &format!("SELECT d.x FROM (SELECT {expression} AS x) AS d"));
         assert_expression_children_indexed(query);
     }
+}
+
+#[test]
+fn omitted_query_containers_follow_the_sqlparser_visitor() {
+    let mut fixtures: Vec<_> = [
+        "SELECT d.x FROM (SELECT needle AS x FROM a ORDER BY needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a LIMIT needle OFFSET needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a LIMIT needle, needle) AS d",
+    ]
+    .into_iter()
+    .map(|sql| (query(sql), true))
+    .collect();
+    fixtures.push((
+        query_with(
+            &PostgreSqlDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a \
+                 FETCH FIRST 'needle' ROWS ONLY\
+             ) AS d",
+        ),
+        true,
+    ));
+    fixtures.push((
+        query_with(
+            &ClickHouseDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a \
+                 SETTINGS max_threads = needle\
+             ) AS d",
+        ),
+        true,
+    ));
+    fixtures.extend(
+        [
+            "LIMIT needle OFFSET needle",
+            "WHERE needle",
+            "ORDER BY needle",
+            "SELECT needle AS x",
+            "EXTEND needle AS y",
+            "SET x = needle",
+            "AGGREGATE SUM(needle) GROUP BY needle",
+            "TABLESAMPLE SYSTEM (needle) OFFSET needle",
+            "CALL f(needle)",
+            "PIVOT(SUM(needle) FOR id IN (1))",
+            "JOIN b ON needle",
+        ]
+        .into_iter()
+        .map(|pipe| {
+            (query(&format!("SELECT d.x FROM (SELECT needle AS x FROM a |> {pipe}) AS d")), true)
+        }),
+    );
+    let (values, values_count) = inject_nested_queries(
+        query("SELECT d.x FROM (SELECT (VALUES (needle)) AS x FROM a) AS d"),
+        false,
+    );
+    assert_container_fixtures(fixtures);
+    assert_expression_nested_selects_indexed(&values, values_count, true);
+}
+
+#[test]
+fn omitted_select_containers_follow_the_sqlparser_visitor() {
+    let mut fixtures: Vec<_> = [
+        "SELECT d.x FROM (SELECT DISTINCT ON (needle) needle AS x FROM a) AS d",
+        "SELECT d.x FROM (\
+             SELECT (\
+                 SELECT a.id FROM a \
+                 START WITH needle CONNECT BY needle\
+             ) AS x\
+         ) AS d",
+        "SELECT d.x FROM (SELECT TOP (needle) needle AS x FROM a) AS d",
+        "SELECT d.x FROM (\
+             SELECT needle AS x FROM a \
+             WINDOW w AS (\
+                 PARTITION BY needle ORDER BY needle \
+                 ROWS BETWEEN needle PRECEDING AND needle FOLLOWING\
+             )\
+         ) AS d",
+    ]
+    .into_iter()
+    .map(|sql| (query(sql), true))
+    .collect();
+    fixtures.push((
+        query_with(
+            &HiveDialect {},
+            "SELECT d.x FROM (\
+                 SELECT (\
+                     SELECT a.id FROM a \
+                     LATERAL VIEW explode(needle) t AS value\
+                 ) AS x\
+             ) AS d",
+        ),
+        true,
+    ));
+    assert_container_fixtures(fixtures);
+}
+
+#[test]
+fn omitted_relation_containers_follow_the_sqlparser_visitor() {
+    let mut fixtures: Vec<_> = [
+        "SELECT d.x FROM (SELECT needle AS x FROM a JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a, f(needle) AS f) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a, TABLE(needle) AS f) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a, LATERAL f(needle) AS f) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a, UNNEST(ARRAY[needle]) AS u) AS d",
+    ]
+    .into_iter()
+    .map(|sql| (query(sql), true))
+    .collect();
+    fixtures.extend(
+        [
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM a PIVOT(SUM(needle) FOR needle IN (needle))\
+             ) AS d",
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM a UNPIVOT(needle FOR kind IN (needle))\
+             ) AS d",
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM a MATCH_RECOGNIZE(\
+                     PARTITION BY needle \
+                     ORDER BY needle \
+                     MEASURES needle AS value \
+                     PATTERN (x) \
+                     DEFINE x AS needle\
+                 )\
+             ) AS d",
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM XMLTABLE(\
+                     needle PASSING needle \
+                     COLUMNS value TEXT PATH needle DEFAULT needle\
+                 ) AS xt\
+             ) AS d",
+        ]
+        .into_iter()
+        .map(|sql| (query(sql), false)),
+    );
+    fixtures.push((
+        query_with(
+            &PostgreSqlDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM a TABLESAMPLE SYSTEM (needle) OFFSET needle\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &SnowflakeDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM SEMANTIC_VIEW(\
+                     model \
+                     DIMENSIONS needle \
+                     METRICS needle \
+                     FACTS needle \
+                     WHERE needle\
+                 ) AS sv\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &BigQueryDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM a FOR SYSTEM_TIME AS OF needle\
+             ) AS d",
+        ),
+        false,
+    ));
+    assert_container_fixtures(fixtures);
 }
 
 #[test]
@@ -970,8 +1318,13 @@ fn hive_clause_children_follow_the_sqlparser_visitor() {
             panic!("expected a derived relation")
         };
         let defining_select = select_body(subquery);
-        let mut oracle =
-            IndexedSelectOracle { scope: defining_scope, select_count: 0, resolve_input: true };
+        let mut oracle = IndexedSelectOracle {
+            scope: defining_scope,
+            select_count: 0,
+            resolve_input: true,
+            injected_only: false,
+            context: None,
+        };
         assert!(matches!(expression.visit(&mut oracle), ControlFlow::Continue(())));
         for clause_expression in
             defining_select.cluster_by.iter().chain(&defining_select.distribute_by)

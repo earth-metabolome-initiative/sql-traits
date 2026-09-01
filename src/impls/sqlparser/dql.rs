@@ -23,12 +23,15 @@ use alloc::{
 use core::ops::ControlFlow;
 
 use sqlparser::ast::{
-    AccessExpr, CaseWhen, Cte, DictionaryField, Expr, Function, FunctionArg, FunctionArgExpr,
-    FunctionArgumentClause, FunctionArguments, GroupByExpr, Ident, JoinConstraint, JoinOperator,
-    JsonPathElem, MapEntry, ObjectName, OrderByExpr, Query, Select, SelectItem,
-    SelectItemQualifiedWildcardKind, SetExpr, SetOperator, SetQuantifier, Subscript, TableAlias,
-    TableAliasColumnDef, TableFactor, Visit, Visitor, WildcardAdditionalOptions, WindowFrameBound,
-    WindowType, With,
+    AccessExpr, CaseWhen, ConnectByKind, Cte, DictionaryField, Distinct, Expr, ExprWithAlias,
+    Function, FunctionArg, FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr,
+    Ident, Join, JoinConstraint, JoinOperator, JsonPathElem, LimitClause, MapEntry, Measure,
+    NamedWindowExpr, ObjectName, OrderBy, OrderByExpr, OrderByKind, PipeOperator, PivotValueSource,
+    Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, SetOperator,
+    SetQuantifier, Subscript, SymbolDefinition, TableAlias, TableAliasColumnDef, TableFactor,
+    TableFunctionArgs, TableSample, TableSampleKind, TableVersion, TableWithJoins, TopQuantity,
+    Values, Visit, Visitor, WildcardAdditionalOptions, WindowFrameBound, WindowSpec, WindowType,
+    With, XmlNamespaceDefinition, XmlPassingClause, XmlTableColumn, XmlTableColumnOption,
 };
 
 use crate::{
@@ -235,13 +238,17 @@ impl<DB: DatabaseLike, D: Copy> Clone for CteShape<'_, '_, DB, D> {
 }
 
 #[derive(Clone, Copy)]
-enum OpaqueIdentity<'query, 'db> {
-    Known { key: RelationKey<'query, 'db>, schema: Option<RelationKey<'query, 'db>> },
-    Anonymous,
-    AnyQualifier,
+struct OpaqueQualifier<'query, 'db> {
+    key: RelationKey<'query, 'db>,
+    schema: Option<RelationKey<'query, 'db>>,
 }
 
-#[derive(Clone, Copy)]
+enum OpaqueIdentity<'query, 'db> {
+    Known { key: RelationKey<'query, 'db>, schema: Option<RelationKey<'query, 'db>> },
+    Multiple(Vec<OpaqueQualifier<'query, 'db>>),
+    Anonymous,
+}
+
 struct OpaqueRelation<'query, 'db> {
     identity: OpaqueIdentity<'query, 'db>,
     entry_index: usize,
@@ -410,6 +417,13 @@ trait DerivationProfile<'query, 'db, DB: DatabaseLike> {
         scope: &'scope mut Self::Scope,
     ) -> &'scope mut FromScope<'query, 'db, DB, Self::Definition>;
     fn cursor(&self, scope: &Self::Scope) -> Self::Cursor;
+    fn cursor_for_select(&self, select: AstRef<'query, 'db, Select>) -> Option<Self::Cursor>;
+    fn set_scope_owners_since(
+        &mut self,
+        checkpoint: Self::Checkpoint,
+        inherited: Self::Cursor,
+        owner: Self::Cursor,
+    );
     fn opaque_definition(&self) -> Self::Definition;
     fn base_definition(
         &mut self,
@@ -475,6 +489,18 @@ where
     }
 
     fn cursor(&self, _scope: &Self::Scope) {}
+
+    fn cursor_for_select(&self, _select: AstRef<'query, 'db, Select>) -> Option<Self::Cursor> {
+        None
+    }
+
+    fn set_scope_owners_since(
+        &mut self,
+        _checkpoint: Self::Checkpoint,
+        _inherited: Self::Cursor,
+        _owner: Self::Cursor,
+    ) {
+    }
 
     fn opaque_definition(&self) {}
 
@@ -586,6 +612,16 @@ where
             (data.bases.len(), data.derived.len())
         };
         let local_parent = profile.cursor(&scope);
+        if P::INDEX_NESTED_QUERIES {
+            index_table_factor_expression_queries(
+                table_with_joins.map(|entry| &entry.relation),
+                cte_scope,
+                deriving,
+                parent,
+                local_parent,
+                profile,
+            )?;
+        }
         let contribution = collect_factor(
             table_with_joins.map(|entry| &entry.relation),
             deriving,
@@ -604,6 +640,16 @@ where
                 (data.bases.len(), data.derived.len())
             };
             let local_parent = profile.cursor(&scope);
+            if P::INDEX_NESTED_QUERIES {
+                index_table_factor_expression_queries(
+                    join.map(|join| &join.relation),
+                    cte_scope,
+                    deriving,
+                    parent,
+                    local_parent,
+                    profile,
+                )?;
+            }
             let contribution = collect_factor(
                 join.map(|join| &join.relation),
                 deriving,
@@ -617,6 +663,10 @@ where
                     Some((names, entries)) => (Some(names), Some(entries)),
                     None => (None, None),
                 };
+            if P::INDEX_NESTED_QUERIES {
+                let local_parent = profile.cursor(&scope);
+                index_join_expression_queries(join, cte_scope, deriving, local_parent, profile)?;
+            }
             let (left_nullable, right_nullable) = nullable_sides(&join.get().join_operator);
             let data = profile.scope_mut(&mut scope);
             if left_nullable {
@@ -890,6 +940,7 @@ where
 enum SetExprRef<'query, 'db> {
     Select(AstRef<'query, 'db, Select>),
     Query(AstRef<'query, 'db, Query>),
+    Values(AstRef<'query, 'db, Values>),
     SetOperation {
         operator: SetOperator,
         quantifier: SetQuantifier,
@@ -921,7 +972,40 @@ fn set_expr_ref<'query, 'db>(body: AstRef<'query, 'db, SetExpr>) -> SetExprRef<'
                 right: AstRef::Database(right),
             }
         }
-        AstRef::Query(_) | AstRef::Database(_) => SetExprRef::Other,
+        AstRef::Query(SetExpr::Values(values)) => SetExprRef::Values(AstRef::Query(values)),
+        AstRef::Database(SetExpr::Values(values)) => SetExprRef::Values(AstRef::Database(values)),
+        AstRef::Query(
+            SetExpr::Insert(_)
+            | SetExpr::Update(_)
+            | SetExpr::Delete(_)
+            | SetExpr::Merge(_)
+            | SetExpr::Table(_),
+        )
+        | AstRef::Database(
+            SetExpr::Insert(_)
+            | SetExpr::Update(_)
+            | SetExpr::Delete(_)
+            | SetExpr::Merge(_)
+            | SetExpr::Table(_),
+        ) => SetExprRef::Other,
+    }
+}
+
+fn derived_body_cursor<'query, 'db, DB, P>(
+    body: AstRef<'query, 'db, SetExpr>,
+    parent: P::Cursor,
+    profile: &P,
+) -> P::Cursor
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match set_expr_ref(body) {
+        SetExprRef::Select(select) => profile.cursor_for_select(select).unwrap_or(parent),
+        SetExprRef::Query(query) => {
+            derived_body_cursor(query.map(|query| query.body.as_ref()), parent, profile)
+        }
+        SetExprRef::Values(_) | SetExprRef::SetOperation { .. } | SetExprRef::Other => parent,
     }
 }
 
@@ -1050,6 +1134,15 @@ where
         parent,
         profile,
     );
+    let result = match result {
+        Ok(Some(shape)) if P::INDEX_NESTED_QUERIES => {
+            let cursor =
+                derived_body_cursor(query.map(|query| query.body.as_ref()), parent, profile);
+            index_query_expression_queries(query, scope, deriving, cursor, profile)
+                .map(|()| Some(shape))
+        }
+        other => other,
+    };
     if !matches!(result, Ok(Some(_))) {
         profile.rollback(checkpoint);
     }
@@ -1105,7 +1198,7 @@ where
                 profile,
             ))
         }
-        SetExprRef::Other => Ok(None),
+        SetExprRef::Values(_) | SetExprRef::Other => Ok(None),
     }
 }
 
@@ -1272,7 +1365,7 @@ fn index_nested_query_scopes<'query, 'db, DB, P>(
     deriving: Deriving<'_, 'db, DB>,
     parent: P::Cursor,
     profile: &mut P,
-) -> Result<(), LookupError>
+) -> Result<P::Cursor, LookupError>
 where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
@@ -1284,13 +1377,15 @@ where
     } else {
         outer_ctes
     };
-    index_nested_set_scopes(
+    let cursor = index_nested_set_scopes(
         query.map(|query| query.body.as_ref()),
         cte_scope,
         deriving,
         parent,
         profile,
-    )
+    )?;
+    index_query_expression_queries(query, cte_scope, deriving, cursor, profile)?;
+    Ok(cursor)
 }
 
 fn index_nested_set_scopes<'query, 'db, DB, P>(
@@ -1299,7 +1394,7 @@ fn index_nested_set_scopes<'query, 'db, DB, P>(
     deriving: Deriving<'_, 'db, DB>,
     parent: P::Cursor,
     profile: &mut P,
-) -> Result<(), LookupError>
+) -> Result<P::Cursor, LookupError>
 where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
@@ -1308,16 +1403,22 @@ where
         SetExprRef::Select(select) => {
             let scope = collect_select_from(select, cte_scope, deriving, parent, profile)?;
             let cursor = profile.cursor(&scope);
-            index_select_expression_queries(select, cte_scope, deriving, cursor, profile)
+            index_select_expression_queries(select, cte_scope, deriving, cursor, profile)?;
+            Ok(cursor)
         }
         SetExprRef::Query(query) => {
             index_nested_query_scopes(query, cte_scope, deriving, parent, profile)
         }
+        SetExprRef::Values(values) => {
+            index_values_expression_queries(values, cte_scope, deriving, parent, profile)?;
+            Ok(parent)
+        }
         SetExprRef::SetOperation { left, right, .. } => {
             index_nested_set_scopes(left, cte_scope, deriving, parent, profile)?;
-            index_nested_set_scopes(right, cte_scope, deriving, parent, profile)
+            index_nested_set_scopes(right, cte_scope, deriving, parent, profile)?;
+            Ok(parent)
         }
-        SetExprRef::Other => Ok(()),
+        SetExprRef::Other => Ok(parent),
     }
 }
 
@@ -1337,6 +1438,51 @@ fn select_item_expression<'query, 'db>(
     })
 }
 
+fn index_query_expression_queries<'query, 'db, DB, P>(
+    query: AstRef<'query, 'db, Query>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'_, 'db, DB>,
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match query {
+        AstRef::Query(query) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Query(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .query_expressions(query)
+        }
+        AstRef::Database(query) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Database(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .query_expressions(query)
+        }
+    }
+}
+
 fn index_select_expression_queries<'query, 'db, DB, P>(
     select: AstRef<'query, 'db, Select>,
     cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
@@ -1348,48 +1494,204 @@ where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
 {
-    for item in select.map(|select| select.projection.as_slice()).iter() {
-        if let Some(expression) = select_item_expression(item) {
-            index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
+    match select {
+        AstRef::Query(select) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Query(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .select(select)
+        }
+        AstRef::Database(select) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Database(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .select(select)
         }
     }
-    let optional_expressions = [
-        select.try_map(|select| select.prewhere.as_ref()),
-        select.try_map(|select| select.selection.as_ref()),
-        select.try_map(|select| select.having.as_ref()),
-        select.try_map(|select| select.qualify.as_ref()),
-    ];
-    for expression in optional_expressions.into_iter().flatten() {
-        index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
-    }
-    if let Some(expressions) = select.try_map(|select| {
-        match &select.group_by {
-            GroupByExpr::Expressions(expressions, _) => Some(expressions.as_slice()),
-            GroupByExpr::All(_) => None,
+}
+
+fn index_values_expression_queries<'query, 'db, DB, P>(
+    values: AstRef<'query, 'db, Values>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'_, 'db, DB>,
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match values {
+        AstRef::Query(values) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Query(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .values(values)
         }
-    }) {
-        for expression in expressions.iter() {
-            index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
+        AstRef::Database(values) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Database(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .values(values)
         }
     }
-    for expressions in [
-        select.map(|select| select.cluster_by.as_slice()),
-        select.map(|select| select.distribute_by.as_slice()),
-    ] {
-        for expression in expressions.iter() {
-            index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
+}
+
+fn index_table_factor_expression_queries<'query, 'db, DB, P>(
+    factor: AstRef<'query, 'db, TableFactor>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'_, 'db, DB>,
+    inherited_parent: P::Cursor,
+    visible_parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match factor {
+        AstRef::Query(factor) => {
+            NestedQueryWalker {
+                query: |query| {
+                    let checkpoint = profile.checkpoint();
+                    index_nested_query_scopes(
+                        AstRef::Query(query),
+                        cte_scope,
+                        deriving,
+                        inherited_parent,
+                        profile,
+                    )?;
+                    profile.set_scope_owners_since(checkpoint, inherited_parent, visible_parent);
+                    Ok(())
+                },
+            }
+            .factor_relation_inputs(factor)?;
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Query(query),
+                        cte_scope,
+                        deriving,
+                        visible_parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .factor_visible_expressions(factor)
+        }
+        AstRef::Database(factor) => {
+            NestedQueryWalker {
+                query: |query| {
+                    let checkpoint = profile.checkpoint();
+                    index_nested_query_scopes(
+                        AstRef::Database(query),
+                        cte_scope,
+                        deriving,
+                        inherited_parent,
+                        profile,
+                    )?;
+                    profile.set_scope_owners_since(checkpoint, inherited_parent, visible_parent);
+                    Ok(())
+                },
+            }
+            .factor_relation_inputs(factor)?;
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Database(query),
+                        cte_scope,
+                        deriving,
+                        visible_parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .factor_visible_expressions(factor)
         }
     }
-    for order in select.map(|select| select.sort_by.as_slice()).iter() {
-        index_expression_queries(
-            order.map(|order| &order.expr),
-            cte_scope,
-            deriving,
-            parent,
-            profile,
-        )?;
+}
+
+fn index_join_expression_queries<'query, 'db, DB, P>(
+    join: AstRef<'query, 'db, Join>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'_, 'db, DB>,
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match join {
+        AstRef::Query(join) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Query(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .join_operator(&join.join_operator)
+        }
+        AstRef::Database(join) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Database(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                    .map(|_| ())
+                },
+            }
+            .join_operator(&join.join_operator)
+        }
     }
-    Ok(())
 }
 
 struct NestedQueryWalker<F> {
@@ -1402,6 +1704,240 @@ where
 {
     fn query(&mut self, query: &'source Query) -> Result<(), LookupError> {
         (self.query)(query)
+    }
+
+    fn query_expressions(&mut self, query: &'source Query) -> Result<(), LookupError> {
+        let Query {
+            with: _,
+            body: _,
+            order_by,
+            limit_clause,
+            fetch,
+            locks: _,
+            for_clause: _,
+            settings,
+            format_clause: _,
+            pipe_operators,
+        } = query;
+        if let Some(order_by) = order_by {
+            self.order_by_clause(order_by)?;
+        }
+        if let Some(limit_clause) = limit_clause {
+            self.limit_clause(limit_clause)?;
+        }
+        if let Some(fetch) = fetch {
+            self.optional_expression(fetch.quantity.as_ref())?;
+        }
+        if let Some(settings) = settings {
+            for setting in settings {
+                self.expression(&setting.value)?;
+            }
+        }
+        for operator in pipe_operators {
+            self.pipe_operator(operator)?;
+        }
+        Ok(())
+    }
+
+    fn select(&mut self, select: &'source Select) -> Result<(), LookupError> {
+        let Select {
+            select_token: _,
+            flavor: _,
+            distinct,
+            select_modifiers: _,
+            optimizer_hints: _,
+            top,
+            top_before_distinct: _,
+            projection,
+            exclude: _,
+            into: _,
+            from: _,
+            lateral_views,
+            prewhere,
+            selection,
+            connect_by,
+            group_by,
+            cluster_by,
+            distribute_by,
+            sort_by,
+            having,
+            named_window,
+            qualify,
+            window_before_qualify: _,
+            value_table_mode: _,
+        } = select;
+        if let Some(Distinct::On(expressions)) = distinct {
+            self.expressions(expressions)?;
+        }
+        if let Some(top) = top
+            && let Some(TopQuantity::Expr(expression)) = &top.quantity
+        {
+            self.expression(expression)?;
+        }
+        for item in projection {
+            self.select_item(item)?;
+        }
+        for view in lateral_views {
+            self.expression(&view.lateral_view)?;
+        }
+        for expression in [prewhere.as_ref(), selection.as_ref(), having.as_ref(), qualify.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            self.expression(expression)?;
+        }
+        for clause in connect_by {
+            match clause {
+                ConnectByKind::ConnectBy { relationships, .. } => {
+                    self.expressions(relationships)?;
+                }
+                ConnectByKind::StartWith { condition, .. } => {
+                    self.expression(condition)?;
+                }
+            }
+        }
+        if let GroupByExpr::Expressions(expressions, _) = group_by {
+            self.expressions(expressions)?;
+        }
+        self.expressions(cluster_by)?;
+        self.expressions(distribute_by)?;
+        for order in sort_by {
+            self.order_by(order)?;
+        }
+        for definition in named_window {
+            if let NamedWindowExpr::WindowSpec(specification) = &definition.1 {
+                self.window_spec(specification)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn select_item(&mut self, item: &'source SelectItem) -> Result<(), LookupError> {
+        match item {
+            SelectItem::UnnamedExpr(expression)
+            | SelectItem::ExprWithAlias { expr: expression, .. }
+            | SelectItem::ExprWithAliases { expr: expression, .. } => self.expression(expression),
+            SelectItem::QualifiedWildcard(
+                SelectItemQualifiedWildcardKind::Expr(expression),
+                options,
+            ) => {
+                self.expression(expression)?;
+                self.wildcard_options(options)
+            }
+            SelectItem::QualifiedWildcard(
+                SelectItemQualifiedWildcardKind::ObjectName(_),
+                options,
+            )
+            | SelectItem::Wildcard(options) => self.wildcard_options(options),
+        }
+    }
+
+    fn values(&mut self, values: &'source Values) -> Result<(), LookupError> {
+        for row in &values.rows {
+            self.expressions(row)?;
+        }
+        Ok(())
+    }
+
+    fn order_by_clause(&mut self, order_by: &'source OrderBy) -> Result<(), LookupError> {
+        match &order_by.kind {
+            OrderByKind::Expressions(expressions) => {
+                for expression in expressions {
+                    self.order_by(expression)?;
+                }
+            }
+            OrderByKind::All(_) => {}
+        }
+        if let Some(interpolate) = &order_by.interpolate
+            && let Some(expressions) = &interpolate.exprs
+        {
+            for expression in expressions {
+                self.optional_expression(expression.expr.as_ref())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn limit_clause(&mut self, limit: &'source LimitClause) -> Result<(), LookupError> {
+        match limit {
+            LimitClause::LimitOffset { limit, offset, limit_by } => {
+                self.optional_expression(limit.as_ref())?;
+                if let Some(offset) = offset {
+                    self.expression(&offset.value)?;
+                }
+                self.expressions(limit_by)
+            }
+            LimitClause::OffsetCommaLimit { offset, limit } => self.expression_pair(offset, limit),
+        }
+    }
+
+    fn pipe_operator(&mut self, operator: &'source PipeOperator) -> Result<(), LookupError> {
+        match operator {
+            PipeOperator::Limit { expr, offset } => {
+                self.expression(expr)?;
+                self.optional_expression(offset.as_ref())
+            }
+            PipeOperator::Where { expr } => self.expression(expr),
+            PipeOperator::OrderBy { exprs } => {
+                for order in exprs {
+                    self.order_by(order)?;
+                }
+                Ok(())
+            }
+            PipeOperator::Select { exprs } | PipeOperator::Extend { exprs } => {
+                for item in exprs {
+                    self.select_item(item)?;
+                }
+                Ok(())
+            }
+            PipeOperator::Set { assignments } => {
+                for assignment in assignments {
+                    self.expression(&assignment.value)?;
+                }
+                Ok(())
+            }
+            PipeOperator::Aggregate { full_table_exprs, group_by_expr } => {
+                for expression in full_table_exprs.iter().chain(group_by_expr) {
+                    self.expression(&expression.expr.expr)?;
+                }
+                Ok(())
+            }
+            PipeOperator::Join(join) => {
+                self.factor_relation_inputs(&join.relation)?;
+                self.factor_visible_expressions(&join.relation)?;
+                self.join_operator(&join.join_operator)
+            }
+            PipeOperator::TableSample { sample } => self.table_sample(sample),
+            PipeOperator::Call { function, alias: _ } => self.function(function),
+            PipeOperator::Pivot {
+                aggregate_functions,
+                value_column: _,
+                value_source,
+                alias: _,
+            } => {
+                for aggregate in aggregate_functions {
+                    self.expression(&aggregate.expr)?;
+                }
+                self.pivot_value_source(value_source)
+            }
+            PipeOperator::Union { set_quantifier: _, queries }
+            | PipeOperator::Intersect { set_quantifier: _, queries }
+            | PipeOperator::Except { set_quantifier: _, queries } => {
+                for query in queries {
+                    self.query(query)?;
+                }
+                Ok(())
+            }
+            PipeOperator::Unpivot {
+                value_column: _,
+                name_column: _,
+                unpivot_columns: _,
+                alias: _,
+            }
+            | PipeOperator::Drop { columns: _ }
+            | PipeOperator::As { alias: _ }
+            | PipeOperator::Rename { mappings: _ } => Ok(()),
+        }
     }
 
     fn optional_expression(
@@ -1428,6 +1964,394 @@ where
     ) -> Result<(), LookupError> {
         self.expression(left)?;
         self.expression(right)
+    }
+
+    fn factor_relation_inputs(&mut self, factor: &'source TableFactor) -> Result<(), LookupError> {
+        match factor {
+            TableFactor::Table {
+                name: _,
+                alias: _,
+                args: _,
+                with_hints,
+                version,
+                with_ordinality: _,
+                partitions: _,
+                json_path,
+                sample,
+                index_hints: _,
+            } => {
+                self.expressions(with_hints)?;
+                if let Some(version) = version {
+                    self.table_version(version)?;
+                }
+                if let Some(path) = json_path {
+                    for element in &path.path {
+                        self.json_path_element(element)?;
+                    }
+                }
+                if let Some(sample) = sample {
+                    self.table_sample_kind(sample)?;
+                }
+                Ok(())
+            }
+            TableFactor::Derived { lateral: _, subquery: _, alias: _, sample } => {
+                if let Some(sample) = sample {
+                    self.table_sample_kind(sample)?;
+                }
+                Ok(())
+            }
+            TableFactor::TableFunction { expr: _, alias: _ }
+            | TableFactor::Function {
+                lateral: _,
+                name: _,
+                args: _,
+                alias: _,
+                with_ordinality: _,
+            }
+            | TableFactor::UNNEST {
+                alias: _,
+                array_exprs: _,
+                with_offset: _,
+                with_offset_alias: _,
+                with_ordinality: _,
+            }
+            | TableFactor::JsonTable { json_expr: _, json_path: _, columns: _, alias: _ }
+            | TableFactor::OpenJsonTable { json_expr: _, json_path: _, columns: _, alias: _ }
+            | TableFactor::XmlTable {
+                namespaces: _,
+                row_expression: _,
+                passing: _,
+                columns: _,
+                alias: _,
+            }
+            | TableFactor::SemanticView {
+                name: _,
+                dimensions: _,
+                metrics: _,
+                facts: _,
+                where_clause: _,
+                alias: _,
+            }
+            | TableFactor::UnpivotExpr { expression: _, value_alias: _, attribute_alias: _ } => {
+                Ok(())
+            }
+            TableFactor::NestedJoin { table_with_joins, alias: _ } => {
+                self.table_with_joins_relation_inputs(table_with_joins)
+            }
+            TableFactor::Pivot { table, .. }
+            | TableFactor::Unpivot { table, .. }
+            | TableFactor::MatchRecognize { table, .. } => self.factor_relation_inputs(table),
+        }
+    }
+
+    fn table_with_joins_relation_inputs(
+        &mut self,
+        table: &'source sqlparser::ast::TableWithJoins,
+    ) -> Result<(), LookupError> {
+        self.factor_relation_inputs(&table.relation)?;
+        for join in &table.joins {
+            self.factor_relation_inputs(&join.relation)?;
+        }
+        Ok(())
+    }
+
+    fn factor_visible_expressions(
+        &mut self,
+        factor: &'source TableFactor,
+    ) -> Result<(), LookupError> {
+        match factor {
+            TableFactor::Table {
+                name: _,
+                alias: _,
+                args,
+                with_hints: _,
+                version: _,
+                with_ordinality: _,
+                partitions: _,
+                json_path: _,
+                sample: _,
+                index_hints: _,
+            } => {
+                if let Some(arguments) = args {
+                    self.table_function_args(arguments)?;
+                }
+                Ok(())
+            }
+            TableFactor::Derived { lateral: _, subquery: _, alias: _, sample: _ } => Ok(()),
+            TableFactor::TableFunction { expr, alias: _ } => self.expression(expr),
+            TableFactor::Function { lateral: _, name: _, args, alias: _, with_ordinality: _ } => {
+                self.function_argument_list(args)
+            }
+            TableFactor::UNNEST {
+                alias: _,
+                array_exprs,
+                with_offset: _,
+                with_offset_alias: _,
+                with_ordinality: _,
+            } => self.expressions(array_exprs),
+            TableFactor::JsonTable { json_expr, json_path: _, columns: _, alias: _ }
+            | TableFactor::OpenJsonTable { json_expr, json_path: _, columns: _, alias: _ } => {
+                self.expression(json_expr)
+            }
+            TableFactor::NestedJoin { table_with_joins, alias: _ } => {
+                self.nested_join_visible_expressions(table_with_joins)
+            }
+            TableFactor::Pivot {
+                table,
+                aggregate_functions,
+                value_column,
+                value_source,
+                default_on_null,
+                alias: _,
+            } => {
+                self.pivot_expressions(
+                    table,
+                    aggregate_functions,
+                    value_column,
+                    value_source,
+                    default_on_null.as_ref(),
+                )
+            }
+            TableFactor::Unpivot {
+                table,
+                value,
+                name: _,
+                columns,
+                alias: _,
+                null_inclusion: _,
+            } => {
+                self.factor_visible_expressions(table)?;
+                self.expression(value)?;
+                for column in columns {
+                    self.expression(&column.expr)?;
+                }
+                Ok(())
+            }
+            TableFactor::UnpivotExpr { expression, value_alias: _, attribute_alias: _ } => {
+                self.expression(expression)
+            }
+            TableFactor::MatchRecognize {
+                table,
+                partition_by,
+                order_by,
+                measures,
+                rows_per_match: _,
+                after_match_skip: _,
+                pattern: _,
+                symbols,
+                alias: _,
+            } => self.match_recognize_expressions(table, partition_by, order_by, measures, symbols),
+            TableFactor::XmlTable { namespaces, row_expression, passing, columns, alias: _ } => {
+                self.xml_table_expressions(namespaces, row_expression, passing, columns)
+            }
+            TableFactor::SemanticView {
+                name: _,
+                dimensions,
+                metrics,
+                facts,
+                where_clause,
+                alias: _,
+            } => {
+                self.expressions(dimensions)?;
+                self.expressions(metrics)?;
+                self.expressions(facts)?;
+                self.optional_expression(where_clause.as_ref())
+            }
+        }
+    }
+
+    fn nested_join_visible_expressions(
+        &mut self,
+        table: &'source TableWithJoins,
+    ) -> Result<(), LookupError> {
+        self.factor_visible_expressions(&table.relation)?;
+        for join in &table.joins {
+            self.factor_visible_expressions(&join.relation)?;
+            self.join_operator(&join.join_operator)?;
+        }
+        Ok(())
+    }
+
+    fn pivot_expressions(
+        &mut self,
+        table: &'source TableFactor,
+        aggregates: &'source [ExprWithAlias],
+        values: &'source [Expr],
+        source: &'source PivotValueSource,
+        default: Option<&'source Expr>,
+    ) -> Result<(), LookupError> {
+        self.factor_visible_expressions(table)?;
+        for aggregate in aggregates {
+            self.expression(&aggregate.expr)?;
+        }
+        self.expressions(values)?;
+        self.pivot_value_source(source)?;
+        self.optional_expression(default)
+    }
+
+    fn match_recognize_expressions(
+        &mut self,
+        table: &'source TableFactor,
+        partition_by: &'source [Expr],
+        order_by: &'source [OrderByExpr],
+        measures: &'source [Measure],
+        symbols: &'source [SymbolDefinition],
+    ) -> Result<(), LookupError> {
+        self.factor_visible_expressions(table)?;
+        self.expressions(partition_by)?;
+        for order in order_by {
+            self.order_by(order)?;
+        }
+        for measure in measures {
+            self.expression(&measure.expr)?;
+        }
+        for symbol in symbols {
+            self.expression(&symbol.definition)?;
+        }
+        Ok(())
+    }
+
+    fn xml_table_expressions(
+        &mut self,
+        namespaces: &'source [XmlNamespaceDefinition],
+        row_expression: &'source Expr,
+        passing: &'source XmlPassingClause,
+        columns: &'source [XmlTableColumn],
+    ) -> Result<(), LookupError> {
+        for namespace in namespaces {
+            self.expression(&namespace.uri)?;
+        }
+        self.expression(row_expression)?;
+        for argument in &passing.arguments {
+            self.expression(&argument.expr)?;
+        }
+        for column in columns {
+            self.xml_table_column(&column.option)?;
+        }
+        Ok(())
+    }
+
+    fn function_argument_list(
+        &mut self,
+        arguments: &'source [FunctionArg],
+    ) -> Result<(), LookupError> {
+        for argument in arguments {
+            self.function_argument(argument)?;
+        }
+        Ok(())
+    }
+
+    fn table_function_args(
+        &mut self,
+        arguments: &'source TableFunctionArgs,
+    ) -> Result<(), LookupError> {
+        for argument in &arguments.args {
+            self.function_argument(argument)?;
+        }
+        if let Some(settings) = &arguments.settings {
+            for setting in settings {
+                self.expression(&setting.value)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn table_sample_kind(&mut self, sample: &'source TableSampleKind) -> Result<(), LookupError> {
+        match sample {
+            TableSampleKind::BeforeTableAlias(sample)
+            | TableSampleKind::AfterTableAlias(sample) => self.table_sample(sample),
+        }
+    }
+
+    fn table_sample(&mut self, sample: &'source TableSample) -> Result<(), LookupError> {
+        if let Some(quantity) = &sample.quantity {
+            self.expression(&quantity.value)?;
+        }
+        if let Some(bucket) = &sample.bucket {
+            self.optional_expression(bucket.on.as_ref())?;
+        }
+        self.optional_expression(sample.offset.as_ref())
+    }
+
+    fn table_version(&mut self, version: &'source TableVersion) -> Result<(), LookupError> {
+        match version {
+            TableVersion::ForSystemTimeAsOf(expression)
+            | TableVersion::TimestampAsOf(expression)
+            | TableVersion::VersionAsOf(expression)
+            | TableVersion::Function(expression) => self.expression(expression),
+            TableVersion::Changes { changes, at, end } => {
+                self.expression(changes)?;
+                self.expression(at)?;
+                self.optional_expression(end.as_ref())
+            }
+        }
+    }
+
+    fn pivot_value_source(&mut self, source: &'source PivotValueSource) -> Result<(), LookupError> {
+        match source {
+            PivotValueSource::List(values) => {
+                for value in values {
+                    self.expression(&value.expr)?;
+                }
+                Ok(())
+            }
+            PivotValueSource::Any(orders) => {
+                for order in orders {
+                    self.order_by(order)?;
+                }
+                Ok(())
+            }
+            PivotValueSource::Subquery(query) => self.query(query),
+        }
+    }
+
+    fn join_operator(&mut self, operator: &'source JoinOperator) -> Result<(), LookupError> {
+        match operator {
+            JoinOperator::Join(constraint)
+            | JoinOperator::Inner(constraint)
+            | JoinOperator::Left(constraint)
+            | JoinOperator::LeftOuter(constraint)
+            | JoinOperator::Right(constraint)
+            | JoinOperator::RightOuter(constraint)
+            | JoinOperator::FullOuter(constraint)
+            | JoinOperator::CrossJoin(constraint)
+            | JoinOperator::Semi(constraint)
+            | JoinOperator::LeftSemi(constraint)
+            | JoinOperator::RightSemi(constraint)
+            | JoinOperator::Anti(constraint)
+            | JoinOperator::LeftAnti(constraint)
+            | JoinOperator::RightAnti(constraint)
+            | JoinOperator::StraightJoin(constraint) => self.join_constraint(constraint),
+            JoinOperator::AsOf { match_condition, constraint } => {
+                self.expression(match_condition)?;
+                self.join_constraint(constraint)
+            }
+            JoinOperator::CrossApply
+            | JoinOperator::OuterApply
+            | JoinOperator::ArrayJoin
+            | JoinOperator::LeftArrayJoin
+            | JoinOperator::InnerArrayJoin => Ok(()),
+        }
+    }
+
+    fn join_constraint(&mut self, constraint: &'source JoinConstraint) -> Result<(), LookupError> {
+        match constraint {
+            JoinConstraint::On(expression) => self.expression(expression),
+            JoinConstraint::Using(_) | JoinConstraint::Natural | JoinConstraint::None => Ok(()),
+        }
+    }
+
+    fn xml_table_column(
+        &mut self,
+        option: &'source XmlTableColumnOption,
+    ) -> Result<(), LookupError> {
+        match option {
+            XmlTableColumnOption::NamedInfo { r#type: _, path, default, nullable: _ } => {
+                self.optional_expression(path.as_ref())?;
+                self.optional_expression(default.as_ref())
+            }
+            XmlTableColumnOption::ForOrdinality => Ok(()),
+        }
     }
 
     fn access(&mut self, access: &'source AccessExpr) -> Result<(), LookupError> {
@@ -1500,9 +2424,13 @@ where
     }
 
     fn window(&mut self, window: &'source WindowType) -> Result<(), LookupError> {
-        let WindowType::WindowSpec(specification) = window else {
-            return Ok(());
-        };
+        match window {
+            WindowType::NamedWindow(_) => Ok(()),
+            WindowType::WindowSpec(specification) => self.window_spec(specification),
+        }
+    }
+
+    fn window_spec(&mut self, specification: &'source WindowSpec) -> Result<(), LookupError> {
         self.expressions(&specification.partition_by)?;
         for order in &specification.order_by {
             self.order_by(order)?;
@@ -1761,49 +2689,6 @@ where
             | Expr::MatchAgainst { .. }
             | Expr::Wildcard(_)
             | Expr::QualifiedWildcard(_, _) => Ok(()),
-        }
-    }
-}
-
-fn index_expression_queries<'query, 'db, DB, P>(
-    expression: AstRef<'query, 'db, Expr>,
-    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
-    deriving: Deriving<'_, 'db, DB>,
-    parent: P::Cursor,
-    profile: &mut P,
-) -> Result<(), LookupError>
-where
-    DB: DatabaseLike,
-    P: DerivationProfile<'query, 'db, DB>,
-{
-    match expression {
-        AstRef::Query(expression) => {
-            NestedQueryWalker {
-                query: |query| {
-                    index_nested_query_scopes(
-                        AstRef::Query(query),
-                        cte_scope,
-                        deriving,
-                        parent,
-                        profile,
-                    )
-                },
-            }
-            .expression(expression)
-        }
-        AstRef::Database(expression) => {
-            NestedQueryWalker {
-                query: |query| {
-                    index_nested_query_scopes(
-                        AstRef::Database(query),
-                        cte_scope,
-                        deriving,
-                        parent,
-                        profile,
-                    )
-                },
-            }
-            .expression(expression)
         }
     }
 }
@@ -2277,25 +3162,33 @@ fn visible_merged_boundary(
         .map(|merged| merged.subsumed)
 }
 
-fn opaque_qualifier_matches(identity: OpaqueIdentity<'_, '_>, qualifier: &[Ident]) -> bool {
+fn opaque_qualifier_matches_key(
+    key: RelationKey<'_, '_>,
+    schema: Option<RelationKey<'_, '_>>,
+    qualifier: &[Ident],
+) -> bool {
+    match qualifier {
+        [table] => key_matches(key, table.value.as_str(), table.quote_style.is_some()),
+        [schema_part, table] => {
+            schema.is_some_and(|schema| {
+                key_matches(schema, schema_part.value.as_str(), schema_part.quote_style.is_some())
+            }) && key_matches(key, table.value.as_str(), table.quote_style.is_some())
+        }
+        _ => false,
+    }
+}
+
+fn opaque_qualifier_matches(identity: &OpaqueIdentity<'_, '_>, qualifier: &[Ident]) -> bool {
     match identity {
         OpaqueIdentity::Known { key, schema } => {
-            match qualifier {
-                [table] => key_matches(key, table.value.as_str(), table.quote_style.is_some()),
-                [schema_part, table] => {
-                    schema.is_some_and(|schema| {
-                        key_matches(
-                            schema,
-                            schema_part.value.as_str(),
-                            schema_part.quote_style.is_some(),
-                        )
-                    }) && key_matches(key, table.value.as_str(), table.quote_style.is_some())
-                }
-                _ => false,
-            }
+            opaque_qualifier_matches_key(*key, *schema, qualifier)
+        }
+        OpaqueIdentity::Multiple(qualifiers) => {
+            qualifiers.iter().any(|candidate| {
+                opaque_qualifier_matches_key(candidate.key, candidate.schema, qualifier)
+            })
         }
         OpaqueIdentity::Anonymous => false,
-        OpaqueIdentity::AnyQualifier => true,
     }
 }
 
@@ -2429,7 +3322,7 @@ fn resolve_definition_local<'db, DB: DatabaseLike, D: Copy>(
             }
             if scope.opaque.iter().any(|entry| {
                 entry.entry_index < visible_entries
-                    && opaque_qualifier_matches(entry.identity, &parts[..1])
+                    && opaque_qualifier_matches(&entry.identity, &parts[..1])
             }) {
                 Ok(LookupOutcome::Found(ResolvedColumn { source: None, definition: opaque }))
             } else {
@@ -2458,7 +3351,7 @@ fn resolve_definition_local<'db, DB: DatabaseLike, D: Copy>(
             }
             if scope.opaque.iter().any(|entry| {
                 entry.entry_index < visible_entries
-                    && opaque_qualifier_matches(entry.identity, &parts[..2])
+                    && opaque_qualifier_matches(&entry.identity, &parts[..2])
             }) {
                 Ok(LookupOutcome::Found(ResolvedColumn { source: None, definition: opaque }))
             } else {
@@ -2720,8 +3613,16 @@ fn factor_alias<'query, 'db>(
             | TableFactor::Derived { alias, .. }
             | TableFactor::TableFunction { alias, .. }
             | TableFactor::Function { alias, .. }
-            | TableFactor::NestedJoin { alias, .. } => alias.as_ref(),
-            _ => None,
+            | TableFactor::UNNEST { alias, .. }
+            | TableFactor::JsonTable { alias, .. }
+            | TableFactor::OpenJsonTable { alias, .. }
+            | TableFactor::NestedJoin { alias, .. }
+            | TableFactor::Pivot { alias, .. }
+            | TableFactor::Unpivot { alias, .. }
+            | TableFactor::MatchRecognize { alias, .. }
+            | TableFactor::XmlTable { alias, .. }
+            | TableFactor::SemanticView { alias, .. } => alias.as_ref(),
+            TableFactor::UnpivotExpr { .. } => None,
         }
     })
 }
@@ -2757,6 +3658,115 @@ fn table_function_expression<'query, 'db>(
             _ => None,
         }
     })
+}
+
+fn table_function_name<'query, 'db>(
+    factor: AstRef<'query, 'db, TableFactor>,
+) -> Option<AstRef<'query, 'db, ObjectName>> {
+    match table_function_expression(factor)? {
+        AstRef::Query(Expr::Function(function)) => Some(AstRef::Query(&function.name)),
+        AstRef::Database(Expr::Function(function)) => Some(AstRef::Database(&function.name)),
+        AstRef::Query(_) | AstRef::Database(_) => None,
+    }
+}
+
+fn opaque_identity_from_alias<'query, 'db>(
+    alias: Option<AstRef<'query, 'db, TableAlias>>,
+) -> OpaqueIdentity<'query, 'db> {
+    alias.map_or(OpaqueIdentity::Anonymous, |alias| {
+        OpaqueIdentity::Known { key: alias_key(alias), schema: None }
+    })
+}
+
+fn push_opaque_qualifier<'query, 'db>(
+    first: &mut Option<OpaqueQualifier<'query, 'db>>,
+    additional: &mut Vec<OpaqueQualifier<'query, 'db>>,
+    qualifier: OpaqueQualifier<'query, 'db>,
+) {
+    if first.is_none() {
+        *first = Some(qualifier);
+    } else {
+        additional.push(qualifier);
+    }
+}
+
+fn collect_nested_factor_qualifiers<'query, 'db>(
+    factor: AstRef<'query, 'db, TableFactor>,
+    first: &mut Option<OpaqueQualifier<'query, 'db>>,
+    additional: &mut Vec<OpaqueQualifier<'query, 'db>>,
+) {
+    if let Some(alias) = factor_alias(factor) {
+        push_opaque_qualifier(
+            first,
+            additional,
+            OpaqueQualifier { key: alias_key(alias), schema: None },
+        );
+        return;
+    }
+    match factor.get() {
+        TableFactor::Table { .. } => {
+            let Some(name) = factor_name(factor) else { return };
+            let Some(key) = object_name_key(name) else { return };
+            push_opaque_qualifier(
+                first,
+                additional,
+                OpaqueQualifier { key, schema: object_name_schema(name) },
+            );
+        }
+        TableFactor::TableFunction { .. } => {
+            let Some(key) = table_function_name(factor).and_then(object_name_key) else {
+                return;
+            };
+            push_opaque_qualifier(first, additional, OpaqueQualifier { key, schema: None });
+        }
+        TableFactor::Function { .. } => {
+            let Some(key) = factor_name(factor).and_then(object_name_key) else { return };
+            push_opaque_qualifier(first, additional, OpaqueQualifier { key, schema: None });
+        }
+        TableFactor::NestedJoin { .. } => {
+            let Some(table) = factor.try_map(|factor| {
+                let TableFactor::NestedJoin { table_with_joins, .. } = factor else { return None };
+                Some(table_with_joins.as_ref())
+            }) else {
+                return;
+            };
+            collect_nested_factor_qualifiers(table.map(|table| &table.relation), first, additional);
+            for join in table.map(|table| table.joins.as_slice()).iter() {
+                collect_nested_factor_qualifiers(
+                    join.map(|join| &join.relation),
+                    first,
+                    additional,
+                );
+            }
+        }
+        TableFactor::Derived { .. }
+        | TableFactor::UNNEST { .. }
+        | TableFactor::JsonTable { .. }
+        | TableFactor::OpenJsonTable { .. }
+        | TableFactor::Pivot { .. }
+        | TableFactor::Unpivot { .. }
+        | TableFactor::UnpivotExpr { .. }
+        | TableFactor::MatchRecognize { .. }
+        | TableFactor::XmlTable { .. }
+        | TableFactor::SemanticView { .. } => {}
+    }
+}
+
+fn nested_join_identity<'query, 'db>(
+    factor: AstRef<'query, 'db, TableFactor>,
+) -> OpaqueIdentity<'query, 'db> {
+    if let Some(alias) = factor_alias(factor) {
+        return opaque_identity_from_alias(Some(alias));
+    }
+    let mut first = None;
+    let mut additional = Vec::new();
+    collect_nested_factor_qualifiers(factor, &mut first, &mut additional);
+    let Some(first) = first else { return OpaqueIdentity::Anonymous };
+    if additional.is_empty() {
+        return OpaqueIdentity::Known { key: first.key, schema: first.schema };
+    }
+    additional.insert(0, first);
+    OpaqueIdentity::Multiple(additional)
 }
 
 fn collect_table_factor<'query, 'db, DB, P>(
@@ -2854,10 +3864,7 @@ where
                 None => body,
             };
             let Some(shape) = shape else {
-                return Ok(opaque_factor(match alias {
-                    Some(alias) => OpaqueIdentity::Known { key: alias_key(alias), schema: None },
-                    None => OpaqueIdentity::Anonymous,
-                }));
+                return Ok(opaque_factor(opaque_identity_from_alias(alias)));
             };
             let names = derived_column_names(&shape.columns);
             Ok(FactorContribution {
@@ -2872,17 +3879,9 @@ where
         }
         TableFactor::TableFunction { .. } => {
             let alias = factor_alias(factor);
-            let Some(expression) = table_function_expression(factor) else {
-                return Ok(opaque_factor(OpaqueIdentity::Anonymous));
-            };
-            let function_name = match expression {
-                AstRef::Query(Expr::Function(function)) => Some(AstRef::Query(&function.name)),
-                AstRef::Database(Expr::Function(function)) => {
-                    Some(AstRef::Database(&function.name))
-                }
-                AstRef::Query(_) | AstRef::Database(_) => None,
-            };
-            let key = alias.map(alias_key).or_else(|| function_name.and_then(object_name_key));
+            let key = alias
+                .map(alias_key)
+                .or_else(|| table_function_name(factor).and_then(object_name_key));
             Ok(opaque_factor(key.map_or(OpaqueIdentity::Anonymous, |key| {
                 OpaqueIdentity::Known { key, schema: None }
             })))
@@ -2897,13 +3896,8 @@ where
                 OpaqueIdentity::Known { key, schema: None }
             })))
         }
-        TableFactor::NestedJoin { .. } => {
-            let identity = factor_alias(factor).map_or(OpaqueIdentity::AnyQualifier, |alias| {
-                OpaqueIdentity::Known { key: alias_key(alias), schema: None }
-            });
-            Ok(opaque_factor(identity))
-        }
-        _ => Ok(opaque_factor(OpaqueIdentity::Anonymous)),
+        TableFactor::NestedJoin { .. } => Ok(opaque_factor(nested_join_identity(factor))),
+        _ => Ok(opaque_factor(opaque_identity_from_alias(factor_alias(factor)))),
     }
 }
 

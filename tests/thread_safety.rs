@@ -13,6 +13,14 @@ fn parser_db_is_send_sync() {
 }
 
 #[test]
+fn derived_definition_handles_are_send_sync() {
+    assert_send_sync::<ColumnScope<'static, 'static, ParserDB>>();
+    assert_send_sync::<ColumnDefinitionScope<'static, 'static, 'static, ParserDB>>();
+    assert_send_sync::<ColumnDefinitionRef<'static, 'static, 'static, ParserDB>>();
+    assert_send_sync::<ColumnDefinition<'static, 'static, 'static, ParserDB>>();
+}
+
+#[test]
 fn parser_db_can_be_shared_across_threads() {
     let sql = "
         CREATE TABLE users (id INT PRIMARY KEY, name TEXT);

@@ -111,12 +111,17 @@ enum DefinitionNode<'query, 'db, DB: DatabaseLike> {
 struct ScopeNode<'query, 'db, DB: DatabaseLike> {
     select: Option<AstRef<'query, 'db, Select>>,
     parent: Option<ScopeCursor>,
+    owner: Option<ScopeId>,
     data: FromScope<'query, 'db, DB, DefinitionId>,
 }
 
 struct SelectIndex {
-    pointer: *const Select,
+    address: usize,
     scope: ScopeId,
+}
+
+fn select_address(select: &Select) -> usize {
+    core::ptr::from_ref(select).addr()
 }
 
 pub(crate) struct DefinitionGraph<'query, 'db, DB: DatabaseLike> {
@@ -212,10 +217,9 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionGraph<'query, 'db, DB> {
         origin: ScopeCursor,
         select: &Select,
     ) -> Option<ColumnDefinitionScope<'scope, 'query, 'db, DB>> {
-        let pointer = core::ptr::from_ref(select);
-        let address = pointer.addr();
-        let start = self.select_index.partition_point(|entry| entry.pointer.addr() < address);
-        let end = self.select_index.partition_point(|entry| entry.pointer.addr() <= address);
+        let address = select_address(select);
+        let start = self.select_index.partition_point(|entry| entry.address < address);
+        let end = self.select_index.partition_point(|entry| entry.address <= address);
         self.select_index[start..end]
             .iter()
             .find(|entry| {
@@ -238,13 +242,13 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionGraph<'query, 'db, DB> {
 
     fn descends_from(&self, mut candidate: ScopeId, ancestor: ScopeId) -> bool {
         loop {
-            let Some(parent) = self.scopes[candidate.0].parent else {
+            let Some(owner) = self.scopes[candidate.0].owner else {
                 return false;
             };
-            if parent.scope == ancestor {
+            if owner == ancestor {
                 return true;
             }
-            candidate = parent.scope;
+            candidate = owner;
         }
     }
 }
@@ -276,14 +280,19 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionDerivation<'query, 'db, DB> {
         mut self,
         scope: ScopeId,
     ) -> (DefinitionGraph<'query, 'db, DB>, ScopeCursor) {
-        self.graph.select_index.sort_unstable_by_key(|entry| entry.pointer.addr());
+        self.graph.select_index.sort_unstable_by_key(|entry| entry.address);
         let visible_entries = self.graph.scopes[scope.0].data.from_entry_count;
         (self.graph, ScopeCursor { scope, visible_entries })
     }
 
     pub(super) fn empty_scope(mut self) -> (DefinitionGraph<'query, 'db, DB>, ScopeCursor) {
         let scope = ScopeId(self.graph.scopes.len());
-        self.graph.scopes.push(ScopeNode { select: None, parent: None, data: FromScope::new() });
+        self.graph.scopes.push(ScopeNode {
+            select: None,
+            parent: None,
+            owner: None,
+            data: FromScope::new(),
+        });
         self.finish(scope)
     }
 }
@@ -308,10 +317,14 @@ impl<'query, 'db, DB: DatabaseLike> DerivationProfile<'query, 'db, DB>
         parent: Self::Cursor,
     ) -> Self::Scope {
         let scope = ScopeId(self.graph.scopes.len());
-        self.graph.scopes.push(ScopeNode { select: Some(select), parent, data: FromScope::new() });
-        self.graph
-            .select_index
-            .push(SelectIndex { pointer: core::ptr::from_ref(select.get()), scope });
+        let owner = parent.map(|parent| parent.scope);
+        self.graph.scopes.push(ScopeNode {
+            select: Some(select),
+            parent,
+            owner,
+            data: FromScope::new(),
+        });
+        self.graph.select_index.push(SelectIndex { address: select_address(select.get()), scope });
         scope
     }
 
@@ -334,6 +347,31 @@ impl<'query, 'db, DB: DatabaseLike> DerivationProfile<'query, 'db, DB>
             scope: *scope,
             visible_entries: self.graph.scopes[scope.0].data.from_entry_count,
         })
+    }
+
+    fn cursor_for_select(&self, select: AstRef<'query, 'db, Select>) -> Option<Self::Cursor> {
+        let address = select_address(select.get());
+        self.graph.select_index.iter().rev().find(|entry| entry.address == address).map(|entry| {
+            Some(ScopeCursor {
+                scope: entry.scope,
+                visible_entries: self.graph.scopes[entry.scope.0].data.from_entry_count,
+            })
+        })
+    }
+
+    fn set_scope_owners_since(
+        &mut self,
+        checkpoint: Self::Checkpoint,
+        inherited: Self::Cursor,
+        owner: Self::Cursor,
+    ) {
+        let inherited = inherited.map(|cursor| cursor.scope);
+        let owner = owner.map(|cursor| cursor.scope);
+        for scope in &mut self.graph.scopes[checkpoint.scopes..] {
+            if scope.owner == inherited {
+                scope.owner = owner;
+            }
+        }
     }
 
     fn opaque_definition(&self) -> Self::Definition {
@@ -402,7 +440,12 @@ pub(crate) fn table_graph<'db, DB: DatabaseLike>(
 ) -> (DefinitionGraph<'db, 'db, DB>, ScopeCursor) {
     let mut profile = DefinitionDerivation::new();
     let scope = ScopeId(0);
-    profile.graph.scopes.push(ScopeNode { select: None, parent: None, data: FromScope::new() });
+    profile.graph.scopes.push(ScopeNode {
+        select: None,
+        parent: None,
+        owner: None,
+        data: FromScope::new(),
+    });
     let mut output_columns = Vec::new();
     if let Ok(columns) = table.columns(database) {
         for column in columns {
