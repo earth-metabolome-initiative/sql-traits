@@ -9,6 +9,10 @@ use sqlparser::parser::ParserError;
 pub enum ObjectKind {
     /// A base table.
     Table,
+    /// A view declared by a `CREATE VIEW` statement.
+    View,
+    /// A view declared by a `CREATE MATERIALIZED VIEW` statement.
+    MaterializedView,
     /// A column declared inside a table.
     Column,
     /// An index declared by a `CREATE INDEX` statement.
@@ -33,6 +37,8 @@ impl core::fmt::Display for ObjectKind {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             Self::Table => "Table",
+            Self::View => "View",
+            Self::MaterializedView => "Materialized view",
             Self::Column => "Column",
             Self::Index => "Index",
             Self::UniqueIndex => "Unique index",
@@ -684,17 +690,19 @@ pub enum Error {
         /// The operation rendered by sqlparser.
         operation: String,
     },
-    #[error("Schema `{schema_name}` not found for table `{table_name}`.")]
-    /// Error indicating that a `CREATE TABLE` statement qualifies its name with
-    /// a schema no `CREATE SCHEMA` in the input creates.
+    #[error("Schema `{schema_name}` not found for {object_kind} `{relation_name}`.")]
+    /// Error indicating that a statement creating a relation qualifies its
+    /// name with a schema no `CREATE SCHEMA` in the input creates.
     ///
     /// The default schema is exempt, since no dump emits a statement creating
     /// it.
-    SchemaNotFoundForTable {
+    SchemaNotFoundForRelation {
         /// Name of the schema that was not found.
         schema_name: String,
-        /// Name of the table qualified with it.
-        table_name: String,
+        /// Kind of relation qualified with it.
+        object_kind: ObjectKind,
+        /// Name of the relation qualified with it.
+        relation_name: String,
     },
     #[error("Schema `{schema_name}` not found for collation `{collation_name}`.")]
     /// Error indicating that a collation is created in an absent schema.
@@ -704,13 +712,15 @@ pub enum Error {
         /// Name of the collation qualified with it.
         collation_name: String,
     },
-    #[error("No schema has been selected to create table `{table_name}` in.")]
-    /// Error indicating that a `CREATE TABLE` statement names no schema at a
-    /// point where the search path selects none either, because `SET
+    #[error("No schema has been selected to create {object_kind} `{relation_name}` in.")]
+    /// Error indicating that a statement creating a relation names no schema at
+    /// a point where the search path selects none either, because `SET
     /// search_path TO ''` emptied it.
-    NoSchemaSelectedForTable {
-        /// Name of the table that named no schema.
-        table_name: String,
+    NoSchemaSelectedForRelation {
+        /// Kind of relation that named no schema.
+        object_kind: ObjectKind,
+        /// Name of the relation that named no schema.
+        relation_name: String,
     },
     #[error("No schema has been selected to create collation `{collation_name}` in.")]
     /// Error indicating that a `CREATE COLLATION` statement names no creatable
@@ -777,14 +787,14 @@ pub enum Error {
     #[error(
         "{object_kind} `{object_name}` cannot be created: {conflicting_kind} `{object_name}` already uses that name in the same schema."
     )]
-    /// Error indicating that a statement names an index or a table with a name
+    /// Error indicating that a statement names a relation with a name
     /// something else in the same schema already holds.
     ///
-    /// PostgreSQL keeps index names in one pool per schema, shared with table
-    /// names, and a named `UNIQUE` or `PRIMARY KEY` constraint puts the name of
-    /// the index behind it in that pool too. Views and sequences share the pool
-    /// as well, and this crate models neither, so the rule it enforces is the
-    /// part of PostgreSQL's it can see.
+    /// PostgreSQL keeps tables, views, materialized views and index names in
+    /// one pool per schema, and a named `UNIQUE` or `PRIMARY KEY` constraint
+    /// puts the name of the index behind it in that pool too. Sequences share
+    /// the pool as well, and this crate does not model those, so the rule it
+    /// enforces is the part of PostgreSQL's it can see.
     RelationNameAlreadyTaken {
         /// Kind of object the statement tried to create.
         object_kind: ObjectKind,
@@ -792,6 +802,118 @@ pub enum Error {
         conflicting_kind: ObjectKind,
         /// The contested name.
         object_name: String,
+    },
+    #[error("{object_kind} `{object_name}` not found.")]
+    /// Error indicating that a statement names a relation the input never
+    /// creates, where the statement carried no `IF EXISTS`.
+    RelationNotFound {
+        /// Kind of relation the statement asked for.
+        object_kind: ObjectKind,
+        /// Name the statement wrote.
+        object_name: String,
+    },
+    #[error("`{object_name}` is a {actual_kind}, not a {expected_kind}.")]
+    /// Error indicating that a statement names an existing relation of the
+    /// wrong kind, which PostgreSQL refuses rather than treating the spellings
+    /// as interchangeable: `DROP TABLE` will not drop a view, `DROP VIEW` will
+    /// not drop a table or a materialized view, and `DROP MATERIALIZED VIEW`
+    /// will not drop a plain view.
+    RelationKindMismatch {
+        /// Name the statement wrote.
+        object_name: String,
+        /// Kind the statement's spelling asked for.
+        expected_kind: ObjectKind,
+        /// Kind the name actually holds.
+        actual_kind: ObjectKind,
+    },
+    #[error(
+        "Cannot change name of view column `{existing_column}` to `{new_column}` of view `{view_name}`."
+    )]
+    /// Error indicating that `CREATE OR REPLACE VIEW` renames an output column.
+    ///
+    /// PostgreSQL allows a replacement to add columns on the end and nothing
+    /// else, so a rename is refused with the hint to use `ALTER VIEW ... RENAME
+    /// COLUMN` instead. This is checked only when both the recorded and the
+    /// replacing shapes can be read, which an explicit column list always
+    /// allows and a definition the resolver cannot see into does not.
+    ViewColumnRenamedByReplace {
+        /// Name of the view being replaced.
+        view_name: String,
+        /// Name the recorded shape exposes at that position.
+        existing_column: String,
+        /// Name the replacement would expose there.
+        new_column: String,
+    },
+    #[error("Cannot drop columns from view `{view_name}`.")]
+    /// Error indicating that `CREATE OR REPLACE VIEW` leaves out an output
+    /// column the recorded shape exposes.
+    ///
+    /// A replacement may only add columns on the end.
+    ViewColumnsDroppedByReplace {
+        /// Name of the view being replaced.
+        view_name: String,
+    },
+    #[error("Materialized view `{view_name}` cannot be replaced.")]
+    /// Error indicating that the input writes `CREATE OR REPLACE MATERIALIZED
+    /// VIEW`, which the parser accepts and PostgreSQL rejects as a syntax
+    /// error: a materialized view has no replace form at all.
+    MaterializedViewCannotBeReplaced {
+        /// Name the statement wrote.
+        view_name: String,
+    },
+    #[error("`CREATE VIEW` does not take `IF NOT EXISTS`, so view `{view_name}` cannot use it.")]
+    /// Error indicating that the input writes `CREATE VIEW ... IF NOT EXISTS`,
+    /// which the parser accepts and PostgreSQL rejects as a syntax error.
+    /// `CREATE OR REPLACE VIEW` is the spelling PostgreSQL offers instead, and
+    /// the materialized form does take `IF NOT EXISTS`.
+    ViewIfNotExistsUnsupported {
+        /// Name the statement wrote.
+        view_name: String,
+    },
+    #[error("View `{view_name}` specifies more column names than columns.")]
+    /// Error indicating that a view's explicit column list is longer than what
+    /// its definition produces.
+    ///
+    /// Checked only when the definition's output columns can be counted.
+    ViewColumnListTooLong {
+        /// Name the statement wrote.
+        view_name: String,
+    },
+    #[error(
+        "{object_kind} `{object_name}` cannot be dropped because {dependent_kind} `{dependent_name}` reads it."
+    )]
+    /// Error indicating that a statement drops a relation a view reads.
+    ///
+    /// PostgreSQL refuses without `CASCADE`, and `CASCADE` drops the reading
+    /// views along with it. A view whose definition read a relation dropped
+    /// from under it would name nothing, which is the dangling reference this
+    /// refusal exists to prevent.
+    RelationHasDependents {
+        /// Kind of relation the statement drops.
+        object_kind: ObjectKind,
+        /// Name of the relation the statement drops.
+        object_name: String,
+        /// Kind of the view reading it.
+        dependent_kind: ObjectKind,
+        /// Name of the view reading it.
+        dependent_name: String,
+    },
+    #[error(
+        "ALTER action {operation} cannot be performed on {object_kind} `{relation_name}`: this operation is not supported for it."
+    )]
+    /// Error indicating that an `ALTER TABLE` names a view and asks for
+    /// something only a table can do.
+    ///
+    /// PostgreSQL accepts `ALTER TABLE` against a view for the handful of
+    /// actions a view supports, renaming it and changing its owner among them,
+    /// and refuses the rest naming the action.
+    AlterActionUnsupportedOnRelation {
+        /// Kind of relation the name holds.
+        object_kind: ObjectKind,
+        /// Name the statement wrote.
+        relation_name: String,
+        /// The action, rendered by the parser.
+        operation: String,
     },
     #[error("Policy `{policy_name}` already exists on table `{table_name}`.")]
     /// Error indicating that a `CREATE POLICY` statement names a policy the

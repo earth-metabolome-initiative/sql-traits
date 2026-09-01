@@ -1,53 +1,37 @@
 //! Implementation of the `DatabaseLike` trait for `GenericDB`.
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 use crate::{
     errors::LookupError,
-    structs::{GenericDB, TargetName},
-    traits::{
-        CheckConstraintLike, ColumnGrantLike, ColumnLike, DatabaseLike, DialectLike,
-        ForeignKeyLike, FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike,
-        TableLike, TriggerLike, UniqueIndexLike,
-    },
+    structs::{GenericDB, SchemaProfile, TargetName, generic_db::RelationSlot},
+    traits::{DatabaseLike, FunctionLike, TableLike},
     utils::{
         identifier_resolution::{normalize_identifier, stored_identifier_matches_lookup},
-        object_name::{TableTargetKey, lookup_key, resolve_target_from_candidates, target_key},
+        object_name::{
+            RelationKey, lookup_key, render_view_candidate, resolve_one_relation,
+            resolve_target_from_candidates, target_key,
+        },
     },
 };
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> DatabaseLike
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike<DB = Self>,
-    C: ColumnLike<DB = Self>,
-    I: IndexLike<DB = Self>,
-    U: UniqueIndexLike<DB = Self>,
-    F: ForeignKeyLike<DB = Self>,
-    Func: FunctionLike<DB = Self>,
-    Ch: CheckConstraintLike<DB = Self>,
-    Tr: TriggerLike<DB = Self>,
-    P: PolicyLike<DB = Self>,
-    R: RoleLike<DB = Self>,
-    S: SchemaLike<DB = Self>,
-    TG: TableGrantLike<DB = Self>,
-    CG: ColumnGrantLike<DB = Self>,
-    D: DialectLike<DB = Self>,
-{
-    type Table = T;
-    type Column = C;
-    type Index = I;
-    type ForeignKey = F;
-    type Function = Func;
-    type UniqueIndex = U;
-    type CheckConstraint = Ch;
-    type Trigger = Tr;
-    type Policy = P;
-    type Role = R;
-    type TableGrant = TG;
-    type ColumnGrant = CG;
-    type Schema = S;
-    type Dialect = D;
+impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
+    type Table = P::Table;
+    type View = P::View;
+    type MaterializedView = P::MaterializedView;
+    type Column = P::Column;
+    type Index = P::Index;
+    type ForeignKey = P::ForeignKey;
+    type Function = P::Function;
+    type UniqueIndex = P::UniqueIndex;
+    type CheckConstraint = P::CheckConstraint;
+    type Trigger = P::Trigger;
+    type Policy = P::Policy;
+    type Role = P::Role;
+    type TableGrant = P::TableGrant;
+    type ColumnGrant = P::ColumnGrant;
+    type Schema = P::Schema;
+    type Dialect = P::Dialect;
 
     #[inline]
     fn dialect(&self) -> &Self::Dialect {
@@ -75,11 +59,27 @@ where
     }
 
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table> {
-        let key = lookup_key(schema, table_name);
-        self.indexed_table_positions(&key)
-            .next()
-            .and_then(|position| self.tables.get(position))
-            .map(|(table, _)| table.as_ref())
+        self.indexed_tables(&lookup_key(schema, table_name)).next()
+    }
+
+    fn views(&self) -> impl Iterator<Item = &Self::View> {
+        self.views.iter().map(|(view, _)| view.as_ref())
+    }
+
+    fn materialized_views(&self) -> impl Iterator<Item = &Self::MaterializedView> {
+        self.materialized_views.iter().map(|(view, _)| view.as_ref())
+    }
+
+    fn view(&self, schema: Option<&str>, view_name: &str) -> Option<&Self::View> {
+        self.indexed_views(&lookup_key(schema, view_name)).next()
+    }
+
+    fn materialized_view(
+        &self,
+        schema: Option<&str>,
+        view_name: &str,
+    ) -> Option<&Self::MaterializedView> {
+        self.indexed_materialized_views(&lookup_key(schema, view_name)).next()
     }
 
     fn table_id(&self, table: &Self::Table) -> Option<usize> {
@@ -95,6 +95,20 @@ where
         target: TargetName<'_>,
     ) -> Result<Option<&Self::Table>, LookupError> {
         self.resolve_target_table_on_path(&target)
+    }
+
+    fn resolve_target_view(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::View>, LookupError> {
+        self.resolve_target_view_on_path(&target)
+    }
+
+    fn resolve_target_materialized_view(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::MaterializedView>, LookupError> {
+        self.resolve_target_materialized_view_on_path(&target)
     }
 
     fn table_by_id(&self, table_id: usize) -> Option<&Self::Table> {
@@ -149,34 +163,63 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-    GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
-    /// Positions in `tables` whose stored identity equals `key`, ascending.
-    fn indexed_table_positions(&self, key: &TableTargetKey) -> impl Iterator<Item = usize> {
-        self.table_index.get(key).map_or(&[][..], Vec::as_slice).iter().copied()
+impl<P: SchemaProfile> GenericDB<P> {
+    /// Slots of every relation whose stored identity equals `key`.
+    fn indexed_relation_slots(&self, key: &RelationKey) -> &[RelationSlot] {
+        self.relation_index.get(key).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// Whether any relation of any kind answers `key`.
+    ///
+    /// Tables, views and materialized views share one pool of names, so this
+    /// is what a creation asks before taking a name.
+    pub(super) fn relation_key_is_taken(&self, key: &RelationKey) -> bool {
+        !self.indexed_relation_slots(key).is_empty()
     }
 
     /// Tables whose stored identity equals `key`, in storage order.
-    pub(super) fn indexed_tables(&self, key: &TableTargetKey) -> impl Iterator<Item = &T> {
-        self.indexed_table_positions(key)
-            .filter_map(|position| self.tables.get(position))
+    pub(super) fn indexed_tables(&self, key: &RelationKey) -> impl Iterator<Item = &P::Table> {
+        self.indexed_relation_slots(key)
+            .iter()
+            .filter_map(|slot| {
+                match slot {
+                    RelationSlot::Table(position) => self.tables.get(*position),
+                    RelationSlot::View(_) | RelationSlot::MaterializedView(_) => None,
+                }
+            })
             .map(|(table, _)| table.as_ref())
+    }
+
+    /// Plain views whose stored identity equals `key`, in storage order.
+    pub(super) fn indexed_views(&self, key: &RelationKey) -> impl Iterator<Item = &P::View> {
+        self.indexed_relation_slots(key)
+            .iter()
+            .filter_map(|slot| {
+                match slot {
+                    RelationSlot::View(position) => self.views.get(*position),
+                    RelationSlot::Table(_) | RelationSlot::MaterializedView(_) => None,
+                }
+            })
+            .map(|(view, _)| view.as_ref())
+    }
+
+    /// Materialized views whose stored identity equals `key`, in storage
+    /// order.
+    pub(super) fn indexed_materialized_views(
+        &self,
+        key: &RelationKey,
+    ) -> impl Iterator<Item = &P::MaterializedView> {
+        self.indexed_relation_slots(key)
+            .iter()
+            .filter_map(|slot| {
+                match slot {
+                    RelationSlot::MaterializedView(position) => {
+                        self.materialized_views.get(*position)
+                    }
+                    RelationSlot::Table(_) | RelationSlot::View(_) => None,
+                }
+            })
+            .map(|(view, _)| view.as_ref())
     }
 
     /// Resolves a written target against the index, ignoring any search path.
@@ -188,8 +231,8 @@ where
     pub(super) fn resolve_target_table_strict(
         &self,
         target: &TargetName<'_>,
-    ) -> Result<Option<&T>, LookupError> {
-        let candidates: Vec<&T> = self.indexed_tables(&target_key(target)).collect();
+    ) -> Result<Option<&P::Table>, LookupError> {
+        let candidates: Vec<&P::Table> = self.indexed_tables(&target_key(target)).collect();
         resolve_target_from_candidates(target, &candidates)
     }
 
@@ -202,26 +245,92 @@ where
     pub(super) fn resolve_target_table_on_path(
         &self,
         target: &TargetName<'_>,
-    ) -> Result<Option<&T>, LookupError> {
+    ) -> Result<Option<&P::Table>, LookupError> {
         if target.schema().is_some() {
             return self.resolve_target_table_strict(target);
         }
 
         let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
         for (entry_schema, entry_quoted) in &self.search_path {
-            let key = TableTargetKey {
+            let key = RelationKey {
                 schema: normalize_identifier(entry_schema, *entry_quoted).into_owned(),
                 name: name.clone(),
             };
-            if let Some(positions) = self.table_index.get(&key) {
-                let candidates: Vec<&T> = positions
-                    .iter()
-                    .filter_map(|position| self.tables.get(*position))
-                    .map(|(table, _)| table.as_ref())
-                    .collect();
+            if self.relation_key_is_taken(&key) {
+                let candidates: Vec<&P::Table> = self.indexed_tables(&key).collect();
                 // Reported under the written name: the entry qualifier is
                 // resolution machinery, not something the statement spelled.
+                // A schema holding the name under another relation kind still
+                // ends the walk, as PostgreSQL's own name resolution does.
                 return resolve_target_from_candidates(target, &candidates);
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Resolves a written target to a plain view, applying the search path to
+    /// an unqualified name exactly as a table lookup does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches
+    /// more than one view in the schema that wins.
+    pub(super) fn resolve_target_view_on_path(
+        &self,
+        target: &TargetName<'_>,
+    ) -> Result<Option<&P::View>, LookupError> {
+        self.resolve_relation_on_path(
+            target,
+            |db, key| db.indexed_views(key).collect(),
+            render_view_candidate,
+        )
+    }
+
+    /// Resolves a written target to a materialized view, applying the search
+    /// path to an unqualified name exactly as a table lookup does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches
+    /// more than one materialized view in the schema that wins.
+    pub(super) fn resolve_target_materialized_view_on_path(
+        &self,
+        target: &TargetName<'_>,
+    ) -> Result<Option<&P::MaterializedView>, LookupError> {
+        self.resolve_relation_on_path(
+            target,
+            |db, key| db.indexed_materialized_views(key).collect(),
+            render_view_candidate,
+        )
+    }
+
+    /// Resolves a written target to one relation of a kind, walking the search
+    /// path for an unqualified name.
+    ///
+    /// A schema holding the name under any relation kind ends the walk, as
+    /// PostgreSQL's own name resolution does, so a name taken by a table is
+    /// not looked for again further along the path as a view.
+    fn resolve_relation_on_path<'db, R>(
+        &'db self,
+        target: &TargetName<'_>,
+        candidates_of: impl Fn(&'db Self, &RelationKey) -> Vec<&'db R>,
+        render: impl Fn(&R) -> String,
+    ) -> Result<Option<&'db R>, LookupError> {
+        if target.schema().is_some() {
+            let candidates = candidates_of(self, &target_key(target));
+            return resolve_one_relation(target, &candidates, render);
+        }
+
+        let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
+        for (entry_schema, entry_quoted) in &self.search_path {
+            let key = RelationKey {
+                schema: normalize_identifier(entry_schema, *entry_quoted).into_owned(),
+                name: name.clone(),
+            };
+            if self.relation_key_is_taken(&key) {
+                let candidates = candidates_of(self, &key);
+                return resolve_one_relation(target, &candidates, render);
             }
         }
 

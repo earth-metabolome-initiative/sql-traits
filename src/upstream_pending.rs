@@ -33,3 +33,11 @@
 //! - `ALTER PROCEDURE` and the PostgreSQL body spelling of `CREATE PROCEDURE`
 //!   do not parse. This costs nothing yet, since no procedure can exist here
 //!   for a statement to alter.
+//! - `ALTER VIEW` does not parse in any spelling, so a recorded view can never
+//!   be renamed, have a column renamed, change owner, or move schema. Only
+//!   `ALTER TABLE <view> RENAME TO` and `OWNER TO`, which the server also
+//!   accepts, are reachable. `CREATE RECURSIVE VIEW`, `REFRESH MATERIALIZED
+//!   VIEW` and `CREATE MATERIALIZED VIEW ... WITH NO DATA` do not parse either,
+//!   and the parser accepts `CREATE VIEW IF NOT EXISTS` and `CREATE OR REPLACE
+//!   MATERIALIZED VIEW`, both of which PostgreSQL refuses, so this crate
+//!   refuses them itself.

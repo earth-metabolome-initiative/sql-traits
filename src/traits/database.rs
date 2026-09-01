@@ -15,11 +15,11 @@ use crate::{
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
-        TriggerLike, UniqueIndexLike,
+        TriggerLike, UniqueIndexLike, ViewLike,
     },
     utils::{
         identifier_resolution::stored_identifier_matches_lookup,
-        object_name::resolve_target_on_search_path_in_iter,
+        object_name::{resolve_target_on_search_path_in_iter, resolve_view_on_search_path_in_iter},
     },
 };
 
@@ -27,6 +27,10 @@ use crate::{
 pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// Type of the tables in the schema.
     type Table: TableLike<DB = Self>;
+    /// Type of the plain views in the schema.
+    type View: ViewLike<DB = Self>;
+    /// Type of the materialized views in the schema.
+    type MaterializedView: ViewLike<DB = Self>;
     /// Type of the columns in the schema.
     type Column: ColumnLike<DB = Self>;
     /// Type of the indices in the schema.
@@ -478,6 +482,92 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// [`ParserDB::resolve_table_object_name_on_search_path`](crate::structs::ParserDB::resolve_table_object_name_on_search_path).
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
 
+    /// Iterates over the plain views defined in the schema.
+    ///
+    /// Views are listed apart from tables rather than mixed in, because a view
+    /// has no columns of its own and, unlike a table, cannot be written to in
+    /// general.
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT);
+    ///      CREATE VIEW v AS SELECT id FROM t;
+    ///      CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
+    /// )?;
+    /// assert_eq!(db.views().count(), 1);
+    /// assert_eq!(db.tables().count(), 1);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn views(&self) -> impl Iterator<Item = &Self::View>;
+
+    /// Iterates over the materialized views defined in the schema.
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT); CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
+    /// )?;
+    /// assert_eq!(db.materialized_views().count(), 1);
+    /// assert!(db.views().next().is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn materialized_views(&self) -> impl Iterator<Item = &Self::MaterializedView>;
+
+    /// Returns the plain view with the given (optional) schema and name.
+    ///
+    /// The name matches under PostgreSQL's identifier rules, so an unquoted
+    /// lookup folds to lowercase and a quoted one matches exactly, the same as
+    /// [`Self::table`]. A materialized view of that name answers [`None`]
+    /// here: ask [`Self::materialized_view`] for those.
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT);
+    ///      CREATE SCHEMA app;
+    ///      CREATE VIEW app.v AS SELECT id FROM t;",
+    /// )?;
+    /// assert!(db.view(Some("app"), "v").is_some());
+    /// assert!(db.view(None, "v").is_none());
+    /// assert!(db.materialized_view(Some("app"), "v").is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn view(&self, schema: Option<&str>, view_name: &str) -> Option<&Self::View>;
+
+    /// Returns the materialized view with the given (optional) schema and
+    /// name.
+    ///
+    /// A plain view of that name answers [`None`] here: ask [`Self::view`] for
+    /// those.
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT); CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
+    /// )?;
+    /// assert!(db.materialized_view(None, "m").is_some());
+    /// assert!(db.view(None, "m").is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn materialized_view(
+        &self,
+        schema: Option<&str>,
+        view_name: &str,
+    ) -> Option<&Self::MaterializedView>;
+
     /// Resolves a name a statement wrote into the table it denotes, applying
     /// PostgreSQL's rules: an unqualified name resolves through the first
     /// schema on [`Self::search_path`] holding it, a table stored without a
@@ -521,6 +611,38 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
         target: TargetName<'_>,
     ) -> Result<Option<&Self::Table>, LookupError> {
         resolve_target_on_search_path_in_iter(self.tables(), &target, self.search_path())
+    }
+
+    /// Resolves a name a statement wrote into the plain view it denotes,
+    /// applying the same rules as [`Self::resolve_target_table`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches more
+    /// than one view, and [`LookupError::InvalidObjectName`] when the name is
+    /// malformed.
+    #[inline]
+    fn resolve_target_view(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::View>, LookupError> {
+        resolve_view_on_search_path_in_iter(self.views(), &target, self.search_path())
+    }
+
+    /// Resolves a name a statement wrote into the materialized view it denotes,
+    /// applying the same rules as [`Self::resolve_target_table`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches more
+    /// than one materialized view, and [`LookupError::InvalidObjectName`] when
+    /// the name is malformed.
+    #[inline]
+    fn resolve_target_materialized_view(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::MaterializedView>, LookupError> {
+        resolve_view_on_search_path_in_iter(self.materialized_views(), &target, self.search_path())
     }
 
     /// Returns the table ID for the given table object according to its

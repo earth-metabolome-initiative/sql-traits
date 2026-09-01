@@ -2,114 +2,108 @@
 
 mod builder;
 mod database;
+mod profile;
 mod sqlparser;
 
 use alloc::{
     collections::BTreeMap,
     string::{String, ToString},
-    sync::Arc,
     vec::Vec,
 };
 use core::fmt::Debug;
 
 pub use builder::GenericDBBuilder;
+pub(crate) use profile::Stored;
+pub use profile::{Meta, SchemaProfile};
 pub use sqlparser::{
     AccessResolution, ParseOptions, ParserDB, ParserDBBuilder, PostgresCatalog,
-    PostgresCatalogCollation, PostgresCatalogType, UnresolvedAccessReference,
+    PostgresCatalogCollation, PostgresCatalogType, SqlparserProfile, UnresolvedAccessReference,
 };
 
 use crate::{
-    traits::{
-        CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
-        FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
-        TriggerLike, UniqueIndexLike,
+    traits::{FunctionLike, PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
+    utils::{
+        identifier_resolution::stored_identifier_matches_lookup,
+        object_name::{RelationKey, stored_view_key},
     },
-    utils::{identifier_resolution::stored_identifier_matches_lookup, object_name::TableTargetKey},
 };
 
+/// Where the relation holding a shared name lives: which kind it is, and its
+/// position in that kind's collection.
+///
+/// PostgreSQL keeps tables, views and materialized views in one pool of
+/// names, so one index answers all three and a lookup for a kind keeps only
+/// the slots of that kind. Crate-private: it names positions inside private
+/// collections, which no caller outside can hold or use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum RelationSlot {
+    /// A table, at this position in the table collection.
+    Table(usize),
+    /// A plain view, at this position in the view collection.
+    View(usize),
+    /// A materialized view, at this position in its collection.
+    MaterializedView(usize),
+}
+
 /// A generic representation of a database schema.
-pub struct GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
+pub struct GenericDB<P: SchemaProfile> {
     /// SQL dialect of the database.
-    dialect: D,
+    dialect: P::Dialect,
     /// Catalog name of the database.
     catalog_name: String,
     /// Timezone of the database.
     timezone: Option<String>,
     /// List of tables in the database.
-    tables: Vec<(Arc<T>, T::Meta)>,
-    /// Tables by normalized `(schema, name)`, values positions in `tables`.
+    tables: Vec<Stored<P::Table>>,
+    /// List of plain views in the database.
+    views: Vec<Stored<P::View>>,
+    /// List of materialized views in the database.
+    materialized_views: Vec<Stored<P::MaterializedView>>,
+    /// Relations by normalized `(schema, name)`, values their storage slots.
     ///
-    /// Lists hold every table a key matched, ascending, so lookup answers and
-    /// ambiguity reporting agree with scanning the list.
-    table_index: BTreeMap<TableTargetKey, Vec<usize>>,
+    /// PostgreSQL keeps tables, views and materialized views in one pool of
+    /// names, so all three share this index and a creation collides with
+    /// whichever kind already holds the name. Lists hold every relation a key
+    /// matched, ascending within a kind, so lookup answers and ambiguity
+    /// reporting agree with scanning the list.
+    relation_index: BTreeMap<RelationKey, Vec<RelationSlot>>,
     /// List of columns in the database.
-    columns: Vec<(Arc<C>, C::Meta)>,
+    columns: Vec<Stored<P::Column>>,
     /// List of indices in the database.
-    indices: Vec<(Arc<I>, I::Meta)>,
+    indices: Vec<Stored<P::Index>>,
     /// List of unique indices in the database.
-    unique_indices: Vec<(Arc<U>, U::Meta)>,
+    unique_indices: Vec<Stored<P::UniqueIndex>>,
     /// List of foreign keys in the database.
-    foreign_keys: Vec<(Arc<F>, F::Meta)>,
+    foreign_keys: Vec<Stored<P::ForeignKey>>,
     /// List of functions created in the database.
-    functions: Vec<(Arc<Func>, Func::Meta)>,
+    functions: Vec<Stored<P::Function>>,
     /// List of triggers created in the database.
-    triggers: Vec<(Arc<Tr>, Tr::Meta)>,
+    triggers: Vec<Stored<P::Trigger>>,
     /// List of policies created in the database.
-    policies: Vec<(Arc<P>, P::Meta)>,
+    policies: Vec<Stored<P::Policy>>,
     /// List of check constraints in the database.
-    check_constraints: Vec<(Arc<Ch>, Ch::Meta)>,
+    check_constraints: Vec<Stored<P::CheckConstraint>>,
     /// List of roles in the database.
-    roles: Vec<(Arc<R>, R::Meta)>,
+    roles: Vec<Stored<P::Role>>,
     /// List of table grants in the database.
-    table_grants: Vec<(Arc<TG>, TG::Meta)>,
+    table_grants: Vec<Stored<P::TableGrant>>,
     /// List of column grants in the database.
-    column_grants: Vec<(Arc<CG>, CG::Meta)>,
+    column_grants: Vec<Stored<P::ColumnGrant>>,
     /// List of schemas in the database.
-    schemas: Vec<(Arc<S>, S::Meta)>,
+    schemas: Vec<Stored<P::Schema>>,
     /// Schemas an unqualified name resolves against, in order.
     search_path: Vec<(String, bool)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> Debug
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
+impl<P: SchemaProfile> Debug for GenericDB<P> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("GenericDB")
             .field("dialect", &self.dialect)
             .field("catalog_name", &self.catalog_name)
             .field("timezone", &self.timezone)
             .field("tables", &self.tables.len())
+            .field("views", &self.views.len())
+            .field("materialized_views", &self.materialized_views.len())
             .field("columns", &self.columns.len())
             .field("indices", &self.indices.len())
             .field("unique_indices", &self.unique_indices.len())
@@ -123,35 +117,20 @@ where
             .field("column_grants", &self.column_grants.len())
             .field("schemas", &self.schemas.len())
             .field("search_path", &self.search_path)
-            .field("table_index", &self.table_index.len())
+            .field("relation_index", &self.relation_index.len())
             .finish()
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> Clone
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
+impl<P: SchemaProfile> Clone for GenericDB<P> {
     fn clone(&self) -> Self {
         Self {
             dialect: self.dialect.clone(),
             catalog_name: self.catalog_name.clone(),
             timezone: self.timezone.clone(),
             tables: self.tables.clone(),
+            views: self.views.clone(),
+            materialized_views: self.materialized_views.clone(),
             columns: self.columns.clone(),
             indices: self.indices.clone(),
             unique_indices: self.unique_indices.clone(),
@@ -165,36 +144,16 @@ where
             column_grants: self.column_grants.clone(),
             schemas: self.schemas.clone(),
             search_path: self.search_path.clone(),
-            table_index: self.table_index.clone(),
+            relation_index: self.relation_index.clone(),
         }
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-    GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
+impl<P: SchemaProfile> GenericDB<P> {
     /// Creates a new `GenericDBBuilder` instance.
     #[must_use]
     #[allow(clippy::type_complexity)]
-    pub fn new(
-        catalog_name: String,
-        dialect: D,
-    ) -> GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D> {
+    pub fn new(catalog_name: String, dialect: P::Dialect) -> GenericDBBuilder<P> {
         GenericDBBuilder::new(catalog_name, dialect)
     }
 
@@ -219,7 +178,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn table_metadata(&self, table: &T) -> Option<&T::Meta> {
+    pub fn table_metadata(&self, table: &P::Table) -> Option<&Meta<P::Table>> {
         self.tables
             .binary_search_by_key(
                 &(
@@ -235,6 +194,61 @@ where
             )
             .ok()
             .map(|index| &self.tables[index].1)
+    }
+
+    /// Returns a reference to the metadata of the specified view, if it exists
+    /// in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT); CREATE VIEW v AS SELECT id FROM t;",
+    /// )?;
+    /// let view = db.view(None, "v").expect("the view is recorded");
+    /// assert!(db.view_metadata(view).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn view_metadata(&self, view: &P::View) -> Option<&Meta<P::View>> {
+        self.views
+            .binary_search_by(|(candidate, _)| {
+                stored_view_key(candidate.as_ref()).cmp(&stored_view_key(view))
+            })
+            .ok()
+            .map(|index| &self.views[index].1)
+    }
+
+    /// Returns a reference to the metadata of the specified materialized view,
+    /// if it exists in the database.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT); CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
+    /// )?;
+    /// let view = db.materialized_view(None, "m").expect("the view is recorded");
+    /// assert!(db.materialized_view_metadata(view).is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn materialized_view_metadata(
+        &self,
+        view: &P::MaterializedView,
+    ) -> Option<&Meta<P::MaterializedView>> {
+        self.materialized_views
+            .binary_search_by(|(candidate, _)| {
+                stored_view_key(candidate.as_ref()).cmp(&stored_view_key(view))
+            })
+            .ok()
+            .map(|index| &self.materialized_views[index].1)
     }
 
     /// Returns a reference to the metadata of the specified column, if it
@@ -254,7 +268,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn column_metadata(&self, column: &C) -> Option<&C::Meta> {
+    pub fn column_metadata(&self, column: &P::Column) -> Option<&Meta<P::Column>> {
         self.columns
             .binary_search_by(|(c, _)| c.as_ref().cmp(column))
             .ok()
@@ -279,7 +293,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn unique_index_metadata(&self, index: &U) -> Option<&U::Meta> {
+    pub fn unique_index_metadata(&self, index: &P::UniqueIndex) -> Option<&Meta<P::UniqueIndex>> {
         self.unique_indices
             .binary_search_by(|(i, _)| i.as_ref().cmp(index))
             .ok()
@@ -302,7 +316,10 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn check_constraint_metadata(&self, constraint: &Ch) -> Option<&Ch::Meta> {
+    pub fn check_constraint_metadata(
+        &self,
+        constraint: &P::CheckConstraint,
+    ) -> Option<&Meta<P::CheckConstraint>> {
         self.check_constraints
             .binary_search_by(|(c, _)| c.as_ref().cmp(constraint))
             .ok()
@@ -330,7 +347,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn foreign_key_metadata(&self, key: &F) -> Option<&F::Meta> {
+    pub fn foreign_key_metadata(&self, key: &P::ForeignKey) -> Option<&Meta<P::ForeignKey>> {
         self.foreign_keys
             .binary_search_by(|(k, _)| k.as_ref().cmp(key))
             .ok()
@@ -355,7 +372,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn index_metadata(&self, index: &I) -> Option<&I::Meta> {
+    pub fn index_metadata(&self, index: &P::Index) -> Option<&Meta<P::Index>> {
         self.indices
             .binary_search_by(|(i, _)| i.as_ref().cmp(index))
             .ok()
@@ -383,7 +400,7 @@ where
     /// # }
     /// ```
     #[must_use]
-    pub fn function(&self, name: &str) -> Option<&Func> {
+    pub fn function(&self, name: &str) -> Option<&P::Function> {
         self.functions.iter().find_map(|(function, _)| {
             stored_identifier_matches_lookup(function.name(), function.name_is_quoted(), name)
                 .then_some(function.as_ref())
@@ -410,7 +427,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn function_metadata(&self, function: &Func) -> Option<&Func::Meta> {
+    pub fn function_metadata(&self, function: &P::Function) -> Option<&Meta<P::Function>> {
         self.functions
             .iter()
             .find_map(|(candidate, metadata)| (candidate.as_ref() == function).then_some(metadata))
@@ -442,7 +459,7 @@ where
     /// # }
     /// ```
     #[must_use]
-    pub fn trigger(&self, name: &str) -> Option<&Tr> {
+    pub fn trigger(&self, name: &str) -> Option<&P::Trigger> {
         self.triggers
             .binary_search_by(|(t, _)| t.name().cmp(name))
             .ok()
@@ -474,7 +491,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn trigger_metadata(&self, trigger: &Tr) -> Option<&Tr::Meta> {
+    pub fn trigger_metadata(&self, trigger: &P::Trigger) -> Option<&Meta<P::Trigger>> {
         self.triggers
             .binary_search_by(|(t, _)| t.name().cmp(trigger.name()))
             .ok()
@@ -501,7 +518,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn policy_metadata(&self, policy: &P) -> Option<&P::Meta> {
+    pub fn policy_metadata(&self, policy: &P::Policy) -> Option<&Meta<P::Policy>> {
         self.policies
             .binary_search_by(|(p, _)| p.name().cmp(policy.name()))
             .ok()
@@ -530,7 +547,7 @@ where
     /// # }
     /// ```
     #[must_use]
-    pub fn role(&self, name: &str) -> Option<&R> {
+    pub fn role(&self, name: &str) -> Option<&P::Role> {
         self.roles
             .binary_search_by(|(role, _)| role.stored_name().as_ref().cmp(name))
             .ok()
@@ -556,7 +573,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn role_metadata(&self, role: &R) -> Option<&R::Meta> {
+    pub fn role_metadata(&self, role: &P::Role) -> Option<&Meta<P::Role>> {
         let stored_name = role.stored_name();
         self.roles
             .binary_search_by(|(candidate, _)| candidate.stored_name().cmp(&stored_name))
@@ -609,7 +626,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn tables_metadata(&self) -> impl Iterator<Item = (&T, &T::Meta)> {
+    pub fn tables_metadata(&self) -> impl Iterator<Item = (&P::Table, &Meta<P::Table>)> {
         self.tables.iter().map(|(t, m)| (t.as_ref(), m))
     }
 
@@ -633,7 +650,9 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn tables_metadata_mut(&mut self) -> impl Iterator<Item = (&T, &mut T::Meta)> {
+    pub fn tables_metadata_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&P::Table, &mut Meta<P::Table>)> {
         self.tables.iter_mut().map(|(t, m)| ((*t).as_ref(), m))
     }
 
@@ -658,7 +677,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn table_grant_metadata(&self, grant: &TG) -> Option<&TG::Meta> {
+    pub fn table_grant_metadata(&self, grant: &P::TableGrant) -> Option<&Meta<P::TableGrant>> {
         self.table_grants.iter().find(|(g, _)| g.as_ref() == grant).map(|(_, m)| m)
     }
 
@@ -683,7 +702,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn column_grant_metadata(&self, grant: &CG) -> Option<&CG::Meta> {
+    pub fn column_grant_metadata(&self, grant: &P::ColumnGrant) -> Option<&Meta<P::ColumnGrant>> {
         self.column_grants.iter().find(|(g, _)| g.as_ref() == grant).map(|(_, m)| m)
     }
 
@@ -716,7 +735,7 @@ where
     /// # }
     /// ```
     #[must_use]
-    pub fn schema(&self, name: &str) -> Option<&S> {
+    pub fn schema(&self, name: &str) -> Option<&P::Schema> {
         self.schemas.iter().find_map(|(s, _)| {
             stored_identifier_matches_lookup(s.name(), s.name_is_quoted(), name)
                 .then_some(s.as_ref())
@@ -742,7 +761,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn schema_metadata(&self, schema: &S) -> Option<&S::Meta> {
+    pub fn schema_metadata(&self, schema: &P::Schema) -> Option<&Meta<P::Schema>> {
         self.schemas
             .binary_search_by(|(s, _)| s.name().cmp(schema.name()))
             .ok()
@@ -763,7 +782,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub fn schemas(&self) -> impl Iterator<Item = (&S, &S::Meta)> {
+    pub fn schemas(&self) -> impl Iterator<Item = (&P::Schema, &Meta<P::Schema>)> {
         self.schemas.iter().map(|(s, m)| (s.as_ref(), m))
     }
 }

@@ -29,15 +29,93 @@ use sqlparser::ast::{
 
 use crate::{
     errors::LookupError,
-    traits::{ColumnLike, DQLLike, DatabaseLike, TableLike},
+    traits::{ColumnLike, DQLLike, DatabaseLike, TableLike, ViewLike},
     utils::{
         identifier_resolution::identifiers_match,
         object_name::{
             object_name_last_part, render_table_candidate, resolve_object_name,
-            schema_from_object_name,
+            schema_from_object_name, target_name_from_object_name,
         },
     },
 };
+
+/// A view whose definition is being derived right now.
+///
+/// A `FROM` reference reaching one of these is a cycle, which PostgreSQL
+/// accepts at creation and only refuses when the view is read, so the model
+/// has to terminate on it rather than assume it cannot happen. The reference
+/// stays opaque, exactly as a recursive CTE's self-reference does.
+#[derive(Clone)]
+enum DerivingView<'db, DB: DatabaseLike> {
+    /// A plain view.
+    Plain(&'db DB::View),
+    /// A materialized view.
+    Materialized(&'db DB::MaterializedView),
+}
+
+impl<DB: DatabaseLike> Copy for DerivingView<'_, DB> {}
+
+impl<DB: DatabaseLike> DerivingView<'_, DB> {
+    /// Whether both name the same recorded view.
+    ///
+    /// Compared by identity rather than by name, since a view's address in the
+    /// database it was read from is what makes it that view.
+    fn is(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Plain(left), Self::Plain(right)) => core::ptr::eq(left, right),
+            (Self::Materialized(left), Self::Materialized(right)) => core::ptr::eq(left, right),
+            _ => false,
+        }
+    }
+}
+
+/// One view on the chain a derivation is currently inside, linked to the one
+/// that reached it.
+///
+/// A frame lives in the stack of the call that pushed it, which outlives every
+/// call it makes, so extending the chain costs nothing. Holding the chain as a
+/// slice instead meant copying it to a fresh allocation for every view
+/// reference a query resolves.
+struct DerivingFrame<'s, 'db, DB: DatabaseLike> {
+    /// The view this frame stands for.
+    view: DerivingView<'db, DB>,
+    /// The frame that reached it, if any.
+    parent: Option<&'s DerivingFrame<'s, 'db, DB>>,
+}
+
+/// The database a derivation reads, and the views whose definitions it is
+/// already inside.
+#[derive(Clone)]
+struct Deriving<'s, 'db, DB: DatabaseLike> {
+    /// The database every relation name resolves against.
+    database: &'db DB,
+    /// The innermost view being derived right now, if any.
+    views: Option<&'s DerivingFrame<'s, 'db, DB>>,
+}
+
+impl<DB: DatabaseLike> Copy for Deriving<'_, '_, DB> {}
+
+impl<'db, DB: DatabaseLike> Deriving<'_, 'db, DB> {
+    /// A derivation of `database` that is inside no view.
+    fn of(database: &'db DB) -> Self {
+        Self { database, views: None }
+    }
+
+    /// Whether a reference to `view` would close a cycle.
+    ///
+    /// Walks the chain, whose length is the view nesting depth: a view appears
+    /// on it at most once, since the second appearance is what this reports.
+    fn is_deriving(&self, view: DerivingView<'db, DB>) -> bool {
+        let mut frame = self.views;
+        while let Some(entry) = frame {
+            if entry.view.is(view) {
+                return true;
+            }
+            frame = entry.parent;
+        }
+        false
+    }
+}
 
 /// A `FROM` relation that resolved to a base table, paired with the identifier
 /// (alias, or table name when unaliased) used to qualify it in the projection.
@@ -162,11 +240,12 @@ pub(crate) fn collect_from_clause<'a, 'db, DB: DatabaseLike>(
     let SetExpr::Select(select) = query.body.as_ref() else {
         return Ok(None);
     };
+    let deriving = Deriving::of(database);
     let cte_scope = match &query.with {
-        Some(with) => derive_cte_shapes(with, &[], database)?,
+        Some(with) => derive_cte_shapes(with, &[], deriving)?,
         None => Vec::new(),
     };
-    Ok(Some(collect_select_from(select, &cte_scope, database)?))
+    Ok(Some(collect_select_from(select, &cte_scope, deriving)?))
 }
 
 /// Collects one `SELECT`'s `FROM` relations against a CTE scope. Join chains
@@ -183,7 +262,7 @@ pub(crate) fn collect_from_clause<'a, 'db, DB: DatabaseLike>(
 fn collect_select_from<'a, 'db, DB: DatabaseLike>(
     select: &'a Select,
     cte_scope: &[CteShape<'a, 'db, DB>],
-    database: &'db DB,
+    deriving: Deriving<'_, 'db, DB>,
 ) -> Result<FromScope<'a, 'db, DB>, LookupError> {
     let mut scope = FromScope {
         bases: Vec::new(),
@@ -199,7 +278,7 @@ fn collect_select_from<'a, 'db, DB: DatabaseLike>(
         let entry_bases = scope.bases.len();
         let entry_derived = scope.derived.len();
         let (mut accumulated, mut plan) =
-            match collect_factor(&table_with_joins.relation, database, cte_scope, &mut scope)? {
+            match collect_factor(&table_with_joins.relation, deriving, cte_scope, &mut scope)? {
                 Some((names, entries)) => (Some(names), Some(entries)),
                 None => (None, None),
             };
@@ -207,7 +286,7 @@ fn collect_select_from<'a, 'db, DB: DatabaseLike>(
             let bases_before = scope.bases.len();
             let derived_before = scope.derived.len();
             let (right_names, right_entries) =
-                match collect_factor(&join.relation, database, cte_scope, &mut scope)? {
+                match collect_factor(&join.relation, deriving, cte_scope, &mut scope)? {
                     Some((names, entries)) => (Some(names), Some(entries)),
                     None => (None, None),
                 };
@@ -412,7 +491,7 @@ fn subsumed_exposure(merged: &[MergedName], entry_index: usize, name: &str, quot
 fn derive_cte_shapes<'a, 'db, DB: DatabaseLike>(
     with: &'a With,
     outer: &[CteShape<'a, 'db, DB>],
-    database: &'db DB,
+    deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Vec<CteShape<'a, 'db, DB>>, LookupError> {
     let mut shapes: Vec<CteShape<'a, 'db, DB>> = outer.to_vec();
     let base = shapes.len();
@@ -436,7 +515,7 @@ fn derive_cte_shapes<'a, 'db, DB: DatabaseLike>(
                 shape: None,
             });
         }
-        let body = derive_query_shape(&cte.query, &shapes, database)?;
+        let body = derive_query_shape(&cte.query, &shapes, deriving)?;
         shapes[position].shape = apply_alias_columns(body, &cte.alias);
     }
     Ok(shapes)
@@ -447,17 +526,17 @@ fn derive_cte_shapes<'a, 'db, DB: DatabaseLike>(
 fn derive_query_shape<'a, 'db, DB: DatabaseLike>(
     query: &'a Query,
     cte_scope: &[CteShape<'a, 'db, DB>],
-    database: &'db DB,
+    deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
     let scoped;
     let scope = match &query.with {
         Some(with) => {
-            scoped = derive_cte_shapes(with, cte_scope, database)?;
+            scoped = derive_cte_shapes(with, cte_scope, deriving)?;
             &scoped
         }
         None => cte_scope,
     };
-    derive_set_expr_shape(&query.body, scope, database)
+    derive_set_expr_shape(&query.body, scope, deriving)
 }
 
 /// Derives the output shape of a body. A set operation merges its arms by
@@ -466,16 +545,16 @@ fn derive_query_shape<'a, 'db, DB: DatabaseLike>(
 fn derive_set_expr_shape<'a, 'db, DB: DatabaseLike>(
     body: &'a SetExpr,
     cte_scope: &[CteShape<'a, 'db, DB>],
-    database: &'db DB,
+    deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
     match body {
-        SetExpr::Select(select) => derive_select_shape(select, cte_scope, database),
-        SetExpr::Query(query) => derive_query_shape(query, cte_scope, database),
+        SetExpr::Select(select) => derive_select_shape(select, cte_scope, deriving),
+        SetExpr::Query(query) => derive_query_shape(query, cte_scope, deriving),
         SetExpr::SetOperation { left, right, set_quantifier, .. } => {
-            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, database)? else {
+            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, deriving)? else {
                 return Ok(None);
             };
-            let Some(right_shape) = derive_set_expr_shape(right, cte_scope, database)? else {
+            let Some(right_shape) = derive_set_expr_shape(right, cte_scope, deriving)? else {
                 return Ok(None);
             };
             if left_shape.columns.len() != right_shape.columns.len() {
@@ -491,8 +570,8 @@ fn derive_set_expr_shape<'a, 'db, DB: DatabaseLike>(
                         quoted: left.quoted,
                         source: match (left.source, right.source) {
                             (Some(left_table), Some(right_table))
-                                if database.table_id(left_table)
-                                    == database.table_id(right_table) =>
+                                if deriving.database.table_id(left_table)
+                                    == deriving.database.table_id(right_table) =>
                             {
                                 Some(left_table)
                             }
@@ -606,7 +685,7 @@ fn wildcard_replaces_values(options: &WildcardAdditionalOptions) -> bool {
 fn derive_select_shape<'a, 'db, DB: DatabaseLike>(
     select: &'a Select,
     cte_scope: &[CteShape<'a, 'db, DB>],
-    database: &'db DB,
+    deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
     // Dialect forms whose output columns this resolver does not enumerate.
     if !select.lateral_views.is_empty()
@@ -616,7 +695,7 @@ fn derive_select_shape<'a, 'db, DB: DatabaseLike>(
     {
         return Ok(None);
     }
-    let scope = collect_select_from(select, cte_scope, database)?;
+    let scope = collect_select_from(select, cte_scope, deriving)?;
     let mut columns: Vec<DerivedColumn<'db, DB>> = Vec::new();
     for item in &select.projection {
         match item {
@@ -1230,15 +1309,124 @@ fn aliased_output_names<'db, DB: DatabaseLike>(
     Ok(Some(output_names))
 }
 
+/// Records a `FROM` relation that names a view, deriving its output columns
+/// from the definition the database holds.
+///
+/// A view's definition is resolved in its own context, so the enclosing
+/// statement's `WITH` items are not in scope inside it. Its own column list
+/// renames what the definition produces, positionally, and the `FROM` alias's
+/// column list then renames again on top, both as PostgreSQL applies them.
+///
+/// A materialized view answers column references the same way, because a
+/// column's declared type is inherited from what it reads and cannot go stale.
+/// Its rows, though, are a snapshot taken when it was last populated rather
+/// than the current rows of anything, so its shape never preserves row
+/// identity and the row-identity question stops there.
+///
+/// A reference reaching a view already being derived closes a cycle, which
+/// PostgreSQL accepts at creation and refuses only on read, so the reference
+/// stays opaque rather than recursing.
+fn collect_view_factor<'a, 'db, DB: DatabaseLike>(
+    name: &ObjectName,
+    alias: Option<&TableAlias>,
+    key_value: &'a str,
+    key_quoted: bool,
+    entry_index: usize,
+    deriving: Deriving<'_, 'db, DB>,
+    scope: &mut FromScope<'a, 'db, DB>,
+) -> Result<Option<FactorContribution>, LookupError> {
+    let Some(target) = target_name_from_object_name(name) else {
+        scope.has_opaque = true;
+        return Ok(None);
+    };
+
+    let (view, row_preserving) =
+        if let Some(view) = deriving.database.resolve_target_view(target.clone())? {
+            (DerivingView::Plain(view), true)
+        } else if let Some(view) = deriving.database.resolve_target_materialized_view(target)? {
+            // A snapshot answers what a column's table is, and never that its
+            // rows are that table's rows.
+            (DerivingView::Materialized(view), false)
+        } else {
+            scope.has_opaque = true;
+            return Ok(None);
+        };
+
+    let shape = derive_view_shape(view, row_preserving, deriving)?;
+    let shape = match alias {
+        Some(table_alias) => apply_alias_columns(shape, table_alias),
+        None => shape,
+    };
+    let Some(shape) = shape else {
+        scope.has_opaque = true;
+        return Ok(None);
+    };
+
+    let names = shape
+        .columns
+        .iter()
+        .map(|column| (column.name.clone(), column.quoted))
+        .collect::<Vec<(String, bool)>>();
+    let entry = WildcardEntry::Derived(scope.derived.len());
+    scope.derived.push(DerivedRelationRef {
+        key_value: Some(key_value),
+        key_quoted,
+        nullable: false,
+        entry_index,
+        shape,
+    });
+    Ok(Some((names, vec![entry])))
+}
+
+/// The output shape of a view's definition, with the view's own column list
+/// applied, or [`None`] when the definition's columns cannot be enumerated or
+/// the reference closes a cycle.
+fn derive_view_shape<'db, DB: DatabaseLike>(
+    view: DerivingView<'db, DB>,
+    row_preserving: bool,
+    deriving: Deriving<'_, 'db, DB>,
+) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    if deriving.is_deriving(view) {
+        return Ok(None);
+    }
+    let (definition, declared) = match view {
+        DerivingView::Plain(view) => (view.definition(), view.declared_column_names()),
+        DerivingView::Materialized(view) => (view.definition(), view.declared_column_names()),
+    };
+
+    let frame = DerivingFrame { view, parent: deriving.views };
+    let inner = Deriving { database: deriving.database, views: Some(&frame) };
+
+    let Some(mut shape) = derive_query_shape(definition, &[], inner)? else {
+        return Ok(None);
+    };
+    if !declared.is_empty() {
+        if declared.len() > shape.columns.len() {
+            // More names than columns is a mismatch PostgreSQL refuses at
+            // creation, so nothing can be said about what it exposes.
+            return Ok(None);
+        }
+        for (column, (declared_name, declared_quoted)) in
+            shape.columns.iter_mut().zip(declared.iter())
+        {
+            declared_name.clone_into(&mut column.name);
+            column.quoted = *declared_quoted;
+        }
+    }
+    shape.row_preserving &= row_preserving;
+    Ok(Some(shape))
+}
+
 /// Records a single `FROM` table factor into the scope, returning the output
 /// column names it contributes and the wildcard plan entry naming what it
 /// pushed, or `None` when the factor is opaque.
 fn collect_factor<'a, 'db, DB: DatabaseLike>(
     factor: &'a TableFactor,
-    database: &'db DB,
+    deriving: Deriving<'_, 'db, DB>,
     cte_scope: &[CteShape<'a, 'db, DB>],
     scope: &mut FromScope<'a, 'db, DB>,
 ) -> Result<Option<FactorContribution>, LookupError> {
+    let database = deriving.database;
     let entry_index = scope.from_entry_count;
     scope.from_entry_count += 1;
     let names_of = |shape: &DerivedShape<'db, DB>| {
@@ -1287,8 +1475,19 @@ fn collect_factor<'a, 'db, DB: DatabaseLike>(
                 return Ok(Some((names, vec![entry])));
             }
             let Some(table) = resolve_object_name(name, database)? else {
-                scope.has_opaque = true;
-                return Ok(None);
+                // A view is a relation too, and its definition sits in the
+                // database rather than in this statement, so its output
+                // columns are derived from there and recorded exactly as a
+                // CTE reference's are.
+                return collect_view_factor(
+                    name,
+                    alias.as_ref(),
+                    key_value,
+                    key_quoted,
+                    entry_index,
+                    deriving,
+                    scope,
+                );
             };
             let Some(output_names) = aliased_output_names(table, alias.as_ref(), database)? else {
                 scope.has_opaque = true;
@@ -1306,7 +1505,7 @@ fn collect_factor<'a, 'db, DB: DatabaseLike>(
             Ok(Some((output_names, vec![entry])))
         }
         TableFactor::Derived { subquery, alias, .. } => {
-            let body = derive_query_shape(subquery, cte_scope, database)?;
+            let body = derive_query_shape(subquery, cte_scope, deriving)?;
             // A derived table written without an alias (accepted since
             // PostgreSQL 16) has no key a reference could qualify with, but
             // its columns still answer bare references.

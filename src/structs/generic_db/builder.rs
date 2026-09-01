@@ -9,15 +9,14 @@ use alloc::{
 
 use crate::{
     errors::LookupError,
-    structs::GenericDB,
-    traits::{
-        CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
-        FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
-        TriggerLike, UniqueIndexLike,
+    structs::{
+        GenericDB, Meta, SchemaProfile,
+        generic_db::{RelationSlot, Stored},
     },
+    traits::{FunctionLike, PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
     utils::{
         identifier_resolution::identifiers_match,
-        object_name::{render_table_candidate, stored_table_key},
+        object_name::{render_table_candidate, stored_table_key, stored_view_key},
     },
 };
 
@@ -59,55 +58,43 @@ fn creates_implicit_public_ambiguity<T: TableLike>(left: &T, right: &T) -> bool 
 }
 
 /// Builder for constructing a `GenericDB` instance.
-pub struct GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
+pub struct GenericDBBuilder<P: SchemaProfile> {
     /// SQL dialect of the database.
-    dialect: D,
+    dialect: P::Dialect,
     /// Catalog name of the database.
     catalog_name: String,
     /// Timezone of the database.
     timezone: Option<String>,
     /// List of tables in the database.
-    tables: Vec<(Arc<T>, T::Meta)>,
+    tables: Vec<Stored<P::Table>>,
+    /// List of plain views in the database.
+    views: Vec<Stored<P::View>>,
+    /// List of materialized views in the database.
+    materialized_views: Vec<Stored<P::MaterializedView>>,
     /// List of columns in the database.
-    columns: Vec<(Arc<C>, C::Meta)>,
+    columns: Vec<Stored<P::Column>>,
     /// List of indices in the database.
-    indices: Vec<(Arc<I>, I::Meta)>,
+    indices: Vec<Stored<P::Index>>,
     /// List of unique indices in the database.
-    unique_indices: Vec<(Arc<U>, U::Meta)>,
+    unique_indices: Vec<Stored<P::UniqueIndex>>,
     /// List of foreign keys in the database.
-    foreign_keys: Vec<(Arc<F>, F::Meta)>,
+    foreign_keys: Vec<Stored<P::ForeignKey>>,
     /// List of functions created in the database.
-    functions: Vec<(Arc<Func>, Func::Meta)>,
+    functions: Vec<Stored<P::Function>>,
     /// List of triggers created in the database.
-    triggers: Vec<(Arc<Tr>, Tr::Meta)>,
+    triggers: Vec<Stored<P::Trigger>>,
     /// List of policies created in the database.
-    policies: Vec<(Arc<P>, P::Meta)>,
+    policies: Vec<Stored<P::Policy>>,
     /// List of check constraints in the database.
-    check_constraints: Vec<(Arc<Ch>, Ch::Meta)>,
+    check_constraints: Vec<Stored<P::CheckConstraint>>,
     /// List of roles in the database.
-    roles: Vec<(Arc<R>, R::Meta)>,
+    roles: Vec<Stored<P::Role>>,
     /// List of schemas in the database.
-    schemas: Vec<(Arc<S>, S::Meta)>,
+    schemas: Vec<Stored<P::Schema>>,
     /// List of table grants in the database.
-    table_grants: Vec<(Arc<TG>, TG::Meta)>,
+    table_grants: Vec<Stored<P::TableGrant>>,
     /// List of column grants in the database.
-    column_grants: Vec<(Arc<CG>, CG::Meta)>,
+    column_grants: Vec<Stored<P::ColumnGrant>>,
     /// Schemas an unqualified name is resolved against, in order.
     ///
     /// Defaults to `public` alone, and `SET search_path` replaces it wholesale
@@ -115,27 +102,30 @@ where
     search_path: Vec<(String, bool)>,
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
+impl<P: SchemaProfile> GenericDBBuilder<P> {
     /// Returns a mutable reference to the tables list.
-    pub(crate) fn tables_mut(&mut self) -> &mut Vec<(Arc<T>, T::Meta)> {
+    pub(crate) fn tables_mut(&mut self) -> &mut Vec<Stored<P::Table>> {
         &mut self.tables
+    }
+
+    /// Returns a mutable reference to the plain views list.
+    pub(crate) fn views_mut(&mut self) -> &mut Vec<Stored<P::View>> {
+        &mut self.views
+    }
+
+    /// Returns the plain views recorded so far, with their metadata.
+    pub(crate) fn views(&self) -> &[Stored<P::View>] {
+        &self.views
+    }
+
+    /// Returns a mutable reference to the materialized views list.
+    pub(crate) fn materialized_views_mut(&mut self) -> &mut Vec<Stored<P::MaterializedView>> {
+        &mut self.materialized_views
+    }
+
+    /// Returns the materialized views recorded so far, with their metadata.
+    pub(crate) fn materialized_views(&self) -> &[Stored<P::MaterializedView>] {
+        &self.materialized_views
     }
 
     /// Returns the schemas an unqualified name resolves against, in order,
@@ -150,7 +140,7 @@ where
     }
 
     /// Returns the SQL dialect recorded for this builder.
-    pub(crate) fn dialect(&self) -> &D {
+    pub(crate) fn dialect(&self) -> &P::Dialect {
         &self.dialect
     }
 
@@ -160,128 +150,130 @@ where
     }
 
     /// Returns a mutable reference to the table grants list.
-    pub(crate) fn table_grants_mut(&mut self) -> &mut Vec<(Arc<TG>, TG::Meta)> {
+    pub(crate) fn table_grants_mut(&mut self) -> &mut Vec<Stored<P::TableGrant>> {
         &mut self.table_grants
     }
 
     /// Returns a mutable reference to the column grants list.
-    pub(crate) fn column_grants_mut(&mut self) -> &mut Vec<(Arc<CG>, CG::Meta)> {
+    pub(crate) fn column_grants_mut(&mut self) -> &mut Vec<Stored<P::ColumnGrant>> {
         &mut self.column_grants
     }
 
     /// Returns a mutable reference to the functions list.
-    pub(crate) fn functions_mut(&mut self) -> &mut Vec<(Arc<Func>, Func::Meta)> {
+    pub(crate) fn functions_mut(&mut self) -> &mut Vec<Stored<P::Function>> {
         &mut self.functions
     }
 
     /// Returns a slice of check constraint Arc references with their metadata.
-    pub(crate) fn check_constraints(&self) -> &[(Arc<Ch>, Ch::Meta)] {
+    pub(crate) fn check_constraints(&self) -> &[Stored<P::CheckConstraint>] {
         &self.check_constraints
     }
 
     /// Returns a slice of policy Arc references with their metadata.
-    pub(crate) fn policies(&self) -> &[(Arc<P>, P::Meta)] {
+    pub(crate) fn policies(&self) -> &[Stored<P::Policy>] {
         &self.policies
     }
 
     /// Returns a slice of trigger Arc references with their metadata.
-    pub(crate) fn triggers(&self) -> &[(Arc<Tr>, Tr::Meta)] {
+    pub(crate) fn triggers(&self) -> &[Stored<P::Trigger>] {
         &self.triggers
     }
 
     /// Returns a slice of foreign key Arc references with their metadata.
-    pub(crate) fn foreign_keys(&self) -> &[(Arc<F>, F::Meta)] {
+    pub(crate) fn foreign_keys(&self) -> &[Stored<P::ForeignKey>] {
         &self.foreign_keys
     }
 
     /// Returns a slice of index Arc references with their metadata.
-    pub(crate) fn indices(&self) -> &[(Arc<I>, I::Meta)] {
+    pub(crate) fn indices(&self) -> &[Stored<P::Index>] {
         &self.indices
     }
 
     /// Returns a slice of unique index Arc references with their metadata.
-    pub(crate) fn unique_indices(&self) -> &[(Arc<U>, U::Meta)] {
+    pub(crate) fn unique_indices(&self) -> &[Stored<P::UniqueIndex>] {
         &self.unique_indices
     }
 
     /// Returns a slice of function Arc references with their metadata.
-    pub(crate) fn functions(&self) -> &[(Arc<Func>, Func::Meta)] {
+    pub(crate) fn functions(&self) -> &[Stored<P::Function>] {
         &self.functions
     }
 
     /// Returns a slice of table grant Arc references with their metadata.
-    pub(crate) fn table_grants(&self) -> &[(Arc<TG>, TG::Meta)] {
+    pub(crate) fn table_grants(&self) -> &[Stored<P::TableGrant>] {
         &self.table_grants
     }
 
     /// Returns a slice of column grant Arc references with their metadata.
-    pub(crate) fn column_grants(&self) -> &[(Arc<CG>, CG::Meta)] {
+    pub(crate) fn column_grants(&self) -> &[Stored<P::ColumnGrant>] {
         &self.column_grants
     }
 
     /// Returns a slice of column Arc references with their metadata.
-    pub(crate) fn columns(&self) -> &[(Arc<C>, C::Meta)] {
+    pub(crate) fn columns(&self) -> &[Stored<P::Column>] {
         &self.columns
     }
 
     /// Returns a mutable reference to the columns list.
-    pub(crate) fn columns_mut(&mut self) -> &mut Vec<(Arc<C>, C::Meta)> {
+    pub(crate) fn columns_mut(&mut self) -> &mut Vec<Stored<P::Column>> {
         &mut self.columns
     }
 
     /// Returns a mutable reference to the indices list.
-    pub(crate) fn indices_mut(&mut self) -> &mut Vec<(Arc<I>, I::Meta)> {
+    pub(crate) fn indices_mut(&mut self) -> &mut Vec<Stored<P::Index>> {
         &mut self.indices
     }
 
     /// Returns a mutable reference to the unique indices list.
-    pub(crate) fn unique_indices_mut(&mut self) -> &mut Vec<(Arc<U>, U::Meta)> {
+    pub(crate) fn unique_indices_mut(&mut self) -> &mut Vec<Stored<P::UniqueIndex>> {
         &mut self.unique_indices
     }
 
     /// Returns a mutable reference to the foreign keys list.
-    pub(crate) fn foreign_keys_mut(&mut self) -> &mut Vec<(Arc<F>, F::Meta)> {
+    pub(crate) fn foreign_keys_mut(&mut self) -> &mut Vec<Stored<P::ForeignKey>> {
         &mut self.foreign_keys
     }
 
     /// Returns a mutable reference to the check constraints list.
-    pub(crate) fn check_constraints_mut(&mut self) -> &mut Vec<(Arc<Ch>, Ch::Meta)> {
+    pub(crate) fn check_constraints_mut(&mut self) -> &mut Vec<Stored<P::CheckConstraint>> {
         &mut self.check_constraints
     }
 
     /// Returns a mutable reference to the triggers list.
-    pub(crate) fn triggers_mut(&mut self) -> &mut Vec<(Arc<Tr>, Tr::Meta)> {
+    pub(crate) fn triggers_mut(&mut self) -> &mut Vec<Stored<P::Trigger>> {
         &mut self.triggers
     }
 
     /// Returns a mutable reference to the policies list.
-    pub(crate) fn policies_mut(&mut self) -> &mut Vec<(Arc<P>, P::Meta)> {
+    pub(crate) fn policies_mut(&mut self) -> &mut Vec<Stored<P::Policy>> {
         &mut self.policies
     }
 
     /// Returns a mutable reference to the roles list.
-    pub(crate) fn roles_mut(&mut self) -> &mut Vec<(Arc<R>, R::Meta)> {
+    pub(crate) fn roles_mut(&mut self) -> &mut Vec<Stored<P::Role>> {
         &mut self.roles
     }
 
     /// Returns a slice of schema Arc references with their metadata.
-    pub(crate) fn schemas(&self) -> &[(Arc<S>, S::Meta)] {
+    pub(crate) fn schemas(&self) -> &[Stored<P::Schema>] {
         &self.schemas
     }
 
     /// Returns a mutable reference to the schemas list.
-    pub(crate) fn schemas_mut(&mut self) -> &mut Vec<(Arc<S>, S::Meta)> {
+    pub(crate) fn schemas_mut(&mut self) -> &mut Vec<Stored<P::Schema>> {
         &mut self.schemas
     }
 
     #[must_use]
     /// Creates a new `GenericDBBuilder` instance.
-    pub fn new(catalog_name: String, dialect: D) -> Self {
+    pub fn new(catalog_name: String, dialect: P::Dialect) -> Self {
         Self {
             dialect,
             catalog_name,
             timezone: None,
             tables: Vec::new(),
+            views: Vec::new(),
+            materialized_views: Vec::new(),
             columns: Vec::new(),
             indices: Vec::new(),
             unique_indices: Vec::new(),
@@ -299,25 +291,8 @@ where
     }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-    GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
-    fn ensure_table_lookup_invariants(&self, table: &T) -> Result<(), LookupError> {
+impl<P: SchemaProfile> GenericDBBuilder<P> {
+    fn ensure_table_lookup_invariants(&self, table: &P::Table) -> Result<(), LookupError> {
         for (existing, _) in self.tables() {
             let existing = existing.as_ref();
             if tables_share_semantic_identity(existing, table)
@@ -346,7 +321,11 @@ where
     ///
     /// Returns an error if adding the table would introduce semantic lookup
     /// ambiguity.
-    pub fn add_table(mut self, table: Arc<T>, metadata: T::Meta) -> Result<Self, LookupError> {
+    pub fn add_table(
+        mut self,
+        table: Arc<P::Table>,
+        metadata: Meta<P::Table>,
+    ) -> Result<Self, LookupError> {
         self.ensure_table_lookup_invariants(table.as_ref())?;
         self.tables.push((table, metadata));
         Ok(self)
@@ -360,7 +339,7 @@ where
     /// lookup ambiguity.
     pub fn add_tables(
         self,
-        tables: impl IntoIterator<Item = (Arc<T>, T::Meta)>,
+        tables: impl IntoIterator<Item = (Arc<P::Table>, Meta<P::Table>)>,
     ) -> Result<Self, LookupError> {
         tables
             .into_iter()
@@ -370,7 +349,7 @@ where
     /// Adds a column with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_column(mut self, column: Arc<C>, metadata: C::Meta) -> Self {
+    pub fn add_column(mut self, column: Arc<P::Column>, metadata: Meta<P::Column>) -> Self {
         self.columns.push((column, metadata));
         self
     }
@@ -378,7 +357,10 @@ where
     /// Adds multiple columns with their metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_columns(mut self, columns: impl IntoIterator<Item = (Arc<C>, C::Meta)>) -> Self {
+    pub fn add_columns(
+        mut self,
+        columns: impl IntoIterator<Item = (Arc<P::Column>, Meta<P::Column>)>,
+    ) -> Self {
         self.columns.extend(columns);
         self
     }
@@ -386,7 +368,7 @@ where
     /// Adds an index with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_index(mut self, index: Arc<I>, metadata: I::Meta) -> Self {
+    pub fn add_index(mut self, index: Arc<P::Index>, metadata: Meta<P::Index>) -> Self {
         self.indices.push((index, metadata));
         self
     }
@@ -394,7 +376,10 @@ where
     /// Adds multiple indices with their metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_indices(mut self, indices: impl IntoIterator<Item = (Arc<I>, I::Meta)>) -> Self {
+    pub fn add_indices(
+        mut self,
+        indices: impl IntoIterator<Item = (Arc<P::Index>, Meta<P::Index>)>,
+    ) -> Self {
         self.indices.extend(indices);
         self
     }
@@ -402,7 +387,11 @@ where
     /// Adds a unique index with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_unique_index(mut self, index: Arc<U>, metadata: U::Meta) -> Self {
+    pub fn add_unique_index(
+        mut self,
+        index: Arc<P::UniqueIndex>,
+        metadata: Meta<P::UniqueIndex>,
+    ) -> Self {
         self.unique_indices.push((index, metadata));
         self
     }
@@ -412,7 +401,7 @@ where
     #[inline]
     pub fn add_unique_indices(
         mut self,
-        indices: impl IntoIterator<Item = (Arc<U>, U::Meta)>,
+        indices: impl IntoIterator<Item = (Arc<P::UniqueIndex>, Meta<P::UniqueIndex>)>,
     ) -> Self {
         self.unique_indices.extend(indices);
         self
@@ -421,7 +410,11 @@ where
     /// Adds a foreign key with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_foreign_key(mut self, key: Arc<F>, metadata: F::Meta) -> Self {
+    pub fn add_foreign_key(
+        mut self,
+        key: Arc<P::ForeignKey>,
+        metadata: Meta<P::ForeignKey>,
+    ) -> Self {
         self.foreign_keys.push((key, metadata));
         self
     }
@@ -429,7 +422,10 @@ where
     /// Adds multiple foreign keys with their metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_foreign_keys(mut self, keys: impl IntoIterator<Item = (Arc<F>, F::Meta)>) -> Self {
+    pub fn add_foreign_keys(
+        mut self,
+        keys: impl IntoIterator<Item = (Arc<P::ForeignKey>, Meta<P::ForeignKey>)>,
+    ) -> Self {
         self.foreign_keys.extend(keys);
         self
     }
@@ -437,7 +433,7 @@ where
     /// Adds a function with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_function(mut self, function: Arc<Func>, metadata: Func::Meta) -> Self {
+    pub fn add_function(mut self, function: Arc<P::Function>, metadata: Meta<P::Function>) -> Self {
         self.functions.push((function, metadata));
         self
     }
@@ -445,7 +441,7 @@ where
     /// Adds a trigger with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_trigger(mut self, trigger: Arc<Tr>, metadata: Tr::Meta) -> Self {
+    pub fn add_trigger(mut self, trigger: Arc<P::Trigger>, metadata: Meta<P::Trigger>) -> Self {
         self.triggers.push((trigger, metadata));
         self
     }
@@ -453,7 +449,7 @@ where
     /// Adds a policy with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_policy(mut self, policy: Arc<P>, metadata: P::Meta) -> Self {
+    pub fn add_policy(mut self, policy: Arc<P::Policy>, metadata: Meta<P::Policy>) -> Self {
         self.policies.push((policy, metadata));
         self
     }
@@ -461,7 +457,10 @@ where
     /// Adds multiple policies with their metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_policies(mut self, policies: impl IntoIterator<Item = (Arc<P>, P::Meta)>) -> Self {
+    pub fn add_policies(
+        mut self,
+        policies: impl IntoIterator<Item = (Arc<P::Policy>, Meta<P::Policy>)>,
+    ) -> Self {
         self.policies.extend(policies);
         self
     }
@@ -471,7 +470,7 @@ where
     #[inline]
     pub fn add_functions(
         mut self,
-        functions: impl IntoIterator<Item = (Arc<Func>, Func::Meta)>,
+        functions: impl IntoIterator<Item = (Arc<P::Function>, Meta<P::Function>)>,
     ) -> Self {
         self.functions.extend(functions);
         self
@@ -479,25 +478,29 @@ where
 
     /// Returns a vector of function Arc references.
     #[must_use]
-    pub fn function_arc_vec(&self) -> Vec<Arc<Func>> {
+    pub fn function_arc_vec(&self) -> Vec<Arc<P::Function>> {
         self.functions.iter().map(|(func_arc, _)| func_arc.clone()).collect()
     }
 
     /// Returns a slice of table Arc references with their metadata.
     #[must_use]
-    pub fn tables(&self) -> &[(Arc<T>, T::Meta)] {
+    pub fn tables(&self) -> &[Stored<P::Table>] {
         &self.tables
     }
 
     /// Returns a slice of role Arc references with their metadata.
     #[must_use]
-    pub fn roles(&self) -> &[(Arc<R>, R::Meta)] {
+    pub fn roles(&self) -> &[Stored<P::Role>] {
         &self.roles
     }
 
     /// Adds a check constraint with its metadata to the builder.
     #[must_use]
-    pub fn add_check_constraint(mut self, constraint: Arc<Ch>, metadata: Ch::Meta) -> Self {
+    pub fn add_check_constraint(
+        mut self,
+        constraint: Arc<P::CheckConstraint>,
+        metadata: Meta<P::CheckConstraint>,
+    ) -> Self {
         self.check_constraints.push((constraint, metadata));
         self
     }
@@ -505,7 +508,7 @@ where
     /// Adds a role with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_role(mut self, role: Arc<R>, metadata: R::Meta) -> Self {
+    pub fn add_role(mut self, role: Arc<P::Role>, metadata: Meta<P::Role>) -> Self {
         self.roles.push((role, metadata));
         self
     }
@@ -513,7 +516,10 @@ where
     /// Adds multiple roles with their metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_roles(mut self, roles: impl IntoIterator<Item = (Arc<R>, R::Meta)>) -> Self {
+    pub fn add_roles(
+        mut self,
+        roles: impl IntoIterator<Item = (Arc<P::Role>, Meta<P::Role>)>,
+    ) -> Self {
         self.roles.extend(roles);
         self
     }
@@ -521,7 +527,7 @@ where
     /// Adds a schema with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_schema(mut self, schema: Arc<S>, metadata: S::Meta) -> Self {
+    pub fn add_schema(mut self, schema: Arc<P::Schema>, metadata: Meta<P::Schema>) -> Self {
         self.schemas.push((schema, metadata));
         self
     }
@@ -529,7 +535,10 @@ where
     /// Adds multiple schemas with their metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_schemas(mut self, schemas: impl IntoIterator<Item = (Arc<S>, S::Meta)>) -> Self {
+    pub fn add_schemas(
+        mut self,
+        schemas: impl IntoIterator<Item = (Arc<P::Schema>, Meta<P::Schema>)>,
+    ) -> Self {
         self.schemas.extend(schemas);
         self
     }
@@ -537,7 +546,11 @@ where
     /// Adds a table grant with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_table_grant(mut self, grant: Arc<TG>, metadata: TG::Meta) -> Self {
+    pub fn add_table_grant(
+        mut self,
+        grant: Arc<P::TableGrant>,
+        metadata: Meta<P::TableGrant>,
+    ) -> Self {
         self.table_grants.push((grant, metadata));
         self
     }
@@ -547,7 +560,7 @@ where
     #[inline]
     pub fn add_table_grants(
         mut self,
-        grants: impl IntoIterator<Item = (Arc<TG>, TG::Meta)>,
+        grants: impl IntoIterator<Item = (Arc<P::TableGrant>, Meta<P::TableGrant>)>,
     ) -> Self {
         self.table_grants.extend(grants);
         self
@@ -556,7 +569,11 @@ where
     /// Adds a column grant with its metadata to the builder.
     #[must_use]
     #[inline]
-    pub fn add_column_grant(mut self, grant: Arc<CG>, metadata: CG::Meta) -> Self {
+    pub fn add_column_grant(
+        mut self,
+        grant: Arc<P::ColumnGrant>,
+        metadata: Meta<P::ColumnGrant>,
+    ) -> Self {
         self.column_grants.push((grant, metadata));
         self
     }
@@ -566,35 +583,57 @@ where
     #[inline]
     pub fn add_column_grants(
         mut self,
-        grants: impl IntoIterator<Item = (Arc<CG>, CG::Meta)>,
+        grants: impl IntoIterator<Item = (Arc<P::ColumnGrant>, Meta<P::ColumnGrant>)>,
     ) -> Self {
         self.column_grants.extend(grants);
         self
     }
+
+    /// Adds a plain view with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_view(mut self, view: Arc<P::View>, metadata: Meta<P::View>) -> Self {
+        self.views.push((view, metadata));
+        self
+    }
+
+    /// Adds multiple plain views with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_views(
+        mut self,
+        views: impl IntoIterator<Item = (Arc<P::View>, Meta<P::View>)>,
+    ) -> Self {
+        self.views.extend(views);
+        self
+    }
+
+    /// Adds a materialized view with its metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_materialized_view(
+        mut self,
+        view: Arc<P::MaterializedView>,
+        metadata: Meta<P::MaterializedView>,
+    ) -> Self {
+        self.materialized_views.push((view, metadata));
+        self
+    }
+
+    /// Adds multiple materialized views with their metadata to the builder.
+    #[must_use]
+    #[inline]
+    pub fn add_materialized_views(
+        mut self,
+        views: impl IntoIterator<Item = (Arc<P::MaterializedView>, Meta<P::MaterializedView>)>,
+    ) -> Self {
+        self.materialized_views.extend(views);
+        self
+    }
 }
 
-impl<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-    From<GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>>
-    for GenericDB<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>
-where
-    T: TableLike,
-    C: ColumnLike,
-    I: IndexLike,
-    U: UniqueIndexLike,
-    F: ForeignKeyLike,
-    Func: FunctionLike,
-    Ch: CheckConstraintLike,
-    Tr: TriggerLike,
-    P: PolicyLike,
-    R: RoleLike,
-    S: SchemaLike,
-    TG: TableGrantLike,
-    CG: ColumnGrantLike,
-    D: DialectLike,
-{
-    fn from(
-        mut builder: GenericDBBuilder<T, C, I, U, F, Func, Ch, Tr, P, R, S, TG, CG, D>,
-    ) -> Self {
+impl<P: SchemaProfile> From<GenericDBBuilder<P>> for GenericDB<P> {
+    fn from(mut builder: GenericDBBuilder<P>) -> Self {
         let catalog_name = builder.catalog_name;
 
         builder.tables.sort_unstable_by_key(|(table, _)| {
@@ -616,11 +655,35 @@ where
             .roles
             .sort_unstable_by(|(left, _), (right, _)| left.stored_name().cmp(&right.stored_name()));
         builder.schemas.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        builder.views.sort_unstable_by(|(a, _), (b, _)| {
+            stored_view_key(a.as_ref()).cmp(&stored_view_key(b.as_ref()))
+        });
+        builder.materialized_views.sort_unstable_by(|(a, _), (b, _)| {
+            stored_view_key(a.as_ref()).cmp(&stored_view_key(b.as_ref()))
+        });
         // Grants are not sorted as their order may be significant
 
-        let mut table_index: BTreeMap<_, Vec<usize>> = BTreeMap::new();
+        // Tables, views and materialized views share one pool of names, so one
+        // index answers all three. Slots of a kind stay ascending because each
+        // kind is walked in storage order.
+        let mut relation_index: BTreeMap<_, Vec<RelationSlot>> = BTreeMap::new();
         for (position, (table, _)) in builder.tables.iter().enumerate() {
-            table_index.entry(stored_table_key(table.as_ref())).or_default().push(position);
+            relation_index
+                .entry(stored_table_key(table.as_ref()))
+                .or_default()
+                .push(RelationSlot::Table(position));
+        }
+        for (position, (view, _)) in builder.views.iter().enumerate() {
+            relation_index
+                .entry(stored_view_key(view.as_ref()))
+                .or_default()
+                .push(RelationSlot::View(position));
+        }
+        for (position, (view, _)) in builder.materialized_views.iter().enumerate() {
+            relation_index
+                .entry(stored_view_key(view.as_ref()))
+                .or_default()
+                .push(RelationSlot::MaterializedView(position));
         }
 
         GenericDB {
@@ -628,7 +691,9 @@ where
             catalog_name,
             timezone: builder.timezone,
             tables: builder.tables,
-            table_index,
+            views: builder.views,
+            materialized_views: builder.materialized_views,
+            relation_index,
             columns: builder.columns,
             indices: builder.indices,
             unique_indices: builder.unique_indices,

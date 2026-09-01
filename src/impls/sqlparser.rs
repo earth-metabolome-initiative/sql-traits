@@ -17,6 +17,7 @@ mod foreign_key_constraint;
 mod grant;
 mod schema;
 mod unique_constraint;
+mod view;
 
 pub use dialect::SqlparserDialect;
 pub use grant::apply_revoke_to_grant;
