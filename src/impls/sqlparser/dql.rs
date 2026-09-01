@@ -20,11 +20,12 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use core::ops::ControlFlow;
 
 use sqlparser::ast::{
-    Expr, GroupByExpr, Ident, JoinConstraint, JoinOperator, ObjectName, Query, Select, SelectItem,
-    SelectItemQualifiedWildcardKind, SetExpr, SetQuantifier, TableAlias, TableFactor,
-    WildcardAdditionalOptions, With,
+    Cte, Expr, GroupByExpr, Ident, JoinConstraint, JoinOperator, ObjectName, Query, Select,
+    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, SetOperator, SetQuantifier, TableAlias,
+    TableFactor, Visit, Visitor, WildcardAdditionalOptions, With,
 };
 
 use crate::{
@@ -178,10 +179,9 @@ pub(crate) struct DerivedRelationRef<'a, 'db, DB: DatabaseLike> {
     pub(crate) entry_index: usize,
 }
 
-/// A CTE name and its derived shape. A `None` shape means a reference to it
-/// stays opaque: the body is not derivable, or the entry is the placeholder a
-/// recursive CTE carries while its own shape is still being derived, which is
-/// what stops the recursive arm's self-reference from recursing forever.
+/// A CTE name and its derived shape. A `None` shape means the body is opaque.
+/// Recursive CTEs start opaque to stop forward and mutual references, then
+/// receive the nonrecursive term's shape while their full body is derived.
 struct CteShape<'a, 'db, DB: DatabaseLike> {
     name: &'a str,
     quoted: bool,
@@ -192,6 +192,98 @@ impl<DB: DatabaseLike> Clone for CteShape<'_, '_, DB> {
     fn clone(&self) -> Self {
         Self { name: self.name, quoted: self.quoted, shape: self.shape.clone() }
     }
+}
+
+struct CteDependencyVisitor<'a> {
+    candidates: &'a [Cte],
+    shadowed: Vec<Vec<Ident>>,
+    dependencies: Vec<bool>,
+}
+
+impl Visitor for CteDependencyVisitor<'_> {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<Self::Break> {
+        self.shadowed.push(query.with.as_ref().map_or_else(Vec::new, |with| {
+            with.cte_tables.iter().map(|cte| cte.alias.name.clone()).collect()
+        }));
+        ControlFlow::Continue(())
+    }
+
+    fn post_visit_query(&mut self, _query: &Query) -> ControlFlow<Self::Break> {
+        self.shadowed.truncate(self.shadowed.len().saturating_sub(1));
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_relation(&mut self, relation: &ObjectName) -> ControlFlow<Self::Break> {
+        if relation.0.len() != 1 {
+            return ControlFlow::Continue(());
+        }
+        let Some((value, quoted)) = object_name_last_part(relation) else {
+            return ControlFlow::Continue(());
+        };
+        if self.shadowed.iter().rev().flatten().any(|ident| {
+            identifiers_match(&ident.value, ident.quote_style.is_some(), value, quoted)
+        }) {
+            return ControlFlow::Continue(());
+        }
+        if let Some(position) = self.candidates.iter().position(|cte| {
+            identifiers_match(
+                &cte.alias.name.value,
+                cte.alias.name.quote_style.is_some(),
+                value,
+                quoted,
+            )
+        }) {
+            self.dependencies[position] = true;
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+fn cte_dependencies(cte: &Cte, candidates: &[Cte]) -> Vec<bool> {
+    let mut visitor = CteDependencyVisitor {
+        candidates,
+        shadowed: Vec::new(),
+        dependencies: vec![false; candidates.len()],
+    };
+    let _: ControlFlow<()> = cte.query.visit(&mut visitor);
+    visitor.dependencies
+}
+
+fn cte_reaches(adjacency: &[Vec<bool>], from: usize, target: usize) -> bool {
+    let mut visited = vec![false; adjacency.len()];
+    let mut pending = vec![from];
+    visited[from] = true;
+    while let Some(current) = pending.pop() {
+        for (next, follows) in adjacency[current].iter().copied().enumerate() {
+            if !follows || visited[next] {
+                continue;
+            }
+            if next == target {
+                return true;
+            }
+            visited[next] = true;
+            pending.push(next);
+        }
+    }
+    false
+}
+
+fn mutually_recursive_ctes(with: &With) -> Vec<bool> {
+    let adjacency: Vec<Vec<bool>> =
+        with.cte_tables.iter().map(|cte| cte_dependencies(cte, &with.cte_tables)).collect();
+    adjacency
+        .iter()
+        .enumerate()
+        .map(|(left, _)| {
+            adjacency.iter().enumerate().any(|(right, _)| {
+                left != right
+                    && cte_reaches(&adjacency, left, right)
+                    && cte_reaches(&adjacency, right, left)
+            })
+        })
+        .collect()
 }
 /// A column name merged by a `USING` or `NATURAL` join. `subsumed` is the
 /// number of `FROM` entries the merge consumed: relations collected before
@@ -481,20 +573,24 @@ fn subsumed_exposure(merged: &[MergedName], entry_index: usize, name: &str, quot
     merged_boundary(merged, name, quoted).is_some_and(|boundary| entry_index < boundary)
 }
 
-/// Derives the shapes of a `WITH` clause's CTEs, in order, appended to the
-/// enclosing CTE scope. A recursive list binds every name before any body is
-/// resolved (PostgreSQL resolves a forward reference inside `WITH RECURSIVE`
-/// to its sibling, not to a same-named base table), so all placeholders go in
-/// first and forward references stay opaque instead of answering a shadowed
-/// base table. A non-recursive list registers names one by one, matching
-/// PostgreSQL, where a forward reference can only reach a base table.
+/// Derives the shapes of a `WITH` clause's CTEs in order. A recursive list
+/// binds every name before any body is resolved. Multi-CTE cycles and forward
+/// references stay opaque, while a self-recursive CTE is seeded from its
+/// nonrecursive term. A non-recursive list registers names one by one.
 fn derive_cte_shapes<'a, 'db, DB: DatabaseLike>(
     with: &'a With,
     outer: &[CteShape<'a, 'db, DB>],
     deriving: Deriving<'_, 'db, DB>,
 ) -> Result<Vec<CteShape<'a, 'db, DB>>, LookupError> {
     let mut shapes: Vec<CteShape<'a, 'db, DB>> = outer.to_vec();
+    #[cfg(test)]
+    tests::record_cte_shape_derivation();
     let base = shapes.len();
+    let mutually_recursive = if with.recursive {
+        mutually_recursive_ctes(with)
+    } else {
+        vec![false; with.cte_tables.len()]
+    };
     if with.recursive {
         for cte in &with.cte_tables {
             shapes.push(CteShape {
@@ -506,19 +602,75 @@ fn derive_cte_shapes<'a, 'db, DB: DatabaseLike>(
     }
     for (index, cte) in with.cte_tables.iter().enumerate() {
         let position = if with.recursive { base + index } else { shapes.len() };
-        // The recursive arm names the CTE while its own shape is unknown, so
-        // the entry starts opaque and only becomes derivable after its body.
-        if !with.recursive {
+        if with.recursive {
+            if mutually_recursive[index] {
+                continue;
+            }
+            let body = derive_recursive_cte_query_shape(
+                &cte.query,
+                &mut shapes,
+                position,
+                &cte.alias,
+                deriving,
+            )?;
+            shapes[position].shape = apply_alias_columns(body, &cte.alias);
+        } else {
             shapes.push(CteShape {
                 name: cte.alias.name.value.as_str(),
                 quoted: cte.alias.name.quote_style.is_some(),
                 shape: None,
             });
+            let body = derive_query_shape(&cte.query, &shapes, deriving)?;
+            shapes[position].shape = apply_alias_columns(body, &cte.alias);
         }
-        let body = derive_query_shape(&cte.query, &shapes, deriving)?;
-        shapes[position].shape = apply_alias_columns(body, &cte.alias);
     }
     Ok(shapes)
+}
+
+fn derive_recursive_cte_query_shape<'a, 'db, DB: DatabaseLike>(
+    query: &'a Query,
+    cte_scope: &mut Vec<CteShape<'a, 'db, DB>>,
+    position: usize,
+    alias: &TableAlias,
+    deriving: Deriving<'_, 'db, DB>,
+) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    let mut scoped;
+    let scope = match &query.with {
+        Some(with) => {
+            scoped = derive_cte_shapes(with, cte_scope, deriving)?;
+            &mut scoped
+        }
+        None => cte_scope,
+    };
+    derive_recursive_cte_set_expr_shape(&query.body, scope, position, alias, deriving)
+}
+
+fn derive_recursive_cte_set_expr_shape<'a, 'db, DB: DatabaseLike>(
+    body: &'a SetExpr,
+    cte_scope: &mut Vec<CteShape<'a, 'db, DB>>,
+    position: usize,
+    alias: &TableAlias,
+    deriving: Deriving<'_, 'db, DB>,
+) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    match body {
+        SetExpr::Query(query) => {
+            derive_recursive_cte_query_shape(query, cte_scope, position, alias, deriving)
+        }
+        SetExpr::SetOperation { op: SetOperator::Union, left, right, set_quantifier } => {
+            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, deriving)? else {
+                return Ok(None);
+            };
+            cte_scope[position].shape = apply_alias_columns(Some(left_shape), alias);
+            let Some(right_shape) = derive_set_expr_shape(right, cte_scope, deriving)? else {
+                return Ok(None);
+            };
+            let Some(left_shape) = cte_scope[position].shape.as_ref() else {
+                return Ok(None);
+            };
+            Ok(merge_set_operation_shapes(left_shape, &right_shape, *set_quantifier, deriving))
+        }
+        _ => derive_set_expr_shape(body, cte_scope, deriving),
+    }
 }
 
 /// Derives the output shape of a query used as a relation body. Returns
@@ -557,43 +709,49 @@ fn derive_set_expr_shape<'a, 'db, DB: DatabaseLike>(
             let Some(right_shape) = derive_set_expr_shape(right, cte_scope, deriving)? else {
                 return Ok(None);
             };
-            if left_shape.columns.len() != right_shape.columns.len() {
-                return Ok(None);
-            }
-            let columns = left_shape
-                .columns
-                .iter()
-                .zip(right_shape.columns.iter())
-                .map(|(left, right)| {
-                    DerivedColumn {
-                        name: left.name.clone(),
-                        quoted: left.quoted,
-                        source: match (left.source, right.source) {
-                            (Some(left_table), Some(right_table))
-                                if deriving.database.table_id(left_table)
-                                    == deriving.database.table_id(right_table) =>
-                            {
-                                Some(left_table)
-                            }
-                            _ => None,
-                        },
-                    }
-                })
-                .collect();
-            Ok(Some(DerivedShape {
-                columns,
-                // Only an `ALL` set operation preserves row identity, and only
-                // when both arms do: a deduplicating `UNION` collapses rows,
-                // and `INTERSECT`/`EXCEPT` drop them.
-                row_preserving: matches!(set_quantifier, SetQuantifier::All)
-                    && left_shape.row_preserving
-                    && right_shape.row_preserving,
-            }))
+            Ok(merge_set_operation_shapes(&left_shape, &right_shape, *set_quantifier, deriving))
         }
         // `VALUES` and `TABLE` bodies name their columns by rules this
         // resolver does not model.
         _ => Ok(None),
     }
+}
+
+fn merge_set_operation_shapes<'db, DB: DatabaseLike>(
+    left: &DerivedShape<'db, DB>,
+    right: &DerivedShape<'db, DB>,
+    set_quantifier: SetQuantifier,
+    deriving: Deriving<'_, 'db, DB>,
+) -> Option<DerivedShape<'db, DB>> {
+    if left.columns.len() != right.columns.len() {
+        return None;
+    }
+    let columns = left
+        .columns
+        .iter()
+        .zip(right.columns.iter())
+        .map(|(left, right)| {
+            DerivedColumn {
+                name: left.name.clone(),
+                quoted: left.quoted,
+                source: match (left.source, right.source) {
+                    (Some(left_table), Some(right_table))
+                        if deriving.database.table_id(left_table)
+                            == deriving.database.table_id(right_table) =>
+                    {
+                        Some(left_table)
+                    }
+                    _ => None,
+                },
+            }
+        })
+        .collect();
+    Some(DerivedShape {
+        columns,
+        row_preserving: matches!(set_quantifier, SetQuantifier::All)
+            && left.row_preserving
+            && right.row_preserving,
+    })
 }
 
 /// Expands a `*` projection by materializing each `FROM` item's plan in
@@ -1647,6 +1805,23 @@ mod tests {
         traits::{DQLLike, TableLike},
     };
 
+    std::thread_local! {
+        static CTE_SHAPE_DERIVATIONS: core::cell::Cell<usize> =
+            const { core::cell::Cell::new(0) };
+    }
+
+    pub(super) fn record_cte_shape_derivation() {
+        CTE_SHAPE_DERIVATIONS.with(|count| count.set(count.get() + 1));
+    }
+
+    fn reset_cte_shape_derivations() {
+        CTE_SHAPE_DERIVATIONS.with(|count| count.set(0));
+    }
+
+    fn cte_shape_derivations() -> usize {
+        CTE_SHAPE_DERIVATIONS.with(core::cell::Cell::get)
+    }
+
     const SCHEMA: &str = "
         CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
         CREATE TABLE orders (id INT PRIMARY KEY, user_id INT, total INT);
@@ -1669,6 +1844,31 @@ mod tests {
             .projection_source_table(db)
             .expect("projection_source_table succeeds")
             .map(|table| table.table_name().to_string())
+    }
+
+    fn nested_recursive_cte_body(depth: usize) -> String {
+        if depth == 0 {
+            return "SELECT id FROM users UNION ALL SELECT t0.id FROM t0 WHERE false".to_string();
+        }
+        let inner = depth - 1;
+        format!(
+            "WITH RECURSIVE t{inner} AS ({}) SELECT id FROM t{inner} \
+             UNION ALL SELECT t{depth}.id FROM t{depth} WHERE false",
+            nested_recursive_cte_body(inner)
+        )
+    }
+
+    #[test]
+    fn nested_recursive_ctes_derive_each_with_once() {
+        let depth = 6;
+        let db = schema_db();
+        let sql = format!(
+            "WITH RECURSIVE t{depth} AS ({}) SELECT t{depth}.id FROM t{depth}",
+            nested_recursive_cte_body(depth)
+        );
+        reset_cte_shape_derivations();
+        assert_eq!(source_name(&sql, &db), Some("users".to_string()));
+        assert_eq!(cte_shape_derivations(), depth + 1);
     }
 
     #[test]
