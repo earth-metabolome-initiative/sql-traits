@@ -13,7 +13,7 @@
 #![allow(clippy::expect_used)]
 
 use sql_traits::{
-    errors::{Error, LookupError},
+    errors::{Error, LookupError, ObjectKind},
     prelude::*,
 };
 use sqlparser::dialect::PostgreSqlDialect;
@@ -87,8 +87,10 @@ fn a_table_in_an_absent_schema_is_refused() {
     let error = parse("CREATE TABLE missing_schema.u (id INT);")
         .expect_err("missing_schema is not created");
     assert!(
-        matches!(&error, Error::SchemaNotFoundForTable { schema_name, table_name }
-            if schema_name == "missing_schema" && table_name == "u"),
+        matches!(&error, Error::SchemaNotFoundForRelation { schema_name, relation_name, object_kind }
+            if schema_name == "missing_schema"
+                && relation_name == "u"
+                && *object_kind == ObjectKind::Table),
         "got {error:?}"
     );
 
@@ -122,7 +124,7 @@ fn renaming_a_table_into_an_absent_schema_is_refused() {
          RENAME TABLE a.t TO b.t;",
     )
     .expect_err("b is not created");
-    assert!(matches!(&error, Error::SchemaNotFoundForTable { .. }), "got {error:?}");
+    assert!(matches!(&error, Error::SchemaNotFoundForRelation { .. }), "got {error:?}");
 }
 
 #[test]

@@ -264,8 +264,8 @@ fn a_path_naming_only_absent_schemas_is_refused() {
         "SET search_path TO nope; CREATE TABLE docs (id INT);",
     );
     assert!(
-        matches!(&refused, Err(Error::SchemaNotFoundForTable { schema_name, table_name })
-            if schema_name == "nope" && table_name == "docs"),
+        matches!(&refused, Err(Error::SchemaNotFoundForRelation { schema_name, relation_name, .. })
+            if schema_name == "nope" && relation_name == "docs"),
         "got {refused:?}"
     );
 }
@@ -277,8 +277,8 @@ fn an_emptied_path_is_refused() {
     let refused =
         ParserDB::parse::<PostgreSqlDialect>("SET search_path TO ''; CREATE TABLE docs (id INT);");
     assert!(
-        matches!(&refused, Err(Error::NoSchemaSelectedForTable { table_name })
-            if table_name == "docs"),
+        matches!(&refused, Err(Error::NoSchemaSelectedForRelation { relation_name, .. })
+            if relation_name == "docs"),
         "got {refused:?}"
     );
 
@@ -384,7 +384,7 @@ fn if_not_exists_does_not_swallow_the_refusal() {
          CREATE TABLE IF NOT EXISTS b (id INT);",
     );
     assert!(
-        matches!(&refused, Err(Error::SchemaNotFoundForTable { schema_name, .. })
+        matches!(&refused, Err(Error::SchemaNotFoundForRelation { schema_name, .. })
             if schema_name == "nope"),
         "got {refused:?}"
     );

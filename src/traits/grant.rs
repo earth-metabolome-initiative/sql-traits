@@ -368,11 +368,41 @@ impl<T: GrantLike> GrantLike for &T {
     }
 }
 
-/// A trait for table-level grants.
+/// One relation a grant covers, saying which kind it is.
 ///
-/// Table grants apply privileges to entire tables. This includes direct table
-/// grants (`GRANT ... ON table_name`) and schema-wide table grants
-/// (`GRANT ... ON ALL TABLES IN SCHEMA`).
+/// A grant reaches tables, views and materialized views alike, so a caller
+/// wanting the whole picture asks [`TableGrantLike::relations`] and handles
+/// each case. [`TableGrantLike::tables`] answers the narrower question, which
+/// tables a grant covers, and quietly omits the views: that is the right
+/// answer to that question and the wrong answer to this one.
+#[derive(Clone)]
+pub enum GrantRelation<'a, DB: DatabaseLike> {
+    /// A table.
+    Table(&'a DB::Table),
+    /// A plain view.
+    View(&'a DB::View),
+    /// A materialized view.
+    MaterializedView(&'a DB::MaterializedView),
+}
+
+impl<DB: DatabaseLike> Copy for GrantRelation<'_, DB> {}
+
+impl<DB: DatabaseLike> Debug for GrantRelation<'_, DB> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Table(table) => f.debug_tuple("Table").field(table).finish(),
+            Self::View(view) => f.debug_tuple("View").field(view).finish(),
+            Self::MaterializedView(view) => f.debug_tuple("MaterializedView").field(view).finish(),
+        }
+    }
+}
+
+/// A trait for relation-level grants.
+///
+/// A grant applies privileges to whole relations, whether written as a direct
+/// grant (`GRANT ... ON name`) or a schema-wide one (`GRANT ... ON ALL TABLES
+/// IN SCHEMA`), and PostgreSQL lets both reach views and materialized views as
+/// well as tables.
 ///
 /// This trait corresponds to PostgreSQL's `role_table_grants` system view.
 pub trait TableGrantLike:
@@ -439,6 +469,51 @@ pub trait TableGrantLike:
         database: &'a Self::DB,
     ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Table>;
 
+    /// Returns every relation this grant applies to, each saying which kind it
+    /// is.
+    ///
+    /// This is the complete answer, where [`Self::tables`] answers the
+    /// narrower question of which tables a grant covers. A caller that means
+    /// "everything this grant reaches" has to ask this one, because a grant on
+    /// a view is ordinary PostgreSQL and `ALL TABLES IN SCHEMA` covers views
+    /// too.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::{prelude::*, traits::grant::GrantRelation};
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE t (id INT);
+    /// CREATE VIEW v AS SELECT id FROM t;
+    /// CREATE ROLE reader;
+    /// GRANT SELECT ON t, v TO reader;
+    /// ",
+    /// )?;
+    /// let grant = db.table_grants().next().unwrap();
+    /// let kinds: Vec<&str> = grant
+    ///     .relations(&db)
+    ///     .map(|relation| {
+    ///         match relation {
+    ///             GrantRelation::Table(_) => "table",
+    ///             GrantRelation::View(_) => "view",
+    ///             GrantRelation::MaterializedView(_) => "materialized view",
+    ///         }
+    ///     })
+    ///     .collect();
+    /// assert_eq!(kinds, vec!["table", "view"]);
+    /// // The narrower question still answers only the table.
+    /// assert_eq!(grant.tables(&db).count(), 1);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn relations<'a>(
+        &'a self,
+        database: &'a Self::DB,
+    ) -> impl Iterator<Item = GrantRelation<'a, Self::DB>>;
+
     /// Returns whether this grant applies to a specific table.
     ///
     /// # Arguments
@@ -484,6 +559,13 @@ where
         database: &'a Self::DB,
     ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Table> {
         (*self).tables(database)
+    }
+
+    fn relations<'a>(
+        &'a self,
+        database: &'a Self::DB,
+    ) -> impl Iterator<Item = GrantRelation<'a, Self::DB>> {
+        (*self).relations(database)
     }
 
     fn applies_to_table(
@@ -545,6 +627,10 @@ pub trait ColumnGrantLike:
 
     /// Returns the table this column grant applies to.
     ///
+    /// Answers [`None`] when the grant's target is a view, which PostgreSQL
+    /// allows: ask [`Self::relation`] for the answer that says which kind the
+    /// target is.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -567,6 +653,35 @@ pub trait ColumnGrantLike:
     /// ```
     fn table<'a>(&'a self, database: &'a Self::DB)
     -> Option<&'a <Self::DB as DatabaseLike>::Table>;
+
+    /// Returns the relation this column grant applies to, saying which kind it
+    /// is.
+    ///
+    /// [`Self::table`] answers the narrower question and cannot distinguish a
+    /// grant on a view from a grant on nothing, because both answer [`None`].
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::{prelude::*, traits::grant::GrantRelation};
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "
+    /// CREATE TABLE t (id INT);
+    /// CREATE VIEW v AS SELECT id FROM t;
+    /// CREATE ROLE app_user;
+    /// GRANT SELECT (id) ON v TO app_user;
+    /// ",
+    /// )?;
+    /// let grant = db.column_grants().next().unwrap();
+    /// assert!(grant.table(&db).is_none(), "the target is not a table");
+    /// assert!(matches!(grant.relation(&db), Some(GrantRelation::View(_))));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn relation<'a>(&'a self, database: &'a Self::DB) -> Option<GrantRelation<'a, Self::DB>>;
 }
 
 impl<T: ColumnGrantLike> ColumnGrantLike for &T
@@ -587,6 +702,10 @@ where
     ) -> Option<&'a <Self::DB as DatabaseLike>::Table> {
         (*self).table(database)
     }
+
+    fn relation<'a>(&'a self, database: &'a Self::DB) -> Option<GrantRelation<'a, Self::DB>> {
+        (*self).relation(database)
+    }
 }
 
 #[cfg(test)]
@@ -603,8 +722,11 @@ mod tests {
     fn test_table_grant_ref_implementation() {
         let sql = r"
             CREATE TABLE my_table (id INT);
+            CREATE VIEW my_view AS SELECT id FROM my_table;
+            CREATE MATERIALIZED VIEW my_materialized AS SELECT id FROM my_table;
             CREATE ROLE app_user;
-            GRANT SELECT, INSERT ON my_table TO app_user WITH GRANT OPTION;
+            GRANT SELECT, INSERT ON my_table, my_view, my_materialized
+                TO app_user WITH GRANT OPTION;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let grant = db.table_grants().next().expect("Grant not found");
@@ -628,6 +750,13 @@ mod tests {
         assert!(<&_ as TableGrantLike>::applies_to_table(&grant_ref, table, &db));
         let tables: Vec<_> = <&_ as TableGrantLike>::tables(&grant_ref, &db).collect();
         assert_eq!(tables.len(), 1);
+
+        let relations: Vec<_> = <&_ as TableGrantLike>::relations(&grant_ref, &db).collect();
+        assert_eq!(relations.len(), 3);
+        let rendered: Vec<_> = relations.iter().map(|relation| format!("{relation:?}")).collect();
+        assert!(rendered.iter().any(|relation| relation.starts_with("Table(")));
+        assert!(rendered.iter().any(|relation| relation.starts_with("View(")));
+        assert!(rendered.iter().any(|relation| relation.starts_with("MaterializedView(")));
 
         let app_user = db.role("app_user").expect("Role not found");
         assert!(<&_ as GrantLike>::applies_to_role(&grant_ref, app_user));
@@ -655,6 +784,10 @@ mod tests {
         // ColumnGrantLike methods routed through &T.
         let table = <&_ as ColumnGrantLike>::table(&cg_ref, &db).expect("column grant has a table");
         assert_eq!(table.table_name(), "users");
+        assert!(matches!(
+            <&_ as ColumnGrantLike>::relation(&cg_ref, &db),
+            Some(GrantRelation::Table(_))
+        ));
         let cols: Vec<_> =
             <&_ as ColumnGrantLike>::columns(&cg_ref, table, &db).expect("columns").collect();
         assert!(!cols.is_empty(), "column grant must surface at least one column");

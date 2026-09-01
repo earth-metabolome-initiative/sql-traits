@@ -4,15 +4,18 @@ mod column_scope;
 pub(crate) mod fingerprint;
 pub mod generic_db;
 pub use generic_db::{
-    AccessResolution, GenericDB, ParseOptions, ParserDB, ParserDBBuilder, PostgresCatalog,
-    PostgresCatalogCollation, PostgresCatalogType, UnresolvedAccessReference,
+    AccessResolution, GenericDB, Meta, ParseOptions, ParserDB, ParserDBBuilder, PostgresCatalog,
+    PostgresCatalogCollation, PostgresCatalogType, SchemaProfile, SqlparserProfile,
+    UnresolvedAccessReference,
 };
 pub mod metadata;
 mod schema;
 mod target_name;
+mod view;
 
 pub use column_scope::ColumnScope;
 pub use fingerprint::{AlgorithmId, FingerprintError, SchemaFingerprint, canonical_bytes_v1};
-pub use metadata::{ColumnMetadata, FunctionMetadata, TableAttribute, TableMetadata};
+pub use metadata::{ColumnMetadata, FunctionMetadata, TableAttribute, TableMetadata, ViewMetadata};
 pub use schema::Schema;
 pub use target_name::TargetName;
+pub use view::{MaterializedView, View, ViewDeclaration};

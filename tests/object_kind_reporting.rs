@@ -208,6 +208,8 @@ fn a_mysql_unique_key_reports_itself_by_name() {
 fn every_kind_renders_its_own_spelling() {
     for (kind, spelling) in [
         (ObjectKind::Table, "Table"),
+        (ObjectKind::View, "View"),
+        (ObjectKind::MaterializedView, "Materialized view"),
         (ObjectKind::Index, "Index"),
         (ObjectKind::UniqueIndex, "Unique index"),
         (ObjectKind::CheckConstraint, "Check constraint"),

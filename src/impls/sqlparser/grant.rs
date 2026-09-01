@@ -17,7 +17,7 @@ use crate::{
     structs::{ParserDB, TargetName},
     traits::{
         ColumnGrantLike, ColumnLike, DatabaseLike, GrantLike, Metadata, RoleLike, TableGrantLike,
-        TableLike,
+        TableLike, ViewLike, grant::GrantRelation,
     },
     utils::{
         identifier_resolution::{identifiers_match, is_public_pseudo_role},
@@ -91,19 +91,31 @@ fn grantee_matches_role(grantee: &Grantee, role: &CreateRole) -> bool {
     }
 }
 
-fn schema_matches_table<T: TableLike>(schema_name: &ObjectName, table: &T) -> bool {
-    let Some(table_schema) = table.table_schema() else {
+/// Whether a schema-wide grant's schema name covers a relation stored in
+/// `relation_schema`, with the quote state that decides case sensitivity.
+///
+/// A relation stored without a schema is not covered: this crate leaves a
+/// `public` relation's qualifier unwritten, and `ALL TABLES IN SCHEMA public`
+/// naming it would then read differently from the same grant written against
+/// any other schema.
+fn schema_matches_relation(
+    schema_name: &ObjectName,
+    relation_schema: Option<(&str, bool)>,
+) -> bool {
+    let Some((relation_schema, relation_schema_quoted)) = relation_schema else {
         return false;
     };
     let Some((lookup_schema, lookup_schema_quoted)) = object_name_last_part(schema_name) else {
         return false;
     };
 
-    identifiers_match(
-        table_schema,
-        table.table_schema_is_quoted(),
-        lookup_schema,
-        lookup_schema_quoted,
+    identifiers_match(relation_schema, relation_schema_quoted, lookup_schema, lookup_schema_quoted)
+}
+
+fn schema_matches_table<T: TableLike>(schema_name: &ObjectName, table: &T) -> bool {
+    schema_matches_relation(
+        schema_name,
+        table.table_schema().map(|schema| (schema, table.table_schema_is_quoted())),
     )
 }
 
@@ -645,12 +657,83 @@ fn granted_tables<'a>(
     }
 }
 
+/// Resolves each relation a grant names, in the order the grant wrote them,
+/// looking for a table first and then each view kind, since one name holds at
+/// most one of the three.
+///
+/// `ALL TABLES IN SCHEMA` covers views and materialized views as well as
+/// tables, which is what PostgreSQL grants, so all three are walked.
+fn granted_relations<'a>(
+    grant: &'a Grant,
+    database: &'a ParserDB,
+) -> Vec<GrantRelation<'a, ParserDB>> {
+    match &grant.objects {
+        Some(GrantObjects::Tables(names)) => {
+            names.iter().filter_map(|name| resolve_relation_name(name, database)).collect()
+        }
+        Some(GrantObjects::AllTablesInSchema { schemas }) => {
+            database
+                .tables()
+                .filter(|table| schemas.iter().any(|schema| schema_matches_table(schema, *table)))
+                .map(GrantRelation::Table)
+                .chain(
+                    database
+                        .views()
+                        .filter(|view| {
+                            let stored =
+                                view.view_schema().map(|s| (s, view.view_schema_is_quoted()));
+                            schemas.iter().any(|schema| schema_matches_relation(schema, stored))
+                        })
+                        .map(GrantRelation::View),
+                )
+                .chain(
+                    database
+                        .materialized_views()
+                        .filter(|view| {
+                            let stored =
+                                view.view_schema().map(|s| (s, view.view_schema_is_quoted()));
+                            schemas.iter().any(|schema| schema_matches_relation(schema, stored))
+                        })
+                        .map(GrantRelation::MaterializedView),
+                )
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Resolves one written name to whichever relation kind holds it.
+fn resolve_relation_name<'a>(
+    name: &ObjectName,
+    database: &'a ParserDB,
+) -> Option<GrantRelation<'a, ParserDB>> {
+    if let Some(table) = resolve_object_name(name, database).ok().flatten() {
+        return Some(GrantRelation::Table(table));
+    }
+    let target = target_name_from_object_name(name)?;
+    if let Some(view) = database.resolve_target_view(target.clone()).ok().flatten() {
+        return Some(GrantRelation::View(view));
+    }
+    database
+        .resolve_target_materialized_view(target)
+        .ok()
+        .flatten()
+        .map(GrantRelation::MaterializedView)
+}
+
 impl TableGrantLike for Grant {
     fn tables<'a>(
         &'a self,
         database: &'a Self::DB,
     ) -> impl Iterator<Item = &'a <Self::DB as DatabaseLike>::Table> {
         granted_tables(self, database).into_iter()
+    }
+
+    fn relations<'a>(
+        &'a self,
+        database: &'a Self::DB,
+    ) -> impl Iterator<Item = GrantRelation<'a, Self::DB>> {
+        granted_relations(self, database).into_iter()
     }
 
     fn applies_to_table(
@@ -711,5 +794,9 @@ impl ColumnGrantLike for Grant {
         database: &'a Self::DB,
     ) -> Option<&'a <Self::DB as DatabaseLike>::Table> {
         granted_tables(self, database).into_iter().next()
+    }
+
+    fn relation<'a>(&'a self, database: &'a Self::DB) -> Option<GrantRelation<'a, Self::DB>> {
+        granted_relations(self, database).into_iter().next()
     }
 }

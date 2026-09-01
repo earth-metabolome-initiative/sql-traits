@@ -14,3 +14,5 @@ mod check_metadata;
 pub use check_metadata::CheckMetadata;
 mod policy_metadata;
 pub use policy_metadata::PolicyMetadata;
+mod view_metadata;
+pub use view_metadata::ViewMetadata;

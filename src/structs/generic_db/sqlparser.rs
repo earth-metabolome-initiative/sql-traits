@@ -41,20 +41,22 @@ use crate::{
     errors::{LookupError, ObjectKind},
     impls::SqlparserDialect,
     structs::{
-        ColumnMetadata, GenericDB, Schema, TableAttribute, TableMetadata,
+        ColumnMetadata, GenericDB, MaterializedView, Schema, SchemaProfile, TableAttribute,
+        TableMetadata, View,
         metadata::{
             CheckMetadata, FunctionMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata,
         },
     },
-    traits::{ColumnLike, FunctionLike, IndexLike, TableLike},
+    traits::{ColumnLike, FunctionLike, IndexLike, TableLike, ViewLike},
     utils::{
         columns_in_expression,
         identifier_resolution::{identifiers_match, is_public_pseudo_role, normalize_identifier},
         last_str, normalize_postgres_type_cow, normalize_sqlparser_type,
         object_name::{
             object_name_identifiers, object_name_last_part, resolve_table_object_name_in_iter,
-            resolve_table_object_name_on_search_path_in_iter, schema_from_object_name,
-            table_matches_object_name, target_name_of_idents,
+            resolve_table_object_name_on_search_path_in_iter, resolve_view_on_search_path_in_iter,
+            schema_from_object_name, stored_table_key, table_matches_object_name,
+            target_name_of_idents,
         },
     },
 };
@@ -66,28 +68,38 @@ mod like;
 mod parse_options;
 mod postgres_catalog;
 mod postgres_icu_collations;
+mod views;
 
 pub use parse_options::{AccessResolution, ParseOptions};
 pub use postgres_catalog::{PostgresCatalog, PostgresCatalogCollation, PostgresCatalogType};
 
+/// The object kinds a schema parsed from SQL text holds, each an `sqlparser`
+/// AST node or a wrapper pairing one with the table it belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SqlparserProfile;
+
+impl SchemaProfile for SqlparserProfile {
+    type Table = CreateTable;
+    type View = View;
+    type MaterializedView = MaterializedView;
+    type Column = TableAttribute<CreateTable, ColumnDef>;
+    type Index = TableAttribute<CreateTable, CreateIndex>;
+    type UniqueIndex = TableAttribute<CreateTable, UniqueConstraint>;
+    type ForeignKey = TableAttribute<CreateTable, ForeignKeyConstraint>;
+    type Function = CreateFunction;
+    type CheckConstraint = TableAttribute<CreateTable, CheckConstraint>;
+    type Trigger = CreateTrigger;
+    type Policy = CreatePolicy;
+    type Role = CreateRole;
+    type Schema = Schema;
+    type TableGrant = Grant;
+    type ColumnGrant = Grant;
+    type Dialect = SqlparserDialect;
+}
+
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
 /// `CreateTable`.
-pub type ParserDBBuilder = super::GenericDBBuilder<
-    CreateTable,
-    TableAttribute<CreateTable, ColumnDef>,
-    TableAttribute<CreateTable, CreateIndex>,
-    TableAttribute<CreateTable, UniqueConstraint>,
-    TableAttribute<CreateTable, ForeignKeyConstraint>,
-    CreateFunction,
-    TableAttribute<CreateTable, CheckConstraint>,
-    CreateTrigger,
-    CreatePolicy,
-    CreateRole,
-    Schema,
-    Grant,
-    Grant,
-    SqlparserDialect,
->;
+pub type ParserDBBuilder = super::GenericDBBuilder<SqlparserProfile>;
 
 #[derive(Debug, Clone)]
 struct CreatedCollationMetadata {
@@ -1215,6 +1227,7 @@ impl ParserDBBuilder {
                 .functions()
                 .iter()
                 .any(|(_, metadata)| metadata.owner() == Some(stored_name.as_str()))
+            || views::view_owner_names(self).iter().any(|owner| owner == stored_name.as_str())
             || self
                 .schemas()
                 .iter()
@@ -1229,22 +1242,22 @@ impl ParserDBBuilder {
             })
     }
 
-    /// Checks if a schema contains any objects (tables).
+    /// Whether any relation belongs to this schema.
     ///
-    /// Returns `true` if any table belongs to this schema.
+    /// A view counts as much as a table: PostgreSQL refuses `DROP SCHEMA`
+    /// without `CASCADE` while a schema holds either.
     fn is_schema_non_empty(&self, schema_name: &str, schema_quoted: bool) -> bool {
-        use crate::traits::TableLike;
-
-        // Check if any table is in this schema
-        self.tables().iter().any(|(t, _)| {
-            t.table_schema().is_some_and(|table_schema| {
-                identifiers_match(
-                    table_schema,
-                    t.table_schema_is_quoted(),
-                    schema_name,
-                    schema_quoted,
-                )
+        let in_schema = |stored: Option<(&str, bool)>| {
+            stored.is_some_and(|(stored_schema, stored_quoted)| {
+                identifiers_match(stored_schema, stored_quoted, schema_name, schema_quoted)
             })
+        };
+        self.tables().iter().any(|(table, _)| {
+            in_schema(table.table_schema().map(|schema| (schema, table.table_schema_is_quoted())))
+        }) || self.views().iter().any(|(view, _)| {
+            in_schema(view.view_schema().map(|schema| (schema, view.view_schema_is_quoted())))
+        }) || self.materialized_views().iter().any(|(view, _)| {
+            in_schema(view.view_schema().map(|schema| (schema, view.view_schema_is_quoted())))
         })
     }
 
@@ -1265,6 +1278,35 @@ impl ParserDBBuilder {
         resolve_table_object_name_on_search_path_in_iter(
             self.tables().iter().map(|(table, _)| table.as_ref()),
             object_name,
+            self.search_path(),
+        )
+    }
+
+    /// Resolves a plain view the input has created so far, honouring the
+    /// search path, so every statement reaching for a bare name answers the
+    /// same way a table lookup does.
+    fn resolve_view_object_name(
+        &self,
+        object_name: &ObjectName,
+    ) -> Result<Option<&View>, LookupError> {
+        let (schema_ident, name_ident) = object_name_identifiers(object_name)?;
+        resolve_view_on_search_path_in_iter(
+            self.views().iter().map(|(view, _)| view.as_ref()),
+            &target_name_of_idents(schema_ident, name_ident),
+            self.search_path(),
+        )
+    }
+
+    /// Resolves a materialized view the input has created so far, honouring
+    /// the search path.
+    fn resolve_materialized_view_object_name(
+        &self,
+        object_name: &ObjectName,
+    ) -> Result<Option<&MaterializedView>, LookupError> {
+        let (schema_ident, name_ident) = object_name_identifiers(object_name)?;
+        resolve_view_on_search_path_in_iter(
+            self.materialized_views().iter().map(|(view, _)| view.as_ref()),
+            &target_name_of_idents(schema_ident, name_ident),
             self.search_path(),
         )
     }
@@ -2368,23 +2410,39 @@ fn validate_created_collation_schema(
     })
 }
 
+/// Checks that a relation qualified with a schema names one the input creates.
+fn validate_relation_schema(
+    builder: &ParserDBBuilder,
+    schema: Option<(&str, bool)>,
+    object_kind: crate::errors::ObjectKind,
+    relation_name: &str,
+) -> Result<(), crate::errors::Error> {
+    let Some((schema_name, schema_quoted)) = schema else {
+        return Ok(());
+    };
+
+    if schema_is_declared(builder, schema_name, schema_quoted) {
+        return Ok(());
+    }
+
+    Err(crate::errors::Error::SchemaNotFoundForRelation {
+        schema_name: schema_name.to_string(),
+        object_kind,
+        relation_name: relation_name.to_string(),
+    })
+}
+
 /// Checks that a table qualified with a schema names one the input creates.
 fn validate_table_schema(
     builder: &ParserDBBuilder,
     create_table: &CreateTable,
 ) -> Result<(), crate::errors::Error> {
-    let Some(schema_name) = create_table.table_schema() else {
-        return Ok(());
-    };
-
-    if schema_is_declared(builder, schema_name, create_table.table_schema_is_quoted()) {
-        return Ok(());
-    }
-
-    Err(crate::errors::Error::SchemaNotFoundForTable {
-        schema_name: schema_name.to_string(),
-        table_name: create_table.table_name().to_string(),
-    })
+    validate_relation_schema(
+        builder,
+        create_table.table_schema().map(|schema| (schema, create_table.table_schema_is_quoted())),
+        crate::errors::ObjectKind::Table,
+        create_table.table_name(),
+    )
 }
 
 /// Refuses a `NO INHERIT` check written on a partitioned table.
@@ -2431,10 +2489,11 @@ fn refuse_no_inherit_check_on_partitioned(
 ///
 /// # Errors
 ///
-/// Returns [`SchemaNotFoundForTable`](crate::errors::Error::SchemaNotFoundForTable)
+/// Returns
+/// [`SchemaNotFoundForRelation`](crate::errors::Error::SchemaNotFoundForRelation)
 /// when the path names only schemas the input never creates, the refusal a
 /// schema written out in full already gets, and
-/// [`NoSchemaSelectedForTable`](crate::errors::Error::NoSchemaSelectedForTable)
+/// [`NoSchemaSelectedForRelation`](crate::errors::Error::NoSchemaSelectedForRelation)
 /// when `SET search_path TO ''` left it naming none at all. A real server
 /// refuses both with one complaint, that no schema has been selected to create
 /// in, and each of these carries whichever name it can.
@@ -2452,24 +2511,49 @@ fn qualify_on_search_path(
         return Ok(());
     }
 
-    // An entry spelled empty names no schema, so it is passed over like one
-    // naming a schema the input never creates.
+    if let Some(qualifier) =
+        search_path_qualifier(builder, crate::errors::ObjectKind::Table, create_table.table_name())?
+    {
+        create_table.name.0.insert(0, ObjectNamePart::Identifier(qualifier));
+    }
+    Ok(())
+}
+
+/// The schema qualifier the search path selects for a relation name written
+/// without one, or [`None`] when the path selects the default schema, which
+/// this model leaves unwritten.
+///
+/// PostgreSQL creates in the first schema on the path that exists, so the walk
+/// passes an entry naming nothing and takes the next. An entry spelled empty
+/// names no schema, so it is passed over like one naming a schema the input
+/// never creates.
+///
+/// # Errors
+///
+/// Returns
+/// [`SchemaNotFoundForRelation`](crate::errors::Error::SchemaNotFoundForRelation)
+/// when the path names only schemas the input never creates, and
+/// [`NoSchemaSelectedForRelation`](crate::errors::Error::NoSchemaSelectedForRelation)
+/// when the path names none at all.
+fn search_path_qualifier(
+    builder: &ParserDBBuilder,
+    object_kind: crate::errors::ObjectKind,
+    relation_name: &str,
+) -> Result<Option<Ident>, crate::errors::Error> {
     let mut named = None;
     for (entry, quoted) in builder.search_path().filter(|(entry, _)| !entry.is_empty()) {
         if identifiers_match(entry, quoted, "public", false) {
-            return Ok(());
+            return Ok(None);
         }
 
         if let Some(schema) = declared_schema(builder, entry, quoted) {
             // The catalog spelling wins over the one the path used, since the
             // two only differ where quoting makes them the same name anyway.
-            let qualifier = if schema.is_quoted() {
+            return Ok(Some(if schema.is_quoted() {
                 Ident::with_quote('"', schema.name())
             } else {
                 Ident::new(schema.name())
-            };
-            create_table.name.0.insert(0, ObjectNamePart::Identifier(qualifier));
-            return Ok(());
+            }));
         }
 
         named.get_or_insert(entry);
@@ -2477,14 +2561,16 @@ fn qualify_on_search_path(
 
     match named {
         Some(schema_name) => {
-            Err(crate::errors::Error::SchemaNotFoundForTable {
+            Err(crate::errors::Error::SchemaNotFoundForRelation {
                 schema_name: schema_name.to_string(),
-                table_name: create_table.table_name().to_string(),
+                object_kind,
+                relation_name: relation_name.to_string(),
             })
         }
         None => {
-            Err(crate::errors::Error::NoSchemaSelectedForTable {
-                table_name: create_table.table_name().to_string(),
+            Err(crate::errors::Error::NoSchemaSelectedForRelation {
+                object_kind,
+                relation_name: relation_name.to_string(),
             })
         }
     }
@@ -2613,10 +2699,40 @@ fn index_name_holder(
         .then_some(ObjectKind::UniqueIndex)
 }
 
+/// Returns the kind of view already holding `name` in `schema`, if any.
+fn view_name_holder(
+    builder: &ParserDBBuilder,
+    name: &Ident,
+    schema: SchemaQualifier<'_>,
+) -> Option<ObjectKind> {
+    if builder.views().iter().any(|(view, _)| view_holds_name(view.as_ref(), name, schema)) {
+        return Some(ObjectKind::View);
+    }
+    builder
+        .materialized_views()
+        .iter()
+        .any(|(view, _)| view_holds_name(view.as_ref(), name, schema))
+        .then_some(ObjectKind::MaterializedView)
+}
+
+/// Returns whether a stored view answers `name` in `schema`.
+fn view_holds_name<V: ViewLike>(view: &V, name: &Ident, schema: SchemaQualifier<'_>) -> bool {
+    identifiers_match(
+        view.view_name(),
+        view.view_name_is_quoted(),
+        name.value.as_str(),
+        name.quote_style.is_some(),
+    ) && schema_qualifiers_match(
+        view.view_schema().map(|value| (value, view.view_schema_is_quoted())),
+        schema,
+    )
+}
+
 /// Returns the kind of relation already holding `name` in `schema`, if any.
 ///
-/// Tables in a schema and indexes on them share one pool of names. A table the
-/// caller is about to replace has to be out of the stores before this is asked.
+/// Tables in a schema, views and materialized views over them, and indexes on
+/// them all share one pool of names. A relation the caller is about to replace
+/// has to be out of the stores before this is asked.
 fn relation_name_holder(
     builder: &ParserDBBuilder,
     name: &Ident,
@@ -2633,7 +2749,7 @@ fn relation_name_holder(
     if table {
         return Some(ObjectKind::Table);
     }
-    index_name_holder(builder, name, schema)
+    view_name_holder(builder, name, schema).or_else(|| index_name_holder(builder, name, schema))
 }
 
 /// Checks that nothing in the schema of a table node already holds a name the
@@ -2651,7 +2767,13 @@ fn validate_relation_names(
 
     for (position, (object_kind, name)) in introduced.iter().enumerate() {
         let against_stores = match object_kind {
-            ObjectKind::Table => index_name_holder(builder, name, schema),
+            // A table name against another table name is left to the builder,
+            // which refuses it as a lookup ambiguity naming both spellings.
+            // Views and indexes are asked for here.
+            ObjectKind::Table => {
+                view_name_holder(builder, name, schema)
+                    .or_else(|| index_name_holder(builder, name, schema))
+            }
             _ => relation_name_holder(builder, name, schema),
         };
         let conflicting_kind = introduced[..position]
@@ -2707,12 +2829,13 @@ fn validate_index_columns(
 }
 
 /// Enforces [`AccessResolution::ClosedWorld`] on one `GRANT` or `REVOKE`: every
-/// table target names a table, and every grantee names a role, that the input
-/// has created up to this statement.
+/// relation target names a table or a view, and every grantee names a role,
+/// that the input has created up to this statement.
 ///
 /// The two statements carry the same targets and the database answers for them
-/// alike, reporting an absent table before an absent role, which is the order
-/// here.
+/// alike, reporting an absent relation before an absent role, which is the
+/// order here. A view is a legal target: granting on one is ordinary
+/// PostgreSQL, and a blanket grant over a schema covers views too.
 fn validate_access_targets_against_builder(
     builder: &ParserDBBuilder,
     grantees: &[Grantee],
@@ -2720,7 +2843,9 @@ fn validate_access_targets_against_builder(
 ) -> Result<(), crate::errors::Error> {
     if let Some(GrantObjects::Tables(tables)) = objects {
         for table_obj in tables {
-            if builder.resolve_table_object_name(table_obj)?.is_none() {
+            if builder.resolve_table_object_name(table_obj)?.is_none()
+                && views::holds_view(builder, table_obj).is_none()
+            {
                 return Err(crate::errors::Error::TableNotFoundForGrant {
                     table_name: last_str(table_obj).to_string(),
                 });
@@ -2967,6 +3092,19 @@ fn rename_role_references(builder: &mut ParserDBBuilder, previous: &Ident, repla
             metadata.set_owner(Some(replacement_name.clone()));
         }
     }
+    // A view's owner is as much a reference to the role as a table's, so a
+    // rename has to reach it too, otherwise the view keeps naming a role that
+    // no longer exists and a later `DROP ROLE` sees nothing depending on it.
+    for (_, metadata) in builder.views_mut() {
+        if metadata.owner() == Some(previous_name.as_str()) {
+            metadata.set_owner(Some(replacement_name.clone()));
+        }
+    }
+    for (_, metadata) in builder.materialized_views_mut() {
+        if metadata.owner() == Some(previous_name.as_str()) {
+            metadata.set_owner(Some(replacement_name.clone()));
+        }
+    }
     for (schema, ()) in builder.schemas_mut() {
         if schema.authorization() == Some(previous_name.as_str()) {
             let replacement_schema = Schema::with_authorization_and_quoted(
@@ -3126,22 +3264,7 @@ fn apply_revoke_to_grant_store(
 /// # Ok(())
 /// # }
 /// ```
-pub type ParserDB = GenericDB<
-    CreateTable,
-    TableAttribute<CreateTable, ColumnDef>,
-    TableAttribute<CreateTable, CreateIndex>,
-    TableAttribute<CreateTable, UniqueConstraint>,
-    TableAttribute<CreateTable, ForeignKeyConstraint>,
-    CreateFunction,
-    TableAttribute<CreateTable, CheckConstraint>,
-    CreateTrigger,
-    CreatePolicy,
-    CreateRole,
-    Schema,
-    Grant,
-    Grant,
-    SqlparserDialect,
->;
+pub type ParserDB = GenericDB<SqlparserProfile>;
 
 /// An access control reference that the database it was read from does not
 /// hold.
@@ -3211,6 +3334,24 @@ impl ParserDB {
     ) -> Result<Option<&CreateTable>, LookupError> {
         let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
         self.resolve_target_table_on_path(&target_name_of_idents(schema_ident, table_ident))
+    }
+
+    /// Whether either view kind holds the relation name a grant wrote.
+    ///
+    /// A grant target is a relation, so a view answers it as readily as a
+    /// table, and the caller only needs to know that something holds the name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the object name is malformed for relation lookup,
+    /// or when lookup is ambiguous.
+    fn resolve_grant_view(&self, object_name: &ObjectName) -> Result<Option<()>, LookupError> {
+        let (schema_ident, name_ident) = object_name_identifiers(object_name)?;
+        let target = target_name_of_idents(schema_ident, name_ident);
+        if self.resolve_target_view_on_path(&target)?.is_some() {
+            return Ok(Some(()));
+        }
+        Ok(self.resolve_target_materialized_view_on_path(&target)?.map(|_| ()))
     }
 
     /// Reports the roles and table targets that this database's access control
@@ -3287,7 +3428,11 @@ impl ParserDB {
 
             if let Some(GrantObjects::Tables(tables)) = &grant.objects {
                 for table_obj in tables {
-                    if self.resolve_table_object_name_on_search_path(table_obj)?.is_none() {
+                    // A view is as legal a target as a table, so only a name
+                    // no relation holds is unresolved.
+                    if self.resolve_table_object_name_on_search_path(table_obj)?.is_none()
+                        && self.resolve_grant_view(table_obj)?.is_none()
+                    {
                         unresolved.insert(UnresolvedAccessReference::GrantTable(table_obj));
                     }
                 }
@@ -3749,6 +3894,16 @@ impl ParserDB {
             builder.search_path(),
         )?;
         let Some(referenced_table) = referenced_table else {
+            // A view holding the name is a different complaint: the relation
+            // exists and simply cannot be referenced, which is what the
+            // database reports.
+            if let Some(actual_kind) = views::holds_view(&builder, &fk.foreign_table) {
+                return Err(crate::errors::Error::RelationKindMismatch {
+                    object_name: referenced_table_name.clone(),
+                    expected_kind: ObjectKind::Table,
+                    actual_kind,
+                });
+            }
             return Err(crate::errors::Error::ReferencedTableNotFoundForForeignKey {
                 referenced_table: referenced_table_name.clone(),
                 host_table: create_table.name.to_string(),
@@ -5379,6 +5534,10 @@ impl ParserDB {
                     for name in names {
                         let table_name = last_str(&name);
 
+                        // A view is refused rather than dropped, and named as
+                        // the wrong kind, as PostgreSQL does.
+                        views::refuse_dropping_view_as_table(&builder, &name)?;
+
                         // Check if table exists and resolve the canonical
                         // stored table.
                         let maybe_table = builder.resolve_table_object_name(&name)?;
@@ -5396,6 +5555,21 @@ impl ParserDB {
                         let resolved_schema_name = table.table_schema().map(str::to_string);
                         let resolved_schema_quoted = table.table_schema_is_quoted();
                         let dropped = StoredTable::of(table);
+
+                        // A view reading the table would name nothing once
+                        // the table left, so it blocks the drop and `CASCADE`
+                        // takes it along, as PostgreSQL does.
+                        let relation_key = stored_table_key(table);
+                        if cascade {
+                            views::remove_dependent_views(&mut builder, &relation_key);
+                        } else {
+                            views::refuse_dependent_views(
+                                &builder,
+                                &relation_key,
+                                ObjectKind::Table,
+                                &resolved_table_name,
+                            )?;
+                        }
 
                         // A child builds its column list out of its parents,
                         // so a parent cannot leave while a child still names
@@ -5439,6 +5613,23 @@ impl ParserDB {
                             resolved_schema_quoted,
                         );
                     }
+                }
+                Statement::Drop {
+                    object_type:
+                        object_type @ (sqlparser::ast::ObjectType::View
+                        | sqlparser::ast::ObjectType::MaterializedView),
+                    if_exists,
+                    names,
+                    cascade,
+                    ..
+                } => {
+                    builder = views::drop_views(
+                        builder,
+                        &names,
+                        object_type == sqlparser::ast::ObjectType::MaterializedView,
+                        if_exists,
+                        cascade,
+                    )?;
                 }
                 Statement::Drop {
                     object_type: sqlparser::ast::ObjectType::Index,
@@ -5529,6 +5720,20 @@ impl ParserDB {
                         builder.resolve_table_object_name(&create_trigger.table_name)?.is_some();
 
                     if !table_exists {
+                        // A view holding the name is a different complaint.
+                        // PostgreSQL does allow an `INSTEAD OF` row trigger on
+                        // a view, which this model cannot record yet, so the
+                        // refusal names the kind rather than claiming the
+                        // relation is absent.
+                        if let Some(actual_kind) =
+                            views::holds_view(&builder, &create_trigger.table_name)
+                        {
+                            return Err(crate::errors::Error::RelationKindMismatch {
+                                object_name: table_name.to_string(),
+                                expected_kind: crate::errors::ObjectKind::Table,
+                                actual_kind,
+                            });
+                        }
                         return Err(crate::errors::Error::TableNotFoundForTrigger {
                             table_name: table_name.to_string(),
                             trigger_name: last_str(&create_trigger.name).to_string(),
@@ -5847,6 +6052,15 @@ impl ParserDB {
                         only: alter_table.only,
                     };
                     for operation in alter_table.operations {
+                        // `ALTER TABLE` names a relation, and PostgreSQL
+                        // accepts it against a view for the actions a view
+                        // supports. A view takes over here so the table path
+                        // never sees a name it does not hold.
+                        if let Some(kind) = views::holds_view(&builder, &alter_table.name) {
+                            builder =
+                                views::alter_view(builder, &alter_table.name, kind, &operation)?;
+                            continue;
+                        }
                         match operation {
                             AlterTableOperation::EnableRowLevelSecurity => {
                                 builder = Self::alter_table_metadata(
@@ -6217,6 +6431,9 @@ impl ParserDB {
                         &inherited.column_metadata,
                     )?;
                 }
+                Statement::CreateView(create_view) => {
+                    builder = views::create_view(builder, create_view)?;
+                }
                 Statement::CreatePolicy(policy) => {
                     require_named(&policy.table_name, crate::errors::ObjectKind::Table)?;
                     if options.access_resolution() == AccessResolution::ClosedWorld {
@@ -6233,6 +6450,16 @@ impl ParserDB {
                     // the access setting: that excuses an absent role, which a
                     // dump legitimately omits, and never an absent table.
                     if builder.resolve_table_object_name(&policy.table_name)?.is_none() {
+                        // A view holding the name is a different complaint:
+                        // the relation exists and simply cannot carry a
+                        // policy, which is what the database reports.
+                        if let Some(actual_kind) = views::holds_view(&builder, &policy.table_name) {
+                            return Err(crate::errors::Error::RelationKindMismatch {
+                                object_name: last_str(&policy.table_name).to_string(),
+                                expected_kind: crate::errors::ObjectKind::Table,
+                                actual_kind,
+                            });
+                        }
                         return Err(crate::errors::Error::TableNotFoundForPolicy {
                             table_name: last_str(&policy.table_name).to_string(),
                             policy_name: policy.name.value.clone(),
