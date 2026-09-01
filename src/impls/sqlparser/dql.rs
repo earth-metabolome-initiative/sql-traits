@@ -23,7 +23,8 @@ use alloc::{
 
 use sqlparser::ast::{
     Expr, GroupByExpr, Ident, JoinConstraint, JoinOperator, ObjectName, Query, Select, SelectItem,
-    SelectItemQualifiedWildcardKind, SetExpr, SetQuantifier, TableAlias, TableFactor, With,
+    SelectItemQualifiedWildcardKind, SetExpr, SetQuantifier, TableAlias, TableFactor,
+    WildcardAdditionalOptions, With,
 };
 
 use crate::{
@@ -576,6 +577,21 @@ fn push_wildcard_columns<'db, DB: DatabaseLike>(
 /// PostgreSQL itself refuses target lists beyond roughly 1600 entries.
 const MAX_DERIVED_COLUMNS: usize = 4096;
 
+/// Whether a wildcard carries options that change what it outputs: `EXCLUDE`,
+/// `EXCEPT` and `ILIKE` drop columns, `RENAME` relabels them, `REPLACE`
+/// substitutes a computed value for one, and Redshift's trailing alias names
+/// the expansion. None of those output sets are enumerated here, so a body
+/// projecting such a wildcard stays opaque rather than claiming columns the
+/// relation does not output.
+fn wildcard_reshapes_output(options: &WildcardAdditionalOptions) -> bool {
+    options.opt_ilike.is_some()
+        || options.opt_exclude.is_some()
+        || options.opt_except.is_some()
+        || options.opt_replace.is_some()
+        || options.opt_rename.is_some()
+        || options.opt_alias.is_some()
+}
+
 /// Derives the output shape of a plain `SELECT`: each projected column's name
 /// and pass-through source, enumerated from the projection (wildcards expand
 /// over the `FROM` relations they stand for).
@@ -643,16 +659,19 @@ fn derive_select_shape<'a, 'db, DB: DatabaseLike>(
                 });
             }
             SelectItem::ExprWithAliases { .. } => return Ok(None),
-            SelectItem::Wildcard(_) => {
-                if scope.has_opaque {
+            SelectItem::Wildcard(options) => {
+                if scope.has_opaque || wildcard_reshapes_output(options) {
                     return Ok(None);
                 }
                 push_wildcard_columns(&scope, &mut columns);
             }
             SelectItem::QualifiedWildcard(
                 SelectItemQualifiedWildcardKind::ObjectName(object_name),
-                _,
+                options,
             ) => {
+                if wildcard_reshapes_output(options) {
+                    return Ok(None);
+                }
                 let Some(expansion) =
                     expand_qualified_wildcard(&scope.bases, &scope.derived, object_name)
                 else {
@@ -2044,5 +2063,98 @@ mod tests {
             None
         );
         assert_eq!(source_name("SELECT probe.public.users.* FROM users", &db), None);
+    }
+
+    // A wildcard carrying `EXCLUDE`, `EXCEPT`, `ILIKE`, `RENAME`, `REPLACE`
+    // or a trailing alias does not output the columns a bare `*` would, so a
+    // body projecting one is not enumerated and a reference through it
+    // answers nothing rather than claiming a column the relation dropped,
+    // renamed or replaced.
+    #[test]
+    fn reshaped_wildcard_leaves_the_body_opaque() {
+        let db = schema_db();
+        for body in [
+            "SELECT * EXCLUDE (name) FROM users",
+            "SELECT * EXCEPT (name) FROM users",
+            "SELECT * ILIKE 'id%' FROM users",
+            "SELECT * RENAME (name AS handle) FROM users",
+            "SELECT * REPLACE ('x' AS name) FROM users",
+            "SELECT users.* EXCLUDE (name) FROM users",
+        ] {
+            let sql = format!("WITH v AS ({body}) SELECT v.name FROM v");
+            assert_eq!(source_name(&sql, &db), None, "{body}");
+        }
+        // A plain wildcard body still resolves.
+        assert_eq!(
+            source_name("WITH v AS (SELECT * FROM users) SELECT v.name FROM v", &db),
+            Some("users".to_string())
+        );
+    }
+
+    // Every join spelling the resolver models routes through the same
+    // nullability rules: the accumulated side keeps row identity unless the
+    // operator null-extends it, and `APPLY` carries no join constraint at all.
+    #[test]
+    fn join_spellings_share_the_nullability_rules() {
+        let db = schema_db();
+        for (sql, expected) in [
+            ("SELECT u.id FROM users u INNER JOIN orders o ON u.id = o.user_id", Some("users")),
+            (
+                "SELECT u.id FROM users u LEFT OUTER JOIN orders o ON u.id = o.user_id",
+                Some("users"),
+            ),
+            ("SELECT u.id FROM users u RIGHT OUTER JOIN orders o ON u.id = o.user_id", None),
+            ("SELECT u.id FROM users u CROSS JOIN orders o", Some("users")),
+            ("SELECT u.id FROM users u CROSS APPLY orders o", Some("users")),
+            ("SELECT u.id FROM users u OUTER APPLY orders o", Some("users")),
+            ("SELECT u.id FROM users u SEMI JOIN orders o ON u.id = o.user_id", Some("users")),
+            ("SELECT u.id FROM users u LEFT ANTI JOIN orders o ON u.id = o.user_id", Some("users")),
+            ("SELECT u.id FROM users u LEFT SEMI JOIN orders o ON u.id = o.user_id", Some("users")),
+            (
+                "SELECT u.id FROM users u RIGHT SEMI JOIN orders o ON u.id = o.user_id",
+                Some("users"),
+            ),
+            ("SELECT u.id FROM users u ANTI JOIN orders o ON u.id = o.user_id", Some("users")),
+        ] {
+            assert_eq!(source_name(sql, &db), expected.map(str::to_string), "{sql}");
+        }
+    }
+
+    // A `NATURAL` join needs both sides' columns to know what it merges, so an
+    // unresolvable side leaves the scope opaque instead of guessing that a
+    // shared name is unmerged.
+    #[test]
+    fn natural_join_with_an_unenumerable_side_is_opaque() {
+        let db = schema_db();
+        assert_eq!(source_name("SELECT id FROM users NATURAL JOIN absent_table", &db), None);
+    }
+
+    // Bodies whose output columns follow rules this resolver does not model
+    // stay opaque: a `VALUES` list names columns positionally, a nested join
+    // factor is not a relation with a key, and `GROUP BY ALL` collapses rows.
+    #[test]
+    fn unmodeled_from_and_group_forms_stay_opaque() {
+        let db = schema_db();
+        assert_eq!(source_name("WITH v AS (VALUES (1)) SELECT * FROM v", &db), None);
+        assert_eq!(
+            source_name("SELECT * FROM (users JOIN orders ON users.id = orders.user_id)", &db),
+            None
+        );
+        assert_eq!(
+            source_name(
+                "WITH v AS (SELECT name FROM users GROUP BY ALL) SELECT v.name FROM v",
+                &db
+            ),
+            None
+        );
+        // A hierarchical query names output columns by rules this resolver
+        // does not model.
+        assert_eq!(
+            source_name(
+                "WITH v AS (SELECT name FROM users CONNECT BY id = 1) SELECT v.name FROM v",
+                &db
+            ),
+            None
+        );
     }
 }

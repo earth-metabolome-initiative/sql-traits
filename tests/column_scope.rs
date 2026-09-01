@@ -908,3 +908,151 @@ fn derived_relation_with_too_many_aliases_is_opaque() {
         Some("a")
     );
 }
+
+// A relation body carries its own `WITH` clause and its own parentheses, and
+// a reference still follows the column through every level to the base table.
+#[test]
+fn nested_with_and_parenthesized_bodies_resolve() {
+    let db = schema_db();
+    assert_eq!(
+        resolve_projection(
+            "WITH ov AS (SELECT id FROM a) \
+             SELECT s.n FROM (WITH iv AS (SELECT id FROM ov) SELECT id AS n FROM iv) s",
+            &db,
+        )
+        .expect("resolves")
+        .as_deref(),
+        Some("a")
+    );
+    assert_eq!(
+        resolve_projection("WITH v AS ((SELECT id FROM a)) SELECT v.id FROM v", &db)
+            .expect("resolves")
+            .as_deref(),
+        Some("a")
+    );
+}
+
+// PostgreSQL rejects a repeated name in a `USING` list, and the resolver
+// tolerates it by merging the name once, so a wildcard over the join carries
+// one `id` and a reference to it stays unambiguous.
+#[test]
+fn duplicate_using_name_merges_once() {
+    let db = schema_db();
+    assert_eq!(
+        resolve_projection(
+            "WITH v AS (SELECT * FROM a JOIN b USING (id, id)) SELECT v.id FROM v",
+            &db,
+        )
+        .expect("resolves"),
+        None
+    );
+}
+
+// Set-operation arms that cannot be paired leave the relation unusable: a
+// differing column count has no ordinal mapping, and an arm with an unnamed
+// computed column has no output name to pair.
+#[test]
+fn set_operation_arms_that_cannot_pair_answer_nothing() {
+    let db = schema_db();
+    for body in [
+        "SELECT id FROM a UNION ALL SELECT id, payload FROM a",
+        "SELECT count(*) FROM a UNION ALL SELECT id FROM a",
+        "SELECT id FROM a UNION ALL SELECT count(*) FROM a",
+    ] {
+        let sql = format!("WITH v AS ({body}) SELECT v.id FROM v");
+        assert_eq!(resolve_projection(&sql, &db).expect("resolves"), None, "{body}");
+    }
+}
+
+// An aliased projection whose expression is ambiguous inside the body still
+// names an output column, and that column carries no source rather than
+// failing the whole derivation.
+#[test]
+fn ambiguous_aliased_projection_degrades_to_no_source() {
+    let db = schema_db();
+    assert_eq!(
+        resolve_projection(
+            "WITH v AS (SELECT payload AS p FROM a JOIN b ON a.id = b.id) SELECT v.p FROM v",
+            &db,
+        )
+        .expect("resolves"),
+        None
+    );
+}
+
+// A reference of four or more parts carries no output name, since the leading
+// database part is not modeled, so a body projecting one stays opaque. The
+// same holds for Spark's `expr AS (a, b)`, which names several outputs for
+// one expression.
+#[test]
+fn projections_without_a_modeled_output_name_leave_the_body_opaque() {
+    let db = schema_db();
+    assert_eq!(
+        resolve_projection("WITH v AS (SELECT d.s.t.c FROM a) SELECT v.c FROM v", &db)
+            .expect("resolves"),
+        None
+    );
+    assert_eq!(
+        resolve_projection("WITH v AS (SELECT payload AS (p, q) FROM a) SELECT v.p FROM v", &db)
+            .expect("resolves"),
+        None
+    );
+}
+
+// A qualified wildcard inside a body expands a derived relation as well as a
+// base table, and the columns keep the sources the inner relation gave them.
+#[test]
+fn qualified_wildcard_over_a_derived_relation_passes_through() {
+    let db = schema_db();
+    assert_eq!(
+        resolve_projection(
+            "WITH v AS (SELECT s.* FROM (SELECT id FROM a) s) SELECT v.id FROM v",
+            &db,
+        )
+        .expect("resolves")
+        .as_deref(),
+        Some("a")
+    );
+    // A prefix matching no relation in the body belongs to a statement
+    // PostgreSQL rejects, so the body stays opaque.
+    assert_eq!(
+        resolve_projection("WITH v AS (SELECT nosuch.* FROM a) SELECT v.id FROM v", &db)
+            .expect("resolves"),
+        None
+    );
+}
+
+// An ambiguity inside one derived relation names that relation, spelled as
+// the SQL wrote it, and an unaliased subquery is named as such.
+#[test]
+fn ambiguity_candidates_name_the_relation() {
+    let db = schema_db();
+    let Err(LookupError::AmbiguousTableLookup { object_name, candidates }) =
+        resolve_projection("SELECT x FROM (SELECT id AS x, payload AS x FROM a)", &db)
+    else {
+        panic!("expected an ambiguity for the anonymous subquery")
+    };
+    assert_eq!(object_name, "x");
+    assert_eq!(candidates, vec!["(subquery)".to_string()]);
+
+    let Err(LookupError::AmbiguousTableLookup { candidates, .. }) =
+        resolve_projection("SELECT x FROM (SELECT id AS x, payload AS x FROM a) \"S\"", &db)
+    else {
+        panic!("expected an ambiguity for the quoted alias")
+    };
+    assert_eq!(candidates, vec!["\"S\"".to_string()]);
+}
+
+// A bare name exposed only by a null-extended derived relation still answers
+// the type question, because the column is that table's, while the
+// row-identity question refuses it: the row may be absent from the output.
+#[test]
+fn bare_name_through_a_null_extended_derived_relation() {
+    let db = ParserDB::parse::<GenericDialect>(
+        "CREATE TABLE a(id INT, x INT); CREATE TABLE b(id INT, y INT);",
+    )
+    .expect("schema parses");
+    let sql = "SELECT y FROM a LEFT JOIN (SELECT y FROM b) s ON true";
+    assert_eq!(resolve_projection(sql, &db).expect("resolves").as_deref(), Some("b"));
+    assert_eq!(query(sql).projection_source_table(&db).expect("identity succeeds"), None);
+}
