@@ -13,7 +13,7 @@ mod schema;
 mod target_name;
 mod view;
 
-pub use column_scope::ColumnScope;
+pub use column_scope::{ColumnDefinition, ColumnDefinitionRef, ColumnDefinitionScope, ColumnScope};
 pub use fingerprint::{AlgorithmId, FingerprintError, SchemaFingerprint, canonical_bytes_v1};
 pub use metadata::{ColumnMetadata, FunctionMetadata, TableAttribute, TableMetadata, ViewMetadata};
 pub use schema::Schema;

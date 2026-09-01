@@ -23,9 +23,12 @@ use alloc::{
 use core::ops::ControlFlow;
 
 use sqlparser::ast::{
-    Cte, Expr, GroupByExpr, Ident, JoinConstraint, JoinOperator, ObjectName, Query, Select,
-    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, SetOperator, SetQuantifier, TableAlias,
-    TableAliasColumnDef, TableFactor, Visit, Visitor, WildcardAdditionalOptions, With,
+    AccessExpr, CaseWhen, Cte, DictionaryField, Expr, Function, FunctionArg, FunctionArgExpr,
+    FunctionArgumentClause, FunctionArguments, GroupByExpr, Ident, JoinConstraint, JoinOperator,
+    JsonPathElem, MapEntry, ObjectName, OrderByExpr, Query, Select, SelectItem,
+    SelectItemQualifiedWildcardKind, SetExpr, SetOperator, SetQuantifier, Subscript, TableAlias,
+    TableAliasColumnDef, TableFactor, Visit, Visitor, WildcardAdditionalOptions, WindowFrameBound,
+    WindowType, With,
 };
 
 use crate::{
@@ -39,6 +42,10 @@ use crate::{
         },
     },
 };
+
+pub(crate) mod definition_graph;
+
+use definition_graph::{AstRef, DefinitionDerivation, ScopeCursor};
 
 /// A view whose definition is being derived right now.
 ///
@@ -118,47 +125,79 @@ impl<'db, DB: DatabaseLike> Deriving<'_, 'db, DB> {
     }
 }
 
-/// A `FROM` relation that resolved to a base table, paired with the identifier
-/// (alias, or table name when unaliased) used to qualify it in the projection.
-/// `nullable` marks a relation on the null-extended side of an outer join:
-/// its rows may be absent from an output row, so it never answers the
-/// row-identity question. `output_names` are the names the relation exposes:
-/// the table's own columns in declaration order with the alias's column list
-/// applied positionally, which replaces the originals (PostgreSQL).
-pub(crate) struct FromTableRef<'a, 'db, DB: DatabaseLike> {
-    pub(crate) key_value: &'a str,
-    pub(crate) key_quoted: bool,
-    pub(crate) table: &'db DB::Table,
-    pub(crate) nullable: bool,
-    pub(crate) entry_index: usize,
-    pub(crate) output_names: Vec<(String, bool)>,
+/// One output column of a base relation.
+struct BaseColumnRef<'db, DB: DatabaseLike, D: Copy> {
+    name: String,
+    quoted: bool,
+    source: &'db DB::Table,
+    definition: D,
 }
 
-/// One output column of a derivable relation, and the base table whose column
-/// it passes through. A `None` source means no single base table declares the
-/// column: it is computed (`count(*) AS n`), or its set-operation arms name
-/// different tables.
-pub(crate) struct DerivedColumn<'db, DB: DatabaseLike> {
-    pub(crate) name: String,
-    pub(crate) quoted: bool,
-    pub(crate) source: Option<&'db DB::Table>,
-}
+type BaseColumns<'db, DB, D> = Vec<BaseColumnRef<'db, DB, D>>;
 
-impl<DB: DatabaseLike> Clone for DerivedColumn<'_, DB> {
+impl<DB: DatabaseLike, D: Copy> Clone for BaseColumnRef<'_, DB, D> {
     fn clone(&self) -> Self {
-        Self { name: self.name.clone(), quoted: self.quoted, source: self.source }
+        Self {
+            name: self.name.clone(),
+            quoted: self.quoted,
+            source: self.source,
+            definition: self.definition,
+        }
     }
 }
 
-enum OutputNameSource<'names, 'db, DB: DatabaseLike> {
-    Columns(&'names [DerivedColumn<'db, DB>]),
-    AliasColumns(&'names [TableAliasColumnDef]),
+#[derive(Clone, Copy)]
+struct RelationKey<'query, 'db> {
+    value: AstRef<'query, 'db, str>,
+    quoted: bool,
+}
+
+struct FromTableRef<'query, 'db, DB: DatabaseLike, D: Copy> {
+    key: RelationKey<'query, 'db>,
+    schema_key: Option<RelationKey<'query, 'db>>,
+    table: &'db DB::Table,
+    nullable: bool,
+    entry_index: usize,
+    output_columns: Vec<BaseColumnRef<'db, DB, D>>,
+}
+
+/// One output column of a derivable relation.
+struct DerivedColumn<'query, 'db, DB: DatabaseLike, D: Copy> {
+    name: String,
+    quoted: bool,
+    source: Option<&'db DB::Table>,
+    definition: D,
+    marker: core::marker::PhantomData<&'query ()>,
+}
+
+impl<DB: DatabaseLike, D: Copy> Clone for DerivedColumn<'_, '_, DB, D> {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            quoted: self.quoted,
+            source: self.source,
+            definition: self.definition,
+            marker: core::marker::PhantomData,
+        }
+    }
+}
+
+enum OutputNameSource<'names, 'query, 'db, DB: DatabaseLike, D: Copy> {
+    Columns(&'names [DerivedColumn<'query, 'db, DB, D>]),
+    AliasColumns(AstRef<'query, 'db, [TableAliasColumnDef]>),
     Declared(&'names [(String, bool)]),
 }
 
-impl<'names, DB: DatabaseLike> OutputNameSource<'names, '_, DB> {
-    fn from_alias(alias: &'names TableAlias) -> Option<Self> {
-        (!alias.columns.is_empty()).then_some(Self::AliasColumns(&alias.columns))
+impl<'names, DB: DatabaseLike, D: Copy> OutputNameSource<'names, '_, '_, DB, D> {
+    fn from_alias<'query, 'db>(
+        alias: AstRef<'query, 'db, TableAlias>,
+    ) -> Option<OutputNameSource<'names, 'query, 'db, DB, D>>
+    where
+        'query: 'names,
+        'db: 'names,
+    {
+        (!alias.get().columns.is_empty())
+            .then_some(OutputNameSource::AliasColumns(alias.map(|alias| alias.columns.as_slice())))
     }
 
     fn get(&self, ordinal: usize) -> Option<(String, bool)> {
@@ -168,6 +207,7 @@ impl<'names, DB: DatabaseLike> OutputNameSource<'names, '_, DB> {
             }
             Self::AliasColumns(columns) => {
                 columns
+                    .get()
                     .get(ordinal)
                     .map(|column| (column.name.value.clone(), column.name.quote_style.is_some()))
             }
@@ -176,48 +216,47 @@ impl<'names, DB: DatabaseLike> OutputNameSource<'names, '_, DB> {
     }
 }
 
-/// The derivable output shape of a relation defined inside the statement.
-pub(crate) struct DerivedShape<'db, DB: DatabaseLike> {
-    pub(crate) columns: Vec<DerivedColumn<'db, DB>>,
-    /// Whether each output row is exactly one row of a source table passed
-    /// through: false when the defining body deduplicates (`DISTINCT`),
-    /// groups, window-filters, reads through a null-extended outer join, or
-    /// combines arms with a set operation other than `ALL`. A filter
-    /// (`WHERE`) keeps rows, so it preserves row identity.
-    pub(crate) row_preserving: bool,
+/// The derivable output shape of a relation.
+struct DerivedShape<'query, 'db, DB: DatabaseLike, D: Copy> {
+    columns: Vec<DerivedColumn<'query, 'db, DB, D>>,
+    row_preserving: bool,
 }
 
-impl<DB: DatabaseLike> Clone for DerivedShape<'_, DB> {
+impl<DB: DatabaseLike, D: Copy> Clone for DerivedShape<'_, '_, DB, D> {
     fn clone(&self) -> Self {
         Self { columns: self.columns.clone(), row_preserving: self.row_preserving }
     }
 }
-/// A `FROM` relation defined inside the statement (a CTE reference or a
-/// derived subquery) whose output columns were enumerated, keyed by the
-/// identifier the projection uses to qualify it. A derived subquery written
-/// without an alias (allowed since PostgreSQL 16) has no key, so no
-/// reference can qualify with it, but its columns still answer bare ones.
-pub(crate) struct DerivedRelationRef<'a, 'db, DB: DatabaseLike> {
-    pub(crate) key_value: Option<&'a str>,
-    pub(crate) key_quoted: bool,
-    pub(crate) shape: DerivedShape<'db, DB>,
-    pub(crate) nullable: bool,
-    pub(crate) entry_index: usize,
+
+struct DerivedRelationRef<'query, 'db, DB: DatabaseLike, D: Copy> {
+    key: Option<RelationKey<'query, 'db>>,
+    shape: DerivedShape<'query, 'db, DB, D>,
+    nullable: bool,
+    entry_index: usize,
 }
 
-/// A CTE name and its derived shape. A `None` shape means the body is opaque.
-/// Recursive CTEs start opaque to stop forward and mutual references, then
-/// receive the nonrecursive term's shape while their full body is derived.
-struct CteShape<'a, 'db, DB: DatabaseLike> {
-    name: &'a str,
-    quoted: bool,
-    shape: Option<DerivedShape<'db, DB>>,
+struct CteShape<'query, 'db, DB: DatabaseLike, D: Copy> {
+    name: RelationKey<'query, 'db>,
+    shape: Option<DerivedShape<'query, 'db, DB, D>>,
 }
 
-impl<DB: DatabaseLike> Clone for CteShape<'_, '_, DB> {
+impl<DB: DatabaseLike, D: Copy> Clone for CteShape<'_, '_, DB, D> {
     fn clone(&self) -> Self {
-        Self { name: self.name, quoted: self.quoted, shape: self.shape.clone() }
+        Self { name: self.name, shape: self.shape.clone() }
     }
+}
+
+#[derive(Clone, Copy)]
+enum OpaqueIdentity<'query, 'db> {
+    Known { key: RelationKey<'query, 'db>, schema: Option<RelationKey<'query, 'db>> },
+    Anonymous,
+    AnyQualifier,
+}
+
+#[derive(Clone, Copy)]
+struct OpaqueRelation<'query, 'db> {
+    identity: OpaqueIdentity<'query, 'db>,
+    entry_index: usize,
 }
 
 struct CteDependencyVisitor<'a> {
@@ -316,130 +355,316 @@ fn mutually_recursive_ctes(with: &With) -> Vec<bool> {
 /// that boundary pass their exposure of the name into the merged column and
 /// no longer count individually, while relations joined in afterwards collide
 /// with it, as PostgreSQL reports for a bare reference.
-pub(crate) struct MergedName {
-    pub(crate) name: String,
-    pub(crate) quoted: bool,
-    pub(crate) subsumed: usize,
+struct MergedName {
+    name: String,
+    quoted: bool,
+    subsumed: usize,
 }
 
 /// One output position of a `FROM` item's join chain as a `*` projection
 /// sees it: a base relation (index into `FromScope::bases`), a derived
 /// relation (index into `FromScope::derived`), or a column merged by a
 /// `USING` or `NATURAL` join, whose coalesced value has no single source.
-pub(crate) enum WildcardEntry {
+enum WildcardEntry {
     Base(usize),
     Derived(usize),
     Merged { name: String, quoted: bool },
 }
 
-/// The `FROM` scope of a query's outer `SELECT`: the resolved base tables,
-/// the relations whose columns were derived from their definitions, the
-/// column names merged by `USING`/`NATURAL` joins, the number of `FROM`
-/// entries seen (opaque ones counted), whether any entry is opaque, and,
-/// one per `FROM` item, the plan of entries a `*` projects in PostgreSQL's
-/// join output order (a poisoned item stores an empty plan and relies on
-/// `has_opaque`).
-pub(crate) struct FromScope<'a, 'db, DB: DatabaseLike> {
-    pub(crate) bases: Vec<FromTableRef<'a, 'db, DB>>,
-    pub(crate) derived: Vec<DerivedRelationRef<'a, 'db, DB>>,
-    pub(crate) merged: Vec<MergedName>,
-    pub(crate) wildcard_plans: Vec<Vec<WildcardEntry>>,
-    pub(crate) from_entry_count: usize,
-    pub(crate) has_opaque: bool,
+struct FromScope<'query, 'db, DB: DatabaseLike, D: Copy> {
+    bases: Vec<FromTableRef<'query, 'db, DB, D>>,
+    derived: Vec<DerivedRelationRef<'query, 'db, DB, D>>,
+    merged: Vec<MergedName>,
+    wildcard_plans: Vec<Vec<WildcardEntry>>,
+    opaque: Vec<OpaqueRelation<'query, 'db>>,
+    from_entry_count: usize,
+    unqualified_poison: bool,
 }
 
-/// Collects the `FROM` relations of the query's outer `SELECT` into the
-/// resolver's shared shape. Returns `Ok(None)` when the body is not a plain
-/// `SELECT`, so a caller has no outer scope to work with.
-pub(crate) fn collect_from_clause<'a, 'db, DB: DatabaseLike>(
-    query: &'a Query,
+impl<DB: DatabaseLike, D: Copy> FromScope<'_, '_, DB, D> {
+    fn new() -> Self {
+        Self {
+            bases: Vec::new(),
+            derived: Vec::new(),
+            merged: Vec::new(),
+            wildcard_plans: Vec::new(),
+            opaque: Vec::new(),
+            from_entry_count: 0,
+            unqualified_poison: false,
+        }
+    }
+
+    fn has_opaque(&self) -> bool {
+        self.unqualified_poison || !self.opaque.is_empty()
+    }
+}
+
+trait DerivationProfile<'query, 'db, DB: DatabaseLike> {
+    type Definition: Copy;
+    type Scope;
+    type Cursor: Copy;
+    type Checkpoint: Copy;
+
+    const INDEX_NESTED_QUERIES: bool;
+
+    fn no_parent(&self) -> Self::Cursor;
+    fn begin_scope(
+        &mut self,
+        select: AstRef<'query, 'db, Select>,
+        parent: Self::Cursor,
+    ) -> Self::Scope;
+    fn scope<'scope>(
+        &'scope self,
+        scope: &'scope Self::Scope,
+    ) -> &'scope FromScope<'query, 'db, DB, Self::Definition>;
+    fn scope_mut<'scope>(
+        &'scope mut self,
+        scope: &'scope mut Self::Scope,
+    ) -> &'scope mut FromScope<'query, 'db, DB, Self::Definition>;
+    fn cursor(&self, scope: &Self::Scope) -> Self::Cursor;
+    fn opaque_definition(&self) -> Self::Definition;
+    fn base_definition(
+        &mut self,
+        table: &'db DB::Table,
+        column: &'db DB::Column,
+    ) -> Self::Definition;
+    fn expression_definition(
+        &mut self,
+        expression: AstRef<'query, 'db, Expr>,
+        scope: Self::Cursor,
+    ) -> Result<Self::Definition, LookupError>;
+    fn set_definition(
+        &mut self,
+        operator: SetOperator,
+        left: Self::Definition,
+        right: Self::Definition,
+    ) -> Self::Definition;
+    fn recursive_definition(
+        &mut self,
+        anchor: Self::Definition,
+        recursive: Self::Definition,
+    ) -> Self::Definition;
+    fn checkpoint(&self) -> Self::Checkpoint;
+    fn rollback(&mut self, checkpoint: Self::Checkpoint);
+}
+
+struct SourceDerivation;
+
+impl<'query, 'db, DB> DerivationProfile<'query, 'db, DB> for SourceDerivation
+where
+    DB: DatabaseLike,
+    DB::Table: 'db,
+{
+    type Definition = ();
+    type Scope = FromScope<'query, 'db, DB, ()>;
+    type Cursor = ();
+    type Checkpoint = ();
+
+    const INDEX_NESTED_QUERIES: bool = false;
+
+    fn no_parent(&self) {}
+
+    fn begin_scope(
+        &mut self,
+        _select: AstRef<'query, 'db, Select>,
+        _parent: Self::Cursor,
+    ) -> Self::Scope {
+        FromScope::new()
+    }
+
+    fn scope<'scope>(
+        &'scope self,
+        scope: &'scope Self::Scope,
+    ) -> &'scope FromScope<'query, 'db, DB, Self::Definition> {
+        scope
+    }
+
+    fn scope_mut<'scope>(
+        &'scope mut self,
+        scope: &'scope mut Self::Scope,
+    ) -> &'scope mut FromScope<'query, 'db, DB, Self::Definition> {
+        scope
+    }
+
+    fn cursor(&self, _scope: &Self::Scope) {}
+
+    fn opaque_definition(&self) {}
+
+    fn base_definition(&mut self, _table: &'db DB::Table, _column: &'db DB::Column) {}
+
+    fn expression_definition(
+        &mut self,
+        _expression: AstRef<'query, 'db, Expr>,
+        _scope: Self::Cursor,
+    ) -> Result<Self::Definition, LookupError> {
+        Ok(())
+    }
+
+    fn set_definition(
+        &mut self,
+        _operator: SetOperator,
+        _left: Self::Definition,
+        _right: Self::Definition,
+    ) {
+    }
+
+    fn recursive_definition(&mut self, _anchor: Self::Definition, _recursive: Self::Definition) {}
+
+    fn checkpoint(&self) {}
+
+    fn rollback(&mut self, _checkpoint: Self::Checkpoint) {}
+}
+
+enum RelationContribution<'query, 'db, DB: DatabaseLike, D: Copy> {
+    Base(FromTableRef<'query, 'db, DB, D>),
+    Derived(DerivedRelationRef<'query, 'db, DB, D>),
+    Opaque(OpaqueIdentity<'query, 'db>),
+}
+
+/// What one `FROM` factor contributes: the output names it exposes and the
+/// wildcard plan entry naming what it pushed.
+struct FactorContribution<'query, 'db, DB: DatabaseLike, D: Copy> {
+    relation: RelationContribution<'query, 'db, DB, D>,
+    names: Option<Vec<(String, bool)>>,
+}
+
+type FactorOutput = (Vec<(String, bool)>, Vec<WildcardEntry>);
+
+fn append_factor<'query, 'db, DB, P>(
+    profile: &mut P,
+    scope: &mut P::Scope,
+    contribution: FactorContribution<'query, 'db, DB, P::Definition>,
+) -> Option<FactorOutput>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let data = profile.scope_mut(scope);
+    let entry_index = data.from_entry_count;
+    data.from_entry_count += 1;
+    let entry = match contribution.relation {
+        RelationContribution::Base(mut relation) => {
+            relation.entry_index = entry_index;
+            let entry = WildcardEntry::Base(data.bases.len());
+            data.bases.push(relation);
+            Some(entry)
+        }
+        RelationContribution::Derived(mut relation) => {
+            relation.entry_index = entry_index;
+            let entry = WildcardEntry::Derived(data.derived.len());
+            data.derived.push(relation);
+            Some(entry)
+        }
+        RelationContribution::Opaque(identity) => {
+            data.opaque.push(OpaqueRelation { identity, entry_index });
+            None
+        }
+    };
+    contribution.names.map(|names| (names, entry.into_iter().collect()))
+}
+
+fn collect_source_from_clause<'query, 'db, DB: DatabaseLike>(
+    query: &'query Query,
     database: &'db DB,
-) -> Result<Option<FromScope<'a, 'db, DB>>, LookupError> {
+) -> Result<Option<FromScope<'query, 'db, DB, ()>>, LookupError> {
     let SetExpr::Select(select) = query.body.as_ref() else {
         return Ok(None);
     };
     let deriving = Deriving::of(database);
+    let mut profile = SourceDerivation;
+    let parent = ();
     let cte_scope = match &query.with {
-        Some(with) => derive_cte_shapes(with, &[], deriving)?,
+        Some(with) => derive_cte_shapes(AstRef::Query(with), &[], deriving, parent, &mut profile)?,
         None => Vec::new(),
     };
-    Ok(Some(collect_select_from(select, &cte_scope, deriving)?))
+    collect_select_from(AstRef::Query(select), &cte_scope, deriving, parent, &mut profile).map(Some)
 }
 
-/// Collects one `SELECT`'s `FROM` relations against a CTE scope. Join chains
-/// are walked left-associatively: `USING`/`NATURAL` column names are recorded
-/// as merged (the join output carries each once as a coalesced value with no
-/// single source), and entries on the null-extended side of an outer join are
-/// marked `nullable`. Each `FROM` item also gets the plan a `*` projects:
-/// PostgreSQL emits a join's merged columns first, then the accumulated
-/// side's remaining entries, then the joined relation's, so the plan is
-/// rebuilt per join as `merged ++ left-remaining ++ right-remaining` and the
-/// latest merge ends up first. Operators this resolver does not model reach
-/// opaqueness through `collect_factor` (a nested join factor, a table
-/// function). An unrecognized operator itself null-extends nothing.
-fn collect_select_from<'a, 'db, DB: DatabaseLike>(
-    select: &'a Select,
-    cte_scope: &[CteShape<'a, 'db, DB>],
+fn collect_select_from<'query, 'db, DB, P>(
+    select: AstRef<'query, 'db, Select>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<FromScope<'a, 'db, DB>, LookupError> {
-    let mut scope = FromScope {
-        bases: Vec::new(),
-        derived: Vec::new(),
-        merged: Vec::new(),
-        wildcard_plans: Vec::new(),
-        from_entry_count: 0,
-        has_opaque: false,
-    };
-    for table_with_joins in &select.from {
-        // Null-extension marks only this `FROM` item's own relations: a comma
-        // is a cross join, so `FROM a, b RIGHT JOIN c` leaves `a` intact.
-        let entry_bases = scope.bases.len();
-        let entry_derived = scope.derived.len();
-        let (mut accumulated, mut plan) =
-            match collect_factor(&table_with_joins.relation, deriving, cte_scope, &mut scope)? {
-                Some((names, entries)) => (Some(names), Some(entries)),
-                None => (None, None),
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<P::Scope, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let mut scope = profile.begin_scope(select, parent);
+    for table_with_joins in select.map(|select| select.from.as_slice()).iter() {
+        let (entry_bases, entry_derived) = {
+            let data = profile.scope(&scope);
+            (data.bases.len(), data.derived.len())
+        };
+        let local_parent = profile.cursor(&scope);
+        let contribution = collect_factor(
+            table_with_joins.map(|entry| &entry.relation),
+            deriving,
+            cte_scope,
+            parent,
+            local_parent,
+            profile,
+        )?;
+        let (mut accumulated, mut plan) = match append_factor(profile, &mut scope, contribution) {
+            Some((names, entries)) => (Some(names), Some(entries)),
+            None => (None, None),
+        };
+        for join in table_with_joins.map(|entry| entry.joins.as_slice()).iter() {
+            let (bases_before, derived_before) = {
+                let data = profile.scope(&scope);
+                (data.bases.len(), data.derived.len())
             };
-        for join in &table_with_joins.joins {
-            let bases_before = scope.bases.len();
-            let derived_before = scope.derived.len();
+            let local_parent = profile.cursor(&scope);
+            let contribution = collect_factor(
+                join.map(|join| &join.relation),
+                deriving,
+                cte_scope,
+                parent,
+                local_parent,
+                profile,
+            )?;
             let (right_names, right_entries) =
-                match collect_factor(&join.relation, deriving, cte_scope, &mut scope)? {
+                match append_factor(profile, &mut scope, contribution) {
                     Some((names, entries)) => (Some(names), Some(entries)),
                     None => (None, None),
                 };
-            let (left_nullable, right_nullable) = nullable_sides(&join.join_operator);
+            let (left_nullable, right_nullable) = nullable_sides(&join.get().join_operator);
+            let data = profile.scope_mut(&mut scope);
             if left_nullable {
-                for base in &mut scope.bases[entry_bases..bases_before] {
+                for base in &mut data.bases[entry_bases..bases_before] {
                     base.nullable = true;
                 }
-                for relation in &mut scope.derived[entry_derived..derived_before] {
+                for relation in &mut data.derived[entry_derived..derived_before] {
                     relation.nullable = true;
                 }
             }
             if right_nullable {
-                for base in &mut scope.bases[bases_before..] {
+                for base in &mut data.bases[bases_before..] {
                     base.nullable = true;
                 }
-                for relation in &mut scope.derived[derived_before..] {
+                for relation in &mut data.derived[derived_before..] {
                     relation.nullable = true;
                 }
             }
             let mut merged = Vec::new();
-            if let Some(names) =
-                merge_names(&join.join_operator, accumulated.as_deref(), right_names.as_deref())
-            {
+            if let Some(names) = merge_names(
+                &join.get().join_operator,
+                accumulated.as_deref(),
+                right_names.as_deref(),
+            ) {
+                let boundary = data.from_entry_count;
                 for (name, quoted) in &names {
-                    merge_name(&mut scope.merged, name.clone(), *quoted, scope.from_entry_count);
+                    merge_name(&mut data.merged, name.clone(), *quoted, boundary);
                 }
                 merged = names;
             } else {
-                scope.has_opaque = true;
+                data.unqualified_poison = true;
             }
             plan = merge_plans(plan, right_entries, &merged);
             accumulated = merge_output_names(accumulated, right_names, &merged);
         }
-        scope.wildcard_plans.push(plan.unwrap_or_default());
+        profile.scope_mut(&mut scope).wildcard_plans.push(plan.unwrap_or_default());
     }
     Ok(scope)
 }
@@ -603,150 +828,296 @@ fn subsumed_exposure(merged: &[MergedName], entry_index: usize, name: &str, quot
 /// binds every name before any body is resolved. Multi-CTE cycles and forward
 /// references stay opaque, while a self-recursive CTE is seeded from its
 /// nonrecursive term. A non-recursive list registers names one by one.
-fn derive_cte_shapes<'a, 'db, DB: DatabaseLike>(
-    with: &'a With,
-    outer: &[CteShape<'a, 'db, DB>],
+fn derive_cte_shapes<'query, 'db, DB, P>(
+    with: AstRef<'query, 'db, With>,
+    outer: &[CteShape<'query, 'db, DB, P::Definition>],
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<Vec<CteShape<'a, 'db, DB>>, LookupError> {
-    let mut shapes: Vec<CteShape<'a, 'db, DB>> = outer.to_vec();
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<Vec<CteShape<'query, 'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let mut shapes = outer.to_vec();
     #[cfg(test)]
     tests::record_cte_shape_derivation();
     let base = shapes.len();
-    let mutually_recursive = if with.recursive {
-        mutually_recursive_ctes(with)
+    let mutually_recursive = if with.get().recursive {
+        mutually_recursive_ctes(with.get())
     } else {
-        vec![false; with.cte_tables.len()]
+        vec![false; with.get().cte_tables.len()]
     };
-    if with.recursive {
-        for cte in &with.cte_tables {
+    if with.get().recursive {
+        for cte in with.map(|with| with.cte_tables.as_slice()).iter() {
+            let alias = cte.map(|cte| &cte.alias);
             shapes.push(CteShape {
-                name: cte.alias.name.value.as_str(),
-                quoted: cte.alias.name.quote_style.is_some(),
+                name: RelationKey {
+                    value: alias.map(|alias| alias.name.value.as_str()),
+                    quoted: alias.get().name.quote_style.is_some(),
+                },
                 shape: None,
             });
         }
     }
-    for (index, cte) in with.cte_tables.iter().enumerate() {
-        let position = if with.recursive { base + index } else { shapes.len() };
-        if with.recursive {
+    for (index, cte) in with.map(|with| with.cte_tables.as_slice()).iter().enumerate() {
+        let position = if with.get().recursive { base + index } else { shapes.len() };
+        if with.get().recursive {
             if mutually_recursive[index] {
                 continue;
             }
             let body = derive_recursive_cte_query_shape(
-                &cte.query,
+                cte.map(|cte| cte.query.as_ref()),
                 &mut shapes,
                 position,
-                &cte.alias,
+                cte.map(|cte| &cte.alias),
                 deriving,
+                parent,
+                profile,
             )?;
-            shapes[position].shape = apply_alias_columns(body, &cte.alias);
+            shapes[position].shape = apply_alias_columns(body, &cte.get().alias);
         } else {
+            let alias = cte.map(|cte| &cte.alias);
             shapes.push(CteShape {
-                name: cte.alias.name.value.as_str(),
-                quoted: cte.alias.name.quote_style.is_some(),
+                name: RelationKey {
+                    value: alias.map(|alias| alias.name.value.as_str()),
+                    quoted: alias.get().name.quote_style.is_some(),
+                },
                 shape: None,
             });
             let body = derive_query_shape(
-                &cte.query,
+                cte.map(|cte| cte.query.as_ref()),
                 &shapes,
-                OutputNameSource::from_alias(&cte.alias),
+                OutputNameSource::from_alias(alias),
                 deriving,
+                parent,
+                profile,
             )?;
-            shapes[position].shape = apply_alias_columns(body, &cte.alias);
+            shapes[position].shape = apply_alias_columns(body, alias.get());
         }
     }
     Ok(shapes)
 }
 
-fn derive_recursive_cte_query_shape<'a, 'db, DB: DatabaseLike>(
-    query: &'a Query,
-    cte_scope: &mut Vec<CteShape<'a, 'db, DB>>,
+fn select_body_ref<'query, 'db>(
+    body: AstRef<'query, 'db, SetExpr>,
+) -> Option<AstRef<'query, 'db, Select>> {
+    body.try_map(|body| {
+        match body {
+            SetExpr::Select(select) => Some(select.as_ref()),
+            _ => None,
+        }
+    })
+}
+
+fn query_body_ref<'query, 'db>(
+    body: AstRef<'query, 'db, SetExpr>,
+) -> Option<AstRef<'query, 'db, Query>> {
+    body.try_map(|body| {
+        match body {
+            SetExpr::Query(query) => Some(query.as_ref()),
+            _ => None,
+        }
+    })
+}
+
+fn set_operation_arms<'query, 'db>(
+    body: AstRef<'query, 'db, SetExpr>,
+) -> Option<(AstRef<'query, 'db, SetExpr>, AstRef<'query, 'db, SetExpr>)> {
+    let left = body.try_map(|body| {
+        match body {
+            SetExpr::SetOperation { left, .. } => Some(left.as_ref()),
+            _ => None,
+        }
+    })?;
+    let right = body.try_map(|body| {
+        match body {
+            SetExpr::SetOperation { right, .. } => Some(right.as_ref()),
+            _ => None,
+        }
+    })?;
+    Some((left, right))
+}
+
+fn derive_recursive_cte_query_shape<'query, 'db, DB, P>(
+    query: AstRef<'query, 'db, Query>,
+    cte_scope: &mut Vec<CteShape<'query, 'db, DB, P::Definition>>,
     position: usize,
-    alias: &TableAlias,
+    alias: AstRef<'query, 'db, TableAlias>,
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<Option<DerivedShape<'query, 'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let checkpoint = profile.checkpoint();
     let mut scoped;
-    let scope = match &query.with {
-        Some(with) => {
-            scoped = derive_cte_shapes(with, cte_scope, deriving)?;
+    let scope = match &query.get().with {
+        Some(_) => {
+            let Some(with) = query.try_map(|query| query.with.as_ref()) else {
+                return Ok(None);
+            };
+            scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
             &mut scoped
         }
         None => cte_scope,
     };
-    derive_recursive_cte_set_expr_shape(&query.body, scope, position, alias, deriving)
+    let result = derive_recursive_cte_set_expr_shape(
+        query.map(|query| query.body.as_ref()),
+        scope,
+        position,
+        alias,
+        deriving,
+        parent,
+        profile,
+    );
+    if !matches!(result, Ok(Some(_))) {
+        profile.rollback(checkpoint);
+    }
+    result
 }
 
-fn derive_recursive_cte_set_expr_shape<'a, 'db, DB: DatabaseLike>(
-    body: &'a SetExpr,
-    cte_scope: &mut Vec<CteShape<'a, 'db, DB>>,
+fn derive_recursive_cte_set_expr_shape<'query, 'db, DB, P>(
+    body: AstRef<'query, 'db, SetExpr>,
+    cte_scope: &mut Vec<CteShape<'query, 'db, DB, P::Definition>>,
     position: usize,
-    alias: &TableAlias,
+    alias: AstRef<'query, 'db, TableAlias>,
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<Option<DerivedShape<'query, 'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
     let output_names = OutputNameSource::from_alias(alias);
-    match body {
-        SetExpr::Query(query) => {
-            derive_recursive_cte_query_shape(query, cte_scope, position, alias, deriving)
+    match body.get() {
+        SetExpr::Query(_) => {
+            let Some(query) = query_body_ref(body) else {
+                return Ok(None);
+            };
+            derive_recursive_cte_query_shape(
+                query, cte_scope, position, alias, deriving, parent, profile,
+            )
         }
-        SetExpr::SetOperation { op: SetOperator::Union, left, right, set_quantifier } => {
-            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, output_names, deriving)?
+        SetExpr::SetOperation { op: SetOperator::Union, set_quantifier, .. } => {
+            let Some((left, right)) = set_operation_arms(body) else {
+                return Ok(None);
+            };
+            let Some(left_shape) =
+                derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?
             else {
                 return Ok(None);
             };
-            cte_scope[position].shape = apply_alias_columns(Some(left_shape), alias);
-            let Some(left_shape) = cte_scope[position].shape.as_ref() else {
+            cte_scope[position].shape = apply_alias_columns(Some(left_shape), alias.get());
+            let Some(right_shape) = ({
+                let Some(left_shape) = cte_scope[position].shape.as_ref() else {
+                    return Ok(None);
+                };
+                derive_set_expr_shape(
+                    right,
+                    cte_scope,
+                    Some(OutputNameSource::Columns(&left_shape.columns)),
+                    deriving,
+                    parent,
+                    profile,
+                )?
+            }) else {
                 return Ok(None);
             };
-            let Some(right_shape) = derive_set_expr_shape(
-                right,
-                cte_scope,
-                Some(OutputNameSource::Columns(&left_shape.columns)),
+            let Some(left_shape) = cte_scope[position].shape.take() else {
+                return Ok(None);
+            };
+            Ok(merge_set_operation_shapes(
+                left_shape,
+                right_shape,
+                SetOperator::Union,
+                *set_quantifier,
+                true,
                 deriving,
-            )?
-            else {
-                return Ok(None);
-            };
-            Ok(merge_set_operation_shapes(left_shape, &right_shape, *set_quantifier, deriving))
+                profile,
+            ))
         }
-        _ => derive_set_expr_shape(body, cte_scope, output_names, deriving),
+        _ => derive_set_expr_shape(body, cte_scope, output_names, deriving, parent, profile),
     }
 }
 
 /// Derives the output shape of a query used as a relation body. Returns
 /// `Ok(None)` when the columns cannot be enumerated.
-fn derive_query_shape<'a, 'db, DB: DatabaseLike>(
-    query: &'a Query,
-    cte_scope: &[CteShape<'a, 'db, DB>],
-    output_names: Option<OutputNameSource<'_, 'db, DB>>,
+fn derive_query_shape<'query, 'db, DB, P>(
+    query: AstRef<'query, 'db, Query>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    output_names: Option<OutputNameSource<'_, 'query, 'db, DB, P::Definition>>,
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<Option<DerivedShape<'query, 'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let checkpoint = profile.checkpoint();
     let scoped;
-    let scope = match &query.with {
-        Some(with) => {
-            scoped = derive_cte_shapes(with, cte_scope, deriving)?;
+    let scope = match &query.get().with {
+        Some(_) => {
+            let Some(with) = query.try_map(|query| query.with.as_ref()) else {
+                return Ok(None);
+            };
+            scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
             &scoped
         }
         None => cte_scope,
     };
-    derive_set_expr_shape(&query.body, scope, output_names, deriving)
+    let result = derive_set_expr_shape(
+        query.map(|query| query.body.as_ref()),
+        scope,
+        output_names,
+        deriving,
+        parent,
+        profile,
+    );
+    if !matches!(result, Ok(Some(_))) {
+        profile.rollback(checkpoint);
+    }
+    result
 }
 
 /// Derives the output shape of a body. A set operation merges its arms by
 /// ordinal position: names come from the left arm (as in PostgreSQL) and a
 /// column keeps a source only while the arms agree on one.
-fn derive_set_expr_shape<'a, 'db, DB: DatabaseLike>(
-    body: &'a SetExpr,
-    cte_scope: &[CteShape<'a, 'db, DB>],
-    output_names: Option<OutputNameSource<'_, 'db, DB>>,
+fn derive_set_expr_shape<'query, 'db, DB, P>(
+    body: AstRef<'query, 'db, SetExpr>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    output_names: Option<OutputNameSource<'_, 'query, 'db, DB, P::Definition>>,
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
-    match body {
-        SetExpr::Select(select) => {
-            derive_select_shape(select, cte_scope, output_names.as_ref(), deriving)
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<Option<DerivedShape<'query, 'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match body.get() {
+        SetExpr::Select(_) => {
+            let Some(select) = select_body_ref(body) else {
+                return Ok(None);
+            };
+            derive_select_shape(select, cte_scope, output_names.as_ref(), deriving, parent, profile)
         }
-        SetExpr::Query(query) => derive_query_shape(query, cte_scope, output_names, deriving),
-        SetExpr::SetOperation { left, right, set_quantifier, .. } => {
-            let Some(left_shape) = derive_set_expr_shape(left, cte_scope, output_names, deriving)?
+        SetExpr::Query(_) => {
+            let Some(query) = query_body_ref(body) else {
+                return Ok(None);
+            };
+            derive_query_shape(query, cte_scope, output_names, deriving, parent, profile)
+        }
+        SetExpr::SetOperation { op, set_quantifier, .. } => {
+            let Some((left, right)) = set_operation_arms(body) else {
+                return Ok(None);
+            };
+            let Some(left_shape) =
+                derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?
             else {
                 return Ok(None);
             };
@@ -755,34 +1126,56 @@ fn derive_set_expr_shape<'a, 'db, DB: DatabaseLike>(
                 cte_scope,
                 Some(OutputNameSource::Columns(&left_shape.columns)),
                 deriving,
+                parent,
+                profile,
             )?
             else {
                 return Ok(None);
             };
-            Ok(merge_set_operation_shapes(&left_shape, &right_shape, *set_quantifier, deriving))
+            Ok(merge_set_operation_shapes(
+                left_shape,
+                right_shape,
+                *op,
+                *set_quantifier,
+                false,
+                deriving,
+                profile,
+            ))
         }
-        // `VALUES` and `TABLE` bodies name their columns by rules this
-        // resolver does not model.
         _ => Ok(None),
     }
 }
 
-fn merge_set_operation_shapes<'db, DB: DatabaseLike>(
-    left: &DerivedShape<'db, DB>,
-    right: &DerivedShape<'db, DB>,
+fn merge_set_operation_shapes<'query, 'db, DB, P>(
+    left: DerivedShape<'query, 'db, DB, P::Definition>,
+    right: DerivedShape<'query, 'db, DB, P::Definition>,
+    operator: SetOperator,
     set_quantifier: SetQuantifier,
+    recursive: bool,
     deriving: Deriving<'_, 'db, DB>,
-) -> Option<DerivedShape<'db, DB>> {
+    profile: &mut P,
+) -> Option<DerivedShape<'query, 'db, DB, P::Definition>>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
     if left.columns.len() != right.columns.len() {
         return None;
     }
+    let row_preserving =
+        matches!(set_quantifier, SetQuantifier::All) && left.row_preserving && right.row_preserving;
     let columns = left
         .columns
-        .iter()
-        .zip(right.columns.iter())
+        .into_iter()
+        .zip(right.columns)
         .map(|(left, right)| {
+            let definition = if recursive {
+                profile.recursive_definition(left.definition, right.definition)
+            } else {
+                profile.set_definition(operator, left.definition, right.definition)
+            };
             DerivedColumn {
-                name: left.name.clone(),
+                name: left.name,
                 quoted: left.quoted,
                 source: match (left.source, right.source) {
                     (Some(left_table), Some(right_table))
@@ -793,15 +1186,12 @@ fn merge_set_operation_shapes<'db, DB: DatabaseLike>(
                     }
                     _ => None,
                 },
+                definition,
+                marker: core::marker::PhantomData,
             }
         })
         .collect();
-    Some(DerivedShape {
-        columns,
-        row_preserving: matches!(set_quantifier, SetQuantifier::All)
-            && left.row_preserving
-            && right.row_preserving,
-    })
+    Some(DerivedShape { columns, row_preserving })
 }
 
 /// Expands a `*` projection by materializing each `FROM` item's plan in
@@ -809,9 +1199,10 @@ fn merge_set_operation_shapes<'db, DB: DatabaseLike>(
 /// except those a merge absorbed (relations collected before that name's
 /// merge). A merged name stands once per join with no source, and a repeated
 /// merge of the same name stands once at its latest position.
-fn push_wildcard_columns<'db, DB: DatabaseLike>(
-    scope: &FromScope<'_, 'db, DB>,
-    columns: &mut Vec<DerivedColumn<'db, DB>>,
+fn push_wildcard_columns<'query, 'db, DB: DatabaseLike, D: Copy>(
+    scope: &FromScope<'query, 'db, DB, D>,
+    columns: &mut Vec<DerivedColumn<'query, 'db, DB, D>>,
+    opaque: D,
 ) {
     for plan in &scope.wildcard_plans {
         for entry in plan {
@@ -850,6 +1241,8 @@ fn push_wildcard_columns<'db, DB: DatabaseLike>(
                         name: name.clone(),
                         quoted: *quoted,
                         source: None,
+                        definition: opaque,
+                        marker: core::marker::PhantomData,
                     });
                 }
             }
@@ -887,10 +1280,10 @@ fn wildcard_replaces_values(options: &WildcardAdditionalOptions) -> bool {
     options.opt_replace.is_some()
 }
 
-fn projection_output_name<DB: DatabaseLike>(
+fn projection_output_name<DB: DatabaseLike, D: Copy>(
     expr: &Expr,
-    bases: &[FromTableRef<'_, '_, DB>],
-    output_names: Option<&OutputNameSource<'_, '_, DB>>,
+    bases: &[FromTableRef<'_, '_, DB, D>],
+    output_names: Option<&OutputNameSource<'_, '_, '_, DB, D>>,
     ordinal: usize,
 ) -> Option<(String, bool)> {
     projected_column_name(expr)
@@ -898,108 +1291,1211 @@ fn projection_output_name<DB: DatabaseLike>(
         .or_else(|| output_names.and_then(|names| names.get(ordinal)))
 }
 
-/// Derives the output shape of a plain `SELECT`: each projected column's name
-/// and pass-through source, enumerated from the projection (wildcards expand
-/// over the `FROM` relations they stand for).
-fn derive_select_shape<'a, 'db, DB: DatabaseLike>(
-    select: &'a Select,
-    cte_scope: &[CteShape<'a, 'db, DB>],
-    output_names: Option<&OutputNameSource<'_, 'db, DB>>,
+fn projection_definition<'query, 'db, DB, P>(
+    expression: AstRef<'query, 'db, Expr>,
+    scope: P::Cursor,
+    profile: &mut P,
+) -> Result<P::Definition, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    profile.expression_definition(expression, scope)
+}
+
+fn index_nested_query_scopes<'query, 'db, DB, P>(
+    query: AstRef<'query, 'db, Query>,
+    outer_ctes: &[CteShape<'query, 'db, DB, P::Definition>],
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
-    // Dialect forms whose output columns this resolver does not enumerate.
-    if !select.lateral_views.is_empty()
-        || select.exclude.is_some()
-        || select.value_table_mode.is_some()
-        || !select.connect_by.is_empty()
-    {
-        return Ok(None);
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let scoped_ctes;
+    let cte_scope = match &query.get().with {
+        Some(_) => {
+            let Some(with) = query.try_map(|query| query.with.as_ref()) else {
+                return Ok(());
+            };
+            scoped_ctes = derive_cte_shapes(with, outer_ctes, deriving, parent, profile)?;
+            &scoped_ctes
+        }
+        None => outer_ctes,
+    };
+    index_nested_set_scopes(
+        query.map(|query| query.body.as_ref()),
+        cte_scope,
+        deriving,
+        parent,
+        profile,
+    )
+}
+
+fn index_nested_set_scopes<'query, 'db, DB, P>(
+    body: AstRef<'query, 'db, SetExpr>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'_, 'db, DB>,
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match body.get() {
+        SetExpr::Select(_) => {
+            let Some(select) = select_body_ref(body) else {
+                return Ok(());
+            };
+            let scope = collect_select_from(select, cte_scope, deriving, parent, profile)?;
+            let cursor = profile.cursor(&scope);
+            index_select_expression_queries(select, cte_scope, deriving, cursor, profile)
+        }
+        SetExpr::Query(_) => {
+            let Some(query) = query_body_ref(body) else {
+                return Ok(());
+            };
+            index_nested_query_scopes(query, cte_scope, deriving, parent, profile)
+        }
+        SetExpr::SetOperation { .. } => {
+            let Some((left, right)) = set_operation_arms(body) else {
+                return Ok(());
+            };
+            index_nested_set_scopes(left, cte_scope, deriving, parent, profile)?;
+            index_nested_set_scopes(right, cte_scope, deriving, parent, profile)
+        }
+        _ => Ok(()),
     }
-    let scope = collect_select_from(select, cte_scope, deriving)?;
-    let mut columns: Vec<DerivedColumn<'db, DB>> = Vec::new();
-    for item in &select.projection {
-        match item {
-            SelectItem::UnnamedExpr(expr) => {
-                let named = projection_output_name(expr, &scope.bases, output_names, columns.len());
-                let Some((name, quoted)) = named else {
-                    return Ok(None);
-                };
-                let source = match column_source(
-                    expr,
-                    &scope.bases,
-                    &scope.derived,
-                    &scope.merged,
-                    scope.has_opaque,
-                ) {
-                    Ok(source) => source,
-                    // A body-internal ambiguity means this output column names
-                    // no single source. The reference itself can still report
-                    // the ambiguity when a caller asks it directly.
-                    Err(LookupError::AmbiguousTableLookup { .. }) => None,
-                    Err(error) => return Err(error),
-                };
-                columns.push(DerivedColumn { name, quoted, source });
+}
+
+fn select_item_expression<'query, 'db>(
+    item: AstRef<'query, 'db, SelectItem>,
+) -> Option<AstRef<'query, 'db, Expr>> {
+    item.try_map(|item| match item {
+        SelectItem::UnnamedExpr(expression)
+        | SelectItem::ExprWithAlias { expr: expression, .. }
+        | SelectItem::ExprWithAliases { expr: expression, .. }
+        | SelectItem::QualifiedWildcard(
+            SelectItemQualifiedWildcardKind::Expr(expression),
+            _,
+        ) => Some(expression),
+        SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::ObjectName(_), _)
+        | SelectItem::Wildcard(_) => None,
+    })
+}
+
+fn index_select_expression_queries<'query, 'db, DB, P>(
+    select: AstRef<'query, 'db, Select>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'_, 'db, DB>,
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    for item in select.map(|select| select.projection.as_slice()).iter() {
+        if let Some(expression) = select_item_expression(item) {
+            index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
+        }
+    }
+    let optional_expressions = [
+        select.try_map(|select| select.prewhere.as_ref()),
+        select.try_map(|select| select.selection.as_ref()),
+        select.try_map(|select| select.having.as_ref()),
+        select.try_map(|select| select.qualify.as_ref()),
+    ];
+    for expression in optional_expressions.into_iter().flatten() {
+        index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
+    }
+    if let Some(expressions) = select.try_map(|select| {
+        match &select.group_by {
+            GroupByExpr::Expressions(expressions, _) => Some(expressions.as_slice()),
+            GroupByExpr::All(_) => None,
+        }
+    }) {
+        for expression in expressions.iter() {
+            index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
+        }
+    }
+    for expressions in [
+        select.map(|select| select.cluster_by.as_slice()),
+        select.map(|select| select.distribute_by.as_slice()),
+    ] {
+        for expression in expressions.iter() {
+            index_expression_queries(expression, cte_scope, deriving, parent, profile)?;
+        }
+    }
+    for order in select.map(|select| select.sort_by.as_slice()).iter() {
+        index_expression_queries(
+            order.map(|order| &order.expr),
+            cte_scope,
+            deriving,
+            parent,
+            profile,
+        )?;
+    }
+    Ok(())
+}
+
+struct NestedQueryIndexer<'walk, 'derive, 'query, 'db, DB, P>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    cte_scope: &'walk [CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'derive, 'db, DB>,
+    parent: P::Cursor,
+    profile: &'walk mut P,
+}
+
+impl<'query, 'db, DB, P> NestedQueryIndexer<'_, '_, 'query, 'db, DB, P>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    fn query(&mut self, query: AstRef<'query, 'db, Query>) -> Result<(), LookupError> {
+        index_nested_query_scopes(query, self.cte_scope, self.deriving, self.parent, self.profile)
+    }
+
+    fn child<T: ?Sized>(
+        &mut self,
+        node: AstRef<'query, 'db, T>,
+        child: impl for<'source> FnOnce(&'source T) -> Option<&'source Expr>,
+    ) -> Result<(), LookupError> {
+        let Some(expression) = node.try_map(child) else {
+            return Ok(());
+        };
+        self.expression(expression)
+    }
+
+    fn children<T: ?Sized>(
+        &mut self,
+        node: AstRef<'query, 'db, T>,
+        children: impl for<'source> FnOnce(&'source T) -> Option<&'source [Expr]>,
+    ) -> Result<(), LookupError> {
+        let Some(expressions) = node.try_map(children) else {
+            return Ok(());
+        };
+        for expression in expressions.iter() {
+            self.expression(expression)?;
+        }
+        Ok(())
+    }
+
+    fn query_child<T: ?Sized>(
+        &mut self,
+        node: AstRef<'query, 'db, T>,
+        child: impl for<'source> FnOnce(&'source T) -> Option<&'source Query>,
+    ) -> Result<(), LookupError> {
+        let Some(query) = node.try_map(child) else {
+            return Ok(());
+        };
+        self.query(query)
+    }
+
+    fn access(&mut self, access: AstRef<'query, 'db, AccessExpr>) -> Result<(), LookupError> {
+        match access.get() {
+            AccessExpr::Dot(_) => {
+                self.child(access, |access| {
+                    let AccessExpr::Dot(expression) = access else {
+                        return None;
+                    };
+                    Some(expression)
+                })
             }
-            SelectItem::ExprWithAlias { expr, alias } => {
-                let source = match column_source(
-                    expr,
-                    &scope.bases,
-                    &scope.derived,
-                    &scope.merged,
-                    scope.has_opaque,
-                ) {
-                    Ok(source) => source,
-                    Err(LookupError::AmbiguousTableLookup { .. }) => None,
-                    Err(error) => return Err(error),
+            AccessExpr::Subscript(_) => {
+                let Some(subscript) = access.try_map(|access| {
+                    let AccessExpr::Subscript(subscript) = access else {
+                        return None;
+                    };
+                    Some(subscript)
+                }) else {
+                    return Ok(());
                 };
-                columns.push(DerivedColumn {
-                    name: alias.value.clone(),
-                    quoted: alias.quote_style.is_some(),
-                    source,
-                });
-            }
-            SelectItem::ExprWithAliases { .. } => return Ok(None),
-            SelectItem::Wildcard(options) => {
-                if scope.has_opaque || wildcard_reshapes_output(options) {
-                    return Ok(None);
-                }
-                push_wildcard_columns(&scope, &mut columns);
-            }
-            SelectItem::QualifiedWildcard(
-                SelectItemQualifiedWildcardKind::ObjectName(object_name),
-                options,
-            ) => {
-                if wildcard_reshapes_output(options) {
-                    return Ok(None);
-                }
-                let Some(expansion) =
-                    expand_qualified_wildcard(&scope.bases, &scope.derived, object_name)
-                else {
-                    return Ok(None);
-                };
-                columns.extend(expansion);
-            }
-            SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => {
-                return Ok(None);
+                self.subscript(subscript)
             }
         }
     }
-    let grouped = match &select.group_by {
+
+    fn subscript(&mut self, subscript: AstRef<'query, 'db, Subscript>) -> Result<(), LookupError> {
+        match subscript.get() {
+            Subscript::Index { .. } => {
+                self.child(subscript, |subscript| {
+                    let Subscript::Index { index } = subscript else {
+                        return None;
+                    };
+                    Some(index)
+                })
+            }
+            Subscript::Slice { .. } => {
+                self.child(subscript, |subscript| {
+                    let Subscript::Slice { lower_bound, .. } = subscript else {
+                        return None;
+                    };
+                    lower_bound.as_ref()
+                })?;
+                self.child(subscript, |subscript| {
+                    let Subscript::Slice { upper_bound, .. } = subscript else {
+                        return None;
+                    };
+                    upper_bound.as_ref()
+                })?;
+                self.child(subscript, |subscript| {
+                    let Subscript::Slice { stride, .. } = subscript else {
+                        return None;
+                    };
+                    stride.as_ref()
+                })
+            }
+        }
+    }
+
+    fn json_path_element(
+        &mut self,
+        element: AstRef<'query, 'db, JsonPathElem>,
+    ) -> Result<(), LookupError> {
+        self.child(element, |element| {
+            match element {
+                JsonPathElem::Bracket { key } | JsonPathElem::ColonBracket { key } => Some(key),
+                JsonPathElem::Dot { .. } => None,
+            }
+        })
+    }
+
+    fn function_argument_expression(
+        &mut self,
+        argument: AstRef<'query, 'db, FunctionArgExpr>,
+    ) -> Result<(), LookupError> {
+        match argument.get() {
+            FunctionArgExpr::Expr(_) => {
+                self.child(argument, |argument| {
+                    let FunctionArgExpr::Expr(expression) = argument else {
+                        return None;
+                    };
+                    Some(expression)
+                })
+            }
+            FunctionArgExpr::WildcardWithOptions(_) => {
+                let Some(options) = argument.try_map(|argument| {
+                    let FunctionArgExpr::WildcardWithOptions(options) = argument else {
+                        return None;
+                    };
+                    Some(options)
+                }) else {
+                    return Ok(());
+                };
+                self.wildcard_options(options)
+            }
+            FunctionArgExpr::QualifiedWildcard(_) | FunctionArgExpr::Wildcard => Ok(()),
+        }
+    }
+
+    fn function_argument(
+        &mut self,
+        argument: AstRef<'query, 'db, FunctionArg>,
+    ) -> Result<(), LookupError> {
+        if matches!(argument.get(), FunctionArg::ExprNamed { .. }) {
+            self.child(argument, |argument| {
+                let FunctionArg::ExprNamed { name, .. } = argument else {
+                    return None;
+                };
+                Some(name)
+            })?;
+        }
+        let Some(value) = argument.try_map(|argument| {
+            match argument {
+                FunctionArg::Named { arg, .. }
+                | FunctionArg::ExprNamed { arg, .. }
+                | FunctionArg::Unnamed(arg) => Some(arg),
+            }
+        }) else {
+            return Ok(());
+        };
+        self.function_argument_expression(value)
+    }
+
+    fn order_by(&mut self, order: AstRef<'query, 'db, OrderByExpr>) -> Result<(), LookupError> {
+        self.child(order, |order| Some(&order.expr))?;
+        let Some(fill) = order.try_map(|order| order.with_fill.as_ref()) else {
+            return Ok(());
+        };
+        self.child(fill, |fill| fill.from.as_ref())?;
+        self.child(fill, |fill| fill.to.as_ref())?;
+        self.child(fill, |fill| fill.step.as_ref())
+    }
+
+    fn window_bound(
+        &mut self,
+        bound: AstRef<'query, 'db, WindowFrameBound>,
+    ) -> Result<(), LookupError> {
+        self.child(bound, |bound| {
+            match bound {
+                WindowFrameBound::Preceding(value) | WindowFrameBound::Following(value) => {
+                    value.as_deref()
+                }
+                WindowFrameBound::CurrentRow => None,
+            }
+        })
+    }
+
+    fn window(&mut self, window: AstRef<'query, 'db, WindowType>) -> Result<(), LookupError> {
+        let Some(specification) = window.try_map(|window| {
+            let WindowType::WindowSpec(specification) = window else {
+                return None;
+            };
+            Some(specification)
+        }) else {
+            return Ok(());
+        };
+        self.children(specification, |specification| Some(specification.partition_by.as_slice()))?;
+        for order in specification.map(|specification| specification.order_by.as_slice()).iter() {
+            self.order_by(order)?;
+        }
+        let start = specification.map(|specification| &specification.window_frame);
+        if let Some(bound) = start.try_map(|frame| frame.as_ref().map(|frame| &frame.start_bound)) {
+            self.window_bound(bound)?;
+        }
+        if let Some(bound) =
+            start.try_map(|frame| frame.as_ref().and_then(|frame| frame.end_bound.as_ref()))
+        {
+            self.window_bound(bound)?;
+        }
+        Ok(())
+    }
+
+    fn function_clause(
+        &mut self,
+        clause: AstRef<'query, 'db, FunctionArgumentClause>,
+    ) -> Result<(), LookupError> {
+        match clause.get() {
+            FunctionArgumentClause::Where(_) | FunctionArgumentClause::Limit(_) => {
+                self.child(clause, |clause| {
+                    match clause {
+                        FunctionArgumentClause::Where(expression)
+                        | FunctionArgumentClause::Limit(expression) => Some(expression),
+                        _ => None,
+                    }
+                })
+            }
+            FunctionArgumentClause::OrderBy(_) => {
+                let Some(orders) = clause.try_map(|clause| {
+                    let FunctionArgumentClause::OrderBy(orders) = clause else {
+                        return None;
+                    };
+                    Some(orders.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for order in orders.iter() {
+                    self.order_by(order)?;
+                }
+                Ok(())
+            }
+            FunctionArgumentClause::OnOverflow(_) => {
+                self.child(clause, |clause| {
+                    let FunctionArgumentClause::OnOverflow(
+                        sqlparser::ast::ListAggOnOverflow::Truncate { filler, .. },
+                    ) = clause
+                    else {
+                        return None;
+                    };
+                    filler.as_deref()
+                })
+            }
+            FunctionArgumentClause::Having(_) => {
+                self.child(clause, |clause| {
+                    let FunctionArgumentClause::Having(bound) = clause else {
+                        return None;
+                    };
+                    Some(&bound.1)
+                })
+            }
+            FunctionArgumentClause::IgnoreOrRespectNulls(_)
+            | FunctionArgumentClause::Separator(_)
+            | FunctionArgumentClause::JsonNullClause(_)
+            | FunctionArgumentClause::JsonReturningClause(_) => Ok(()),
+        }
+    }
+
+    fn function_arguments(
+        &mut self,
+        arguments: AstRef<'query, 'db, FunctionArguments>,
+    ) -> Result<(), LookupError> {
+        match arguments.get() {
+            FunctionArguments::None => Ok(()),
+            FunctionArguments::Subquery(_) => {
+                self.query_child(arguments, |arguments| {
+                    let FunctionArguments::Subquery(query) = arguments else {
+                        return None;
+                    };
+                    Some(query.as_ref())
+                })
+            }
+            FunctionArguments::List(_) => {
+                let Some(values) = arguments.try_map(|arguments| {
+                    let FunctionArguments::List(list) = arguments else {
+                        return None;
+                    };
+                    Some(list.args.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for value in values.iter() {
+                    self.function_argument(value)?;
+                }
+                let Some(clauses) = arguments.try_map(|arguments| {
+                    let FunctionArguments::List(list) = arguments else {
+                        return None;
+                    };
+                    Some(list.clauses.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for clause in clauses.iter() {
+                    self.function_clause(clause)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn function(&mut self, function: AstRef<'query, 'db, Function>) -> Result<(), LookupError> {
+        self.function_arguments(function.map(|function| &function.parameters))?;
+        self.function_arguments(function.map(|function| &function.args))?;
+        self.child(function, |function| function.filter.as_deref())?;
+        if let Some(window) = function.try_map(|function| function.over.as_ref()) {
+            self.window(window)?;
+        }
+        for order in function.map(|function| function.within_group.as_slice()).iter() {
+            self.order_by(order)?;
+        }
+        Ok(())
+    }
+
+    fn wildcard_options(
+        &mut self,
+        options: AstRef<'query, 'db, WildcardAdditionalOptions>,
+    ) -> Result<(), LookupError> {
+        let Some(items) = options.try_map(|options| {
+            options.opt_replace.as_ref().map(|replace| replace.items.as_slice())
+        }) else {
+            return Ok(());
+        };
+        for item in items.iter() {
+            self.child(item, |item| Some(&item.expr))?;
+        }
+        Ok(())
+    }
+
+    fn case_when(&mut self, case: AstRef<'query, 'db, CaseWhen>) -> Result<(), LookupError> {
+        self.child(case, |case| Some(&case.condition))?;
+        self.child(case, |case| Some(&case.result))
+    }
+
+    fn dictionary_field(
+        &mut self,
+        field: AstRef<'query, 'db, DictionaryField>,
+    ) -> Result<(), LookupError> {
+        self.child(field, |field| Some(field.value.as_ref()))
+    }
+
+    fn map_entry(&mut self, entry: AstRef<'query, 'db, MapEntry>) -> Result<(), LookupError> {
+        self.child(entry, |entry| Some(entry.key.as_ref()))?;
+        self.child(entry, |entry| Some(entry.value.as_ref()))
+    }
+
+    fn query_expression(
+        &mut self,
+        expression: AstRef<'query, 'db, Expr>,
+    ) -> Result<(), LookupError> {
+        match expression.get() {
+            Expr::InSubquery { .. } => {
+                self.child(expression, |expression| {
+                    let Expr::InSubquery { expr, .. } = expression else {
+                        return None;
+                    };
+                    Some(expr.as_ref())
+                })?;
+                self.query_child(expression, |expression| {
+                    let Expr::InSubquery { subquery, .. } = expression else {
+                        return None;
+                    };
+                    Some(subquery.as_ref())
+                })
+            }
+            Expr::Exists { .. } | Expr::Subquery(_) => {
+                self.query_child(expression, |expression| {
+                    match expression {
+                        Expr::Exists { subquery, .. } | Expr::Subquery(subquery) => {
+                            Some(subquery.as_ref())
+                        }
+                        _ => None,
+                    }
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn access_expression(
+        &mut self,
+        expression: AstRef<'query, 'db, Expr>,
+    ) -> Result<(), LookupError> {
+        match expression.get() {
+            Expr::CompoundFieldAccess { .. } => {
+                self.child(expression, |expression| {
+                    let Expr::CompoundFieldAccess { root, .. } = expression else {
+                        return None;
+                    };
+                    Some(root.as_ref())
+                })?;
+                let Some(chain) = expression.try_map(|expression| {
+                    let Expr::CompoundFieldAccess { access_chain, .. } = expression else {
+                        return None;
+                    };
+                    Some(access_chain.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for access in chain.iter() {
+                    self.access(access)?;
+                }
+                Ok(())
+            }
+            Expr::JsonAccess { .. } => {
+                self.child(expression, |expression| {
+                    let Expr::JsonAccess { value, .. } = expression else {
+                        return None;
+                    };
+                    Some(value.as_ref())
+                })?;
+                let Some(path) = expression.try_map(|expression| {
+                    let Expr::JsonAccess { path, .. } = expression else {
+                        return None;
+                    };
+                    Some(path.path.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for element in path.iter() {
+                    self.json_path_element(element)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn operator_expression(
+        &mut self,
+        expression: AstRef<'query, 'db, Expr>,
+    ) -> Result<(), LookupError> {
+        match expression.get() {
+            Expr::IsFalse(_)
+            | Expr::IsNotFalse(_)
+            | Expr::IsTrue(_)
+            | Expr::IsNotTrue(_)
+            | Expr::IsNull(_)
+            | Expr::IsNotNull(_)
+            | Expr::IsUnknown(_)
+            | Expr::IsNotUnknown(_)
+            | Expr::IsJson { .. }
+            | Expr::IsNormalized { .. }
+            | Expr::UnaryOp { .. }
+            | Expr::Cast { .. }
+            | Expr::Extract { .. }
+            | Expr::Ceil { .. }
+            | Expr::Floor { .. }
+            | Expr::Collate { .. }
+            | Expr::Nested(_)
+            | Expr::Prefixed { .. }
+            | Expr::Named { .. }
+            | Expr::Interval(_)
+            | Expr::OuterJoin(_)
+            | Expr::Prior(_)
+            | Expr::Lambda(_) => self.child(expression, unary_expression_child),
+            Expr::IsDistinctFrom(_, _)
+            | Expr::IsNotDistinctFrom(_, _)
+            | Expr::InUnnest { .. }
+            | Expr::BinaryOp { .. }
+            | Expr::Like { .. }
+            | Expr::ILike { .. }
+            | Expr::SimilarTo { .. }
+            | Expr::RLike { .. }
+            | Expr::AnyOp { .. }
+            | Expr::AllOp { .. }
+            | Expr::AtTimeZone { .. }
+            | Expr::Position { .. }
+            | Expr::MemberOf(_) => {
+                self.child(expression, left_expression_child)?;
+                self.child(expression, right_expression_child)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn list_expression(
+        &mut self,
+        expression: AstRef<'query, 'db, Expr>,
+    ) -> Result<(), LookupError> {
+        match expression.get() {
+            Expr::InList { .. } => {
+                self.child(expression, |expression| {
+                    let Expr::InList { expr, .. } = expression else {
+                        return None;
+                    };
+                    Some(expr.as_ref())
+                })?;
+                self.children(expression, |expression| {
+                    let Expr::InList { list, .. } = expression else {
+                        return None;
+                    };
+                    Some(list.as_slice())
+                })
+            }
+            Expr::Between { .. } => {
+                for child in
+                    [between_expression as fn(&Expr) -> Option<&Expr>, between_low, between_high]
+                {
+                    self.child(expression, child)?;
+                }
+                Ok(())
+            }
+            Expr::Convert { .. } => {
+                self.child(expression, unary_expression_child)?;
+                self.children(expression, |expression| {
+                    let Expr::Convert { styles, .. } = expression else {
+                        return None;
+                    };
+                    Some(styles.as_slice())
+                })
+            }
+            Expr::Substring { .. } => {
+                self.child(expression, substring_expression)?;
+                self.child(expression, substring_start)?;
+                self.child(expression, substring_length)
+            }
+            Expr::Trim { .. } => {
+                self.child(expression, trim_expression)?;
+                self.child(expression, trim_what)?;
+                self.children(expression, |expression| {
+                    let Expr::Trim { trim_characters, .. } = expression else {
+                        return None;
+                    };
+                    trim_characters.as_deref()
+                })
+            }
+            Expr::Overlay { .. } => {
+                for child in [
+                    overlay_expression as fn(&Expr) -> Option<&Expr>,
+                    overlay_value,
+                    overlay_start,
+                    overlay_length,
+                ] {
+                    self.child(expression, child)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn call_expression(
+        &mut self,
+        expression: AstRef<'query, 'db, Expr>,
+    ) -> Result<(), LookupError> {
+        match expression.get() {
+            Expr::Function(_) => {
+                let Some(function) = expression.try_map(|expression| {
+                    let Expr::Function(function) = expression else {
+                        return None;
+                    };
+                    Some(function)
+                }) else {
+                    return Ok(());
+                };
+                self.function(function)
+            }
+            Expr::Case { .. } => {
+                self.child(expression, |expression| {
+                    let Expr::Case { operand, .. } = expression else {
+                        return None;
+                    };
+                    operand.as_deref()
+                })?;
+                let Some(cases) = expression.try_map(|expression| {
+                    let Expr::Case { conditions, .. } = expression else {
+                        return None;
+                    };
+                    Some(conditions.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for case in cases.iter() {
+                    self.case_when(case)?;
+                }
+                self.child(expression, |expression| {
+                    let Expr::Case { else_result, .. } = expression else {
+                        return None;
+                    };
+                    else_result.as_deref()
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn collection_expression(
+        &mut self,
+        expression: AstRef<'query, 'db, Expr>,
+    ) -> Result<(), LookupError> {
+        match expression.get() {
+            Expr::GroupingSets(_) | Expr::Cube(_) | Expr::Rollup(_) => {
+                let Some(groups) = expression.try_map(|expression| {
+                    match expression {
+                        Expr::GroupingSets(groups) | Expr::Cube(groups) | Expr::Rollup(groups) => {
+                            Some(groups.as_slice())
+                        }
+                        _ => None,
+                    }
+                }) else {
+                    return Ok(());
+                };
+                for group in groups.iter() {
+                    self.children(group, |group| Some(group.as_slice()))?;
+                }
+                Ok(())
+            }
+            Expr::Tuple(_) | Expr::Struct { .. } | Expr::Array(_) => {
+                self.children(expression, |expression| {
+                    match expression {
+                        Expr::Tuple(expressions) => Some(expressions.as_slice()),
+                        Expr::Struct { values, .. } => Some(values.as_slice()),
+                        Expr::Array(array) => Some(array.elem.as_slice()),
+                        _ => None,
+                    }
+                })
+            }
+            Expr::Dictionary(_) => {
+                let Some(fields) = expression.try_map(|expression| {
+                    let Expr::Dictionary(fields) = expression else {
+                        return None;
+                    };
+                    Some(fields.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for field in fields.iter() {
+                    self.dictionary_field(field)?;
+                }
+                Ok(())
+            }
+            Expr::Map(_) => {
+                let Some(entries) = expression.try_map(|expression| {
+                    let Expr::Map(map) = expression else {
+                        return None;
+                    };
+                    Some(map.entries.as_slice())
+                }) else {
+                    return Ok(());
+                };
+                for entry in entries.iter() {
+                    self.map_entry(entry)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn expression(&mut self, expression: AstRef<'query, 'db, Expr>) -> Result<(), LookupError> {
+        match expression.get() {
+            Expr::InSubquery { .. } | Expr::Exists { .. } | Expr::Subquery(_) => {
+                self.query_expression(expression)
+            }
+            Expr::CompoundFieldAccess { .. } | Expr::JsonAccess { .. } => {
+                self.access_expression(expression)
+            }
+            Expr::IsFalse(_)
+            | Expr::IsNotFalse(_)
+            | Expr::IsTrue(_)
+            | Expr::IsNotTrue(_)
+            | Expr::IsNull(_)
+            | Expr::IsNotNull(_)
+            | Expr::IsUnknown(_)
+            | Expr::IsNotUnknown(_)
+            | Expr::IsDistinctFrom(_, _)
+            | Expr::IsNotDistinctFrom(_, _)
+            | Expr::IsJson { .. }
+            | Expr::IsNormalized { .. }
+            | Expr::InUnnest { .. }
+            | Expr::BinaryOp { .. }
+            | Expr::Like { .. }
+            | Expr::ILike { .. }
+            | Expr::SimilarTo { .. }
+            | Expr::RLike { .. }
+            | Expr::AnyOp { .. }
+            | Expr::AllOp { .. }
+            | Expr::UnaryOp { .. }
+            | Expr::Cast { .. }
+            | Expr::AtTimeZone { .. }
+            | Expr::Extract { .. }
+            | Expr::Ceil { .. }
+            | Expr::Floor { .. }
+            | Expr::Position { .. }
+            | Expr::Collate { .. }
+            | Expr::Nested(_)
+            | Expr::Prefixed { .. }
+            | Expr::Named { .. }
+            | Expr::Interval(_)
+            | Expr::OuterJoin(_)
+            | Expr::Prior(_)
+            | Expr::Lambda(_)
+            | Expr::MemberOf(_) => self.operator_expression(expression),
+            Expr::InList { .. }
+            | Expr::Between { .. }
+            | Expr::Convert { .. }
+            | Expr::Substring { .. }
+            | Expr::Trim { .. }
+            | Expr::Overlay { .. } => self.list_expression(expression),
+            Expr::Function(_) | Expr::Case { .. } => self.call_expression(expression),
+            Expr::GroupingSets(_)
+            | Expr::Cube(_)
+            | Expr::Rollup(_)
+            | Expr::Tuple(_)
+            | Expr::Struct { .. }
+            | Expr::Dictionary(_)
+            | Expr::Map(_)
+            | Expr::Array(_) => self.collection_expression(expression),
+            Expr::Identifier(_)
+            | Expr::CompoundIdentifier(_)
+            | Expr::Value(_)
+            | Expr::TypedString(_)
+            | Expr::MatchAgainst { .. }
+            | Expr::Wildcard(_)
+            | Expr::QualifiedWildcard(_, _) => Ok(()),
+        }
+    }
+}
+
+fn unary_expression_child(expression: &Expr) -> Option<&Expr> {
+    match expression {
+        Expr::IsFalse(expression)
+        | Expr::IsNotFalse(expression)
+        | Expr::IsTrue(expression)
+        | Expr::IsNotTrue(expression)
+        | Expr::IsNull(expression)
+        | Expr::IsNotNull(expression)
+        | Expr::IsUnknown(expression)
+        | Expr::IsNotUnknown(expression)
+        | Expr::Nested(expression)
+        | Expr::OuterJoin(expression)
+        | Expr::Prior(expression) => Some(expression.as_ref()),
+        Expr::IsJson { expr, .. }
+        | Expr::IsNormalized { expr, .. }
+        | Expr::UnaryOp { expr, .. }
+        | Expr::Convert { expr, .. }
+        | Expr::Cast { expr, .. }
+        | Expr::Extract { expr, .. }
+        | Expr::Ceil { expr, .. }
+        | Expr::Floor { expr, .. }
+        | Expr::Collate { expr, .. }
+        | Expr::Named { expr, .. } => Some(expr.as_ref()),
+        Expr::Prefixed { value, .. } => Some(value.as_ref()),
+        Expr::Interval(interval) => Some(interval.value.as_ref()),
+        Expr::Lambda(lambda) => Some(lambda.body.as_ref()),
+        _ => None,
+    }
+}
+
+fn left_expression_child(expression: &Expr) -> Option<&Expr> {
+    match expression {
+        Expr::IsDistinctFrom(left, _)
+        | Expr::IsNotDistinctFrom(left, _)
+        | Expr::BinaryOp { left, .. }
+        | Expr::AnyOp { left, .. }
+        | Expr::AllOp { left, .. } => Some(left.as_ref()),
+        Expr::InUnnest { expr, .. }
+        | Expr::Like { expr, .. }
+        | Expr::ILike { expr, .. }
+        | Expr::SimilarTo { expr, .. }
+        | Expr::RLike { expr, .. }
+        | Expr::Position { expr, .. } => Some(expr.as_ref()),
+        Expr::AtTimeZone { timestamp, .. } => Some(timestamp.as_ref()),
+        Expr::MemberOf(member) => Some(member.value.as_ref()),
+        _ => None,
+    }
+}
+
+fn right_expression_child(expression: &Expr) -> Option<&Expr> {
+    match expression {
+        Expr::IsDistinctFrom(_, right)
+        | Expr::IsNotDistinctFrom(_, right)
+        | Expr::BinaryOp { right, .. }
+        | Expr::AnyOp { right, .. }
+        | Expr::AllOp { right, .. } => Some(right.as_ref()),
+        Expr::InUnnest { array_expr, .. } => Some(array_expr.as_ref()),
+        Expr::Like { pattern, .. }
+        | Expr::ILike { pattern, .. }
+        | Expr::SimilarTo { pattern, .. }
+        | Expr::RLike { pattern, .. } => Some(pattern.as_ref()),
+        Expr::AtTimeZone { time_zone, .. } => Some(time_zone.as_ref()),
+        Expr::Position { r#in, .. } => Some(r#in.as_ref()),
+        Expr::MemberOf(member) => Some(member.array.as_ref()),
+        _ => None,
+    }
+}
+
+fn between_expression(expression: &Expr) -> Option<&Expr> {
+    let Expr::Between { expr, .. } = expression else {
+        return None;
+    };
+    Some(expr.as_ref())
+}
+
+fn between_low(expression: &Expr) -> Option<&Expr> {
+    let Expr::Between { low, .. } = expression else {
+        return None;
+    };
+    Some(low.as_ref())
+}
+
+fn between_high(expression: &Expr) -> Option<&Expr> {
+    let Expr::Between { high, .. } = expression else {
+        return None;
+    };
+    Some(high.as_ref())
+}
+
+fn substring_expression(expression: &Expr) -> Option<&Expr> {
+    let Expr::Substring { expr, .. } = expression else {
+        return None;
+    };
+    Some(expr.as_ref())
+}
+
+fn substring_start(expression: &Expr) -> Option<&Expr> {
+    let Expr::Substring { substring_from, .. } = expression else {
+        return None;
+    };
+    substring_from.as_deref()
+}
+
+fn substring_length(expression: &Expr) -> Option<&Expr> {
+    let Expr::Substring { substring_for, .. } = expression else {
+        return None;
+    };
+    substring_for.as_deref()
+}
+
+fn trim_expression(expression: &Expr) -> Option<&Expr> {
+    let Expr::Trim { expr, .. } = expression else {
+        return None;
+    };
+    Some(expr.as_ref())
+}
+
+fn trim_what(expression: &Expr) -> Option<&Expr> {
+    let Expr::Trim { trim_what, .. } = expression else {
+        return None;
+    };
+    trim_what.as_deref()
+}
+
+fn overlay_expression(expression: &Expr) -> Option<&Expr> {
+    let Expr::Overlay { expr, .. } = expression else {
+        return None;
+    };
+    Some(expr.as_ref())
+}
+
+fn overlay_value(expression: &Expr) -> Option<&Expr> {
+    let Expr::Overlay { overlay_what, .. } = expression else {
+        return None;
+    };
+    Some(overlay_what.as_ref())
+}
+
+fn overlay_start(expression: &Expr) -> Option<&Expr> {
+    let Expr::Overlay { overlay_from, .. } = expression else {
+        return None;
+    };
+    Some(overlay_from.as_ref())
+}
+
+fn overlay_length(expression: &Expr) -> Option<&Expr> {
+    let Expr::Overlay { overlay_for, .. } = expression else {
+        return None;
+    };
+    overlay_for.as_deref()
+}
+
+fn index_expression_queries<'query, 'db, DB, P>(
+    expression: AstRef<'query, 'db, Expr>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    deriving: Deriving<'_, 'db, DB>,
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<(), LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    NestedQueryIndexer { cte_scope, deriving, parent, profile }.expression(expression)
+}
+
+fn derived_projection_source<'db, DB: DatabaseLike, D: Copy>(
+    expression: &Expr,
+    scope: &FromScope<'_, 'db, DB, D>,
+    opaque: D,
+) -> Result<Option<&'db DB::Table>, LookupError> {
+    match column_source(expression, scope, scope.from_entry_count, opaque, false) {
+        Ok(source) => Ok(source),
+        Err(LookupError::AmbiguousTableLookup { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn append_select_item<'query, 'db, DB, P>(
+    item: AstRef<'query, 'db, SelectItem>,
+    scope: &P::Scope,
+    scope_cursor: P::Cursor,
+    output_names: Option<&OutputNameSource<'_, 'query, 'db, DB, P::Definition>>,
+    profile: &mut P,
+    columns: &mut Vec<DerivedColumn<'query, 'db, DB, P::Definition>>,
+) -> Result<bool, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match item.get() {
+        SelectItem::UnnamedExpr(_) => {
+            let Some(expression) = select_item_expression(item) else {
+                return Ok(false);
+            };
+            let opaque = profile.opaque_definition();
+            let (named, source) = {
+                let data = profile.scope(scope);
+                (
+                    projection_output_name(
+                        expression.get(),
+                        &data.bases,
+                        output_names,
+                        columns.len(),
+                    ),
+                    derived_projection_source(expression.get(), data, opaque)?,
+                )
+            };
+            let Some((name, quoted)) = named else {
+                return Ok(false);
+            };
+            let definition = projection_definition(expression, scope_cursor, profile)?;
+            columns.push(DerivedColumn {
+                name,
+                quoted,
+                source,
+                definition,
+                marker: core::marker::PhantomData,
+            });
+            Ok(true)
+        }
+        SelectItem::ExprWithAlias { alias, .. } => {
+            let Some(expression) = select_item_expression(item) else {
+                return Ok(false);
+            };
+            let opaque = profile.opaque_definition();
+            let source = derived_projection_source(expression.get(), profile.scope(scope), opaque)?;
+            let definition = projection_definition(expression, scope_cursor, profile)?;
+            columns.push(DerivedColumn {
+                name: alias.value.clone(),
+                quoted: alias.quote_style.is_some(),
+                source,
+                definition,
+                marker: core::marker::PhantomData,
+            });
+            Ok(true)
+        }
+        SelectItem::ExprWithAliases { .. }
+        | SelectItem::QualifiedWildcard(SelectItemQualifiedWildcardKind::Expr(_), _) => Ok(false),
+        SelectItem::Wildcard(options) => {
+            let data = profile.scope(scope);
+            if data.has_opaque() || wildcard_reshapes_output(options) {
+                return Ok(false);
+            }
+            let opaque = profile.opaque_definition();
+            push_wildcard_columns(data, columns, opaque);
+            Ok(true)
+        }
+        SelectItem::QualifiedWildcard(
+            SelectItemQualifiedWildcardKind::ObjectName(object_name),
+            options,
+        ) => {
+            if wildcard_reshapes_output(options) {
+                return Ok(false);
+            }
+            let Some(expansion) = ({
+                let data = profile.scope(scope);
+                expand_qualified_wildcard(&data.bases, &data.derived, object_name)
+            }) else {
+                return Ok(false);
+            };
+            columns.extend(expansion);
+            Ok(true)
+        }
+    }
+}
+
+/// Derives the output shape of a plain `SELECT`: each projected column's name
+/// and pass-through source, enumerated from the projection (wildcards expand
+/// over the `FROM` relations they stand for).
+fn derive_select_shape<'query, 'db, DB, P>(
+    select: AstRef<'query, 'db, Select>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    output_names: Option<&OutputNameSource<'_, 'query, 'db, DB, P::Definition>>,
+    deriving: Deriving<'_, 'db, DB>,
+    parent: P::Cursor,
+    profile: &mut P,
+) -> Result<Option<DerivedShape<'query, 'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    if !select.get().lateral_views.is_empty()
+        || select.get().exclude.is_some()
+        || select.get().value_table_mode.is_some()
+        || !select.get().connect_by.is_empty()
+    {
+        return Ok(None);
+    }
+    let scope = collect_select_from(select, cte_scope, deriving, parent, profile)?;
+    let scope_cursor = profile.cursor(&scope);
+    if P::INDEX_NESTED_QUERIES {
+        index_select_expression_queries(select, cte_scope, deriving, scope_cursor, profile)?;
+    }
+    let mut columns = Vec::new();
+    for item in select.map(|select| select.projection.as_slice()).iter() {
+        if !append_select_item(item, &scope, scope_cursor, output_names, profile, &mut columns)? {
+            return Ok(None);
+        }
+    }
+    let grouped = match &select.get().group_by {
         GroupByExpr::All(_) => true,
         GroupByExpr::Expressions(expressions, _) => !expressions.is_empty(),
     };
-    // A body reading through a null-extended outer join has output rows with
-    // no source row, so it does not preserve row identity either.
-    let outer_join = select.from.iter().flat_map(|entry| &entry.joins).any(|join| {
+    let outer_join = select.get().from.iter().flat_map(|entry| &entry.joins).any(|join| {
         let (left_nullable, right_nullable) = nullable_sides(&join.join_operator);
         left_nullable || right_nullable
     });
-    // A body reading a relation whose own rows are not source rows cannot
-    // preserve row identity either: its rows are that relation's rows.
-    let reads_non_preserving = scope.derived.iter().any(|relation| !relation.shape.row_preserving);
-    let row_preserving = select.distinct.is_none()
-        && select.having.is_none()
-        && select.qualify.is_none()
+    let reads_non_preserving =
+        profile.scope(&scope).derived.iter().any(|relation| !relation.shape.row_preserving);
+    let row_preserving = select.get().distinct.is_none()
+        && select.get().having.is_none()
+        && select.get().qualify.is_none()
         && !grouped
         && !outer_join
         && !reads_non_preserving;
@@ -1031,9 +2527,9 @@ fn projected_column_name(expr: &Expr) -> Option<(String, bool)> {
 /// names a base table in that schema. An unresolvable reference belongs to a
 /// statement PostgreSQL would reject, so it yields no name and the body
 /// stays opaque rather than inventing an output column.
-fn three_part_output_name<DB: DatabaseLike>(
+fn three_part_output_name<DB: DatabaseLike, D: Copy>(
     expr: &Expr,
-    bases: &[FromTableRef<'_, '_, DB>],
+    bases: &[FromTableRef<'_, '_, DB, D>],
 ) -> Option<(String, bool)> {
     let Expr::CompoundIdentifier(parts) = expr else {
         return None;
@@ -1048,6 +2544,7 @@ fn three_part_output_name<DB: DatabaseLike>(
         parts[1].value.as_str(),
         parts[1].quote_style.is_some(),
         false,
+        usize::MAX,
     )?;
     base_exposes_column(base, &parts[2])
         .then(|| (parts[2].value.clone(), parts[2].quote_style.is_some()))
@@ -1056,46 +2553,42 @@ fn three_part_output_name<DB: DatabaseLike>(
 /// Every column a base relation outputs as a derived column sourced by that
 /// table: the relation's `output_names` in declaration order, so an alias
 /// column list renames the wildcard expansion too.
-fn base_columns<'db, DB: DatabaseLike>(
-    base: &FromTableRef<'_, 'db, DB>,
-) -> Vec<DerivedColumn<'db, DB>> {
-    base.output_names
+fn base_columns<'query, 'db, DB: DatabaseLike, D: Copy>(
+    base: &FromTableRef<'query, 'db, DB, D>,
+) -> Vec<DerivedColumn<'query, 'db, DB, D>> {
+    base.output_columns
         .iter()
-        .map(|(name, quoted)| {
-            DerivedColumn { name: name.clone(), quoted: *quoted, source: Some(base.table) }
+        .map(|column| {
+            DerivedColumn {
+                name: column.name.clone(),
+                quoted: column.quoted,
+                source: Some(base.table),
+                definition: column.definition,
+                marker: core::marker::PhantomData,
+            }
         })
         .collect()
 }
 
 /// The relation a qualified wildcard prefix names.
-enum WildcardTarget<'s, 'a, 'db, DB: DatabaseLike> {
-    Base(&'s FromTableRef<'a, 'db, DB>),
-    Derived(&'s DerivedRelationRef<'a, 'db, DB>),
+enum WildcardTarget<'scope, 'query, 'db, DB: DatabaseLike, D: Copy> {
+    Base(&'scope FromTableRef<'query, 'db, DB, D>),
+    Derived(&'scope DerivedRelationRef<'query, 'db, DB, D>),
 }
 
-/// Resolves a qualified wildcard's prefix to the relation it names, sharing
-/// the qualified column reference rules: a one-part prefix matches a base
-/// relation's alias (or table name) first, then a derived relation's key. A
-/// two-part prefix must name a base relation whose own schema equals the
-/// leading part, because a CTE or derived relation has no schema (PostgreSQL
-/// rejects `schema.cte.*`). A prefix of three or more parts matches nothing:
-/// PostgreSQL accepts an exact `database.schema.table.*`, but database names
-/// are not modeled, so that leading part can never be verified. With
-/// `require_row_identity`, null-extended base relations and non-row-preserving
-/// derived relations are excluded.
-fn resolve_wildcard_target<'s, 'a, 'db, DB: DatabaseLike>(
-    bases: &'s [FromTableRef<'a, 'db, DB>],
-    derived: &'s [DerivedRelationRef<'a, 'db, DB>],
+fn resolve_wildcard_target<'scope, 'query, 'db, DB: DatabaseLike, D: Copy>(
+    bases: &'scope [FromTableRef<'query, 'db, DB, D>],
+    derived: &'scope [DerivedRelationRef<'query, 'db, DB, D>],
     qualifier: &ObjectName,
     require_row_identity: bool,
-) -> Option<WildcardTarget<'s, 'a, 'db, DB>> {
+) -> Option<WildcardTarget<'scope, 'query, 'db, DB, D>> {
     let (value, quoted) = object_name_last_part(qualifier)?;
     match qualifier.0.len() {
         1 => {
-            base_for_qualifier(bases, value, quoted, require_row_identity)
+            base_for_qualifier(bases, value, quoted, require_row_identity, usize::MAX)
                 .map(WildcardTarget::Base)
                 .or_else(|| {
-                    derived_for_qualifier(derived, value, quoted, require_row_identity)
+                    derived_for_qualifier(derived, value, quoted, require_row_identity, usize::MAX)
                         .map(WildcardTarget::Derived)
                 })
         }
@@ -1108,6 +2601,7 @@ fn resolve_wildcard_target<'s, 'a, 'db, DB: DatabaseLike>(
                 value,
                 quoted,
                 require_row_identity,
+                usize::MAX,
             )
             .map(WildcardTarget::Base)
         }
@@ -1115,28 +2609,21 @@ fn resolve_wildcard_target<'s, 'a, 'db, DB: DatabaseLike>(
     }
 }
 
-/// The columns a qualified wildcard (`alias.*`) stands for: a base relation
-/// expands to its `output_names` (alias-list renamed when the `FROM` clause
-/// wrote one), a derived relation to its shape's columns. `None` when the
-/// prefix matches nothing.
-fn expand_qualified_wildcard<'s, 'a, 'db, DB: DatabaseLike>(
-    bases: &'s [FromTableRef<'a, 'db, DB>],
-    derived: &'s [DerivedRelationRef<'a, 'db, DB>],
+fn expand_qualified_wildcard<'query, 'db, DB: DatabaseLike, D: Copy>(
+    bases: &[FromTableRef<'query, 'db, DB, D>],
+    derived: &[DerivedRelationRef<'query, 'db, DB, D>],
     qualifier: &ObjectName,
-) -> Option<Vec<DerivedColumn<'db, DB>>> {
+) -> Option<Vec<DerivedColumn<'query, 'db, DB, D>>> {
     match resolve_wildcard_target(bases, derived, qualifier, false)? {
         WildcardTarget::Base(base) => Some(base_columns(base)),
         WildcardTarget::Derived(relation) => Some(relation.shape.columns.clone()),
     }
 }
 
-/// Renames a derived shape's columns positionally by a table alias's column
-/// list (`v(x)` or `(SELECT ...) s(x)`). More aliases than output columns is
-/// a mismatch PostgreSQL rejects, so the shape becomes non-derivable.
-fn apply_alias_columns<'db, DB: DatabaseLike>(
-    shape: Option<DerivedShape<'db, DB>>,
+fn apply_alias_columns<'query, 'db, DB: DatabaseLike, D: Copy>(
+    shape: Option<DerivedShape<'query, 'db, DB, D>>,
     alias: &TableAlias,
-) -> Option<DerivedShape<'db, DB>> {
+) -> Option<DerivedShape<'query, 'db, DB, D>> {
     let mut shape = shape?;
     if alias.columns.is_empty() {
         return Some(shape);
@@ -1151,117 +2638,112 @@ fn apply_alias_columns<'db, DB: DatabaseLike>(
     Some(shape)
 }
 
-/// Finds the scope entry for a bare, single-part relation name, innermost
-/// scope first so a nested `WITH` shadows an outer one.
-fn find_cte<'a, 'db, 's, DB: DatabaseLike>(
+fn find_cte<'query, 'db, 'scope, DB: DatabaseLike, D: Copy>(
     name: &ObjectName,
-    cte_scope: &'s [CteShape<'a, 'db, DB>],
-) -> Option<&'s CteShape<'a, 'db, DB>> {
+    cte_scope: &'scope [CteShape<'query, 'db, DB, D>],
+) -> Option<&'scope CteShape<'query, 'db, DB, D>> {
     if name.0.len() != 1 {
         return None;
     }
     let (value, quoted) = object_name_last_part(name)?;
-    cte_scope.iter().rev().find(|cte| identifiers_match(cte.name, cte.quoted, value, quoted))
+    cte_scope
+        .iter()
+        .rev()
+        .find(|cte| identifiers_match(cte.name.value.get(), cte.name.quoted, value, quoted))
 }
 
-/// Returns whether a base relation exposes a column matching `column` under
-/// the names it outputs (an alias column list replaces the originals),
-/// applying PostgreSQL identifier semantics (including the reference
-/// identifier's own quoting).
-fn base_exposes_column(base: &FromTableRef<'_, '_, impl DatabaseLike>, column: &Ident) -> bool {
-    base.output_names.iter().any(|(name, quoted)| {
-        identifiers_match(name, *quoted, column.value.as_str(), column.quote_style.is_some())
+fn base_exposes_column<DB: DatabaseLike, D: Copy>(
+    base: &FromTableRef<'_, '_, DB, D>,
+    column: &Ident,
+) -> bool {
+    base.output_columns.iter().any(|candidate| {
+        identifiers_match(
+            &candidate.name,
+            candidate.quoted,
+            column.value.as_str(),
+            column.quote_style.is_some(),
+        )
     })
 }
 
-/// Finds the base relation whose qualifying key matches `value`/`quoted`.
-/// With `require_row_identity`, entries on the null-extended side of an outer
-/// join are excluded.
-fn base_for_qualifier<'s, 'a, 'db, DB: DatabaseLike>(
-    bases: &'s [FromTableRef<'a, 'db, DB>],
+fn find_base_column<'scope, 'db, DB: DatabaseLike, D: Copy>(
+    base: &'scope FromTableRef<'_, 'db, DB, D>,
+    column: &Ident,
+) -> Option<&'scope BaseColumnRef<'db, DB, D>> {
+    base.output_columns.iter().find(|candidate| {
+        identifiers_match(
+            &candidate.name,
+            candidate.quoted,
+            column.value.as_str(),
+            column.quote_style.is_some(),
+        )
+    })
+}
+
+fn key_matches(key: RelationKey<'_, '_>, value: &str, quoted: bool) -> bool {
+    identifiers_match(key.value.get(), key.quoted, value, quoted)
+}
+
+fn base_for_qualifier<'scope, 'query, 'db, DB: DatabaseLike, D: Copy>(
+    bases: &'scope [FromTableRef<'query, 'db, DB, D>],
     value: &str,
     quoted: bool,
     require_row_identity: bool,
-) -> Option<&'s FromTableRef<'a, 'db, DB>> {
+    visible_entries: usize,
+) -> Option<&'scope FromTableRef<'query, 'db, DB, D>> {
     bases
         .iter()
+        .filter(|base| base.entry_index < visible_entries)
         .filter(|base| !require_row_identity || !base.nullable)
-        .find(|base| identifiers_match(base.key_value, base.key_quoted, value, quoted))
+        .find(|base| key_matches(base.key, value, quoted))
 }
 
-/// Finds the base relation a `schema.table` prefix names, shared by
-/// `schema.table.column` references and two-part qualified wildcards.
-/// PostgreSQL matches the relation by its alias (or name when unaliased) and
-/// requires the leading part to equal the table's own schema. A table stored
-/// without a schema lives in `public`, and PostgreSQL accepts either spelling
-/// of that schema name. A CTE or derived relation has no schema, so
-/// PostgreSQL rejects the reference outright and there is nothing to find.
-/// With `require_row_identity`, entries on the null-extended side of an outer
-/// join are excluded.
-fn base_for_qualified_name<'s, 'a, 'db, DB: DatabaseLike>(
-    bases: &'s [FromTableRef<'a, 'db, DB>],
+fn base_for_qualified_name<'scope, 'query, 'db, DB: DatabaseLike, D: Copy>(
+    bases: &'scope [FromTableRef<'query, 'db, DB, D>],
     schema: &str,
     schema_quoted: bool,
     table_part: &str,
     table_quoted: bool,
     require_row_identity: bool,
-) -> Option<&'s FromTableRef<'a, 'db, DB>> {
-    bases.iter().filter(|base| !require_row_identity || !base.nullable).find(|base| {
-        let schema_matches = match base.table.table_schema() {
-            Some(stored) => {
-                identifiers_match(
-                    stored,
-                    base.table.table_schema_is_quoted(),
-                    schema,
-                    schema_quoted,
-                )
-            }
-            None => identifiers_match("public", false, schema, schema_quoted),
-        };
-        identifiers_match(base.key_value, base.key_quoted, table_part, table_quoted)
-            && schema_matches
-    })
+    visible_entries: usize,
+) -> Option<&'scope FromTableRef<'query, 'db, DB, D>> {
+    bases
+        .iter()
+        .filter(|base| base.entry_index < visible_entries)
+        .filter(|base| !require_row_identity || !base.nullable)
+        .find(|base| {
+            base.schema_key.is_some_and(|stored| {
+                key_matches(stored, schema, schema_quoted)
+                    && key_matches(base.key, table_part, table_quoted)
+            })
+        })
 }
 
-/// Finds the derived relation whose qualifying key matches `value`/`quoted`.
-/// An anonymous derived subquery has no key and never matches. With
-/// `require_row_identity`, only relations whose bodies preserve row
-/// identity qualify.
-fn derived_for_qualifier<'a, 'db, 's, DB: DatabaseLike>(
-    derived: &'s [DerivedRelationRef<'a, 'db, DB>],
+fn derived_for_qualifier<'scope, 'query, 'db, DB: DatabaseLike, D: Copy>(
+    derived: &'scope [DerivedRelationRef<'query, 'db, DB, D>],
     value: &str,
     quoted: bool,
     require_row_identity: bool,
-) -> Option<&'s DerivedRelationRef<'a, 'db, DB>> {
+    visible_entries: usize,
+) -> Option<&'scope DerivedRelationRef<'query, 'db, DB, D>> {
     derived
         .iter()
-        .find(|relation| {
-            relation
-                .key_value
-                .is_some_and(|key| identifiers_match(key, relation.key_quoted, value, quoted))
-        })
+        .filter(|relation| relation.entry_index < visible_entries)
+        .find(|relation| relation.key.is_some_and(|key| key_matches(key, value, quoted)))
         .filter(|relation| {
             !require_row_identity || (relation.shape.row_preserving && !relation.nullable)
         })
 }
 
-/// Where a derivable relation's output column passes through from.
-/// `Computed` covers output columns not passed through from a base table:
-/// aggregates, literals, or columns sourced from a relation that itself
-/// answers nothing. `Ambiguous` means the relation exposes this name in two
-/// or more output columns, which PostgreSQL refuses to resolve.
-enum PassThrough<'db, DB: DatabaseLike> {
-    Table(&'db DB::Table),
-    Computed,
+enum DerivedMatch<'scope, 'query, 'db, DB: DatabaseLike, D: Copy> {
+    Column(&'scope DerivedColumn<'query, 'db, DB, D>),
     Ambiguous,
 }
 
-/// The source of a derived relation's output column named `column`, or `None`
-/// when the relation has no column of that name.
-fn find_derived_column<'db, DB: DatabaseLike>(
-    columns: &[DerivedColumn<'db, DB>],
+fn find_derived_column<'scope, 'query, 'db, DB: DatabaseLike, D: Copy>(
+    columns: &'scope [DerivedColumn<'query, 'db, DB, D>],
     column: &Ident,
-) -> Option<PassThrough<'db, DB>> {
+) -> Option<DerivedMatch<'scope, 'query, 'db, DB, D>> {
     let mut matches = columns.iter().filter(|candidate| {
         identifiers_match(
             &candidate.name,
@@ -1272,16 +2754,13 @@ fn find_derived_column<'db, DB: DatabaseLike>(
     });
     let first = matches.next()?;
     if matches.next().is_some() {
-        return Some(PassThrough::Ambiguous);
+        return Some(DerivedMatch::Ambiguous);
     }
-    Some(first.source.map_or(PassThrough::Computed, PassThrough::Table))
+    Some(DerivedMatch::Column(first))
 }
 
-/// The single base table every output column of a derived relation comes
-/// from, when the relation preserves row identity and every column is a
-/// pass-through of that same table.
-fn single_source_relation<'db, DB: DatabaseLike>(
-    relation: &DerivedRelationRef<'_, 'db, DB>,
+fn single_source_relation<'db, DB: DatabaseLike, D: Copy>(
+    relation: &DerivedRelationRef<'_, 'db, DB, D>,
     database: &DB,
 ) -> Option<&'db DB::Table> {
     if !relation.shape.row_preserving {
@@ -1298,91 +2777,137 @@ fn single_source_relation<'db, DB: DatabaseLike>(
         .then_some(first)
 }
 
-/// Renders a derived relation's qualifying key for an ambiguity candidate
-/// list, quoting it when the SQL wrote it quoted, or naming an anonymous
-/// derived subquery for a candidate list.
-fn relation_key_display(relation: &DerivedRelationRef<'_, '_, impl DatabaseLike>) -> String {
-    match relation.key_value {
-        Some(key) if relation.key_quoted => format!("\"{key}\""),
-        Some(key) => key.to_string(),
+fn relation_key_display<DB: DatabaseLike, D: Copy>(
+    relation: &DerivedRelationRef<'_, '_, DB, D>,
+) -> String {
+    match relation.key {
+        Some(key) if key.quoted => format!("\"{}\"", key.value.get()),
+        Some(key) => key.value.get().to_string(),
         None => "(subquery)".to_string(),
     }
 }
 
-/// Resolves an unqualified column to the single `FROM` relation that exposes
-/// it, answering that relation's pass-through source. A `USING`/`NATURAL`
-/// merged name counts as one exposure with no source, because the coalesced
-/// column belongs to no single table. With `require_row_identity`, entries on
-/// the null-extended side of an outer join answer nothing.
-fn unqualified_column_source<'db, DB: DatabaseLike>(
-    bases: &[FromTableRef<'_, 'db, DB>],
-    derived: &[DerivedRelationRef<'_, 'db, DB>],
-    merged: &[MergedName],
-    has_opaque: bool,
-    require_row_identity: bool,
-    column: &Ident,
-) -> Result<Option<&'db DB::Table>, LookupError> {
-    // An opaque relation might also expose the column, and its columns cannot
-    // be enumerated, so a single answer cannot be claimed.
-    if has_opaque {
-        return Ok(None);
-    }
+struct ResolvedColumn<'db, DB: DatabaseLike, D: Copy> {
+    source: Option<&'db DB::Table>,
+    definition: D,
+}
 
-    let mut sources: Vec<Option<&'db DB::Table>> = Vec::new();
-    let mut candidates: Vec<String> = Vec::new();
-    // The merge's output carries the name once and its coalesced value
-    // belongs to no table. Relations collected before the merge boundary
-    // passed their exposure into the merged column and no longer count on
-    // their own. Relations joined in afterwards still collide with it.
-    let boundary = merged_boundary(merged, column.value.as_str(), column.quote_style.is_some());
+impl<DB: DatabaseLike, D: Copy> Copy for ResolvedColumn<'_, DB, D> {}
+
+#[expect(clippy::expl_impl_clone_on_copy, reason = "derive would require DB: Clone")]
+impl<DB: DatabaseLike, D: Copy> Clone for ResolvedColumn<'_, DB, D> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+enum LookupOutcome<T> {
+    Found(T),
+    SearchParent,
+    Stop,
+}
+
+fn visible_merged_boundary(
+    merged: &[MergedName],
+    column: &Ident,
+    visible_entries: usize,
+) -> Option<usize> {
+    merged
+        .iter()
+        .filter(|merged| merged.subsumed <= visible_entries)
+        .rev()
+        .find(|merged| {
+            identifiers_match(
+                &merged.name,
+                merged.quoted,
+                column.value.as_str(),
+                column.quote_style.is_some(),
+            )
+        })
+        .map(|merged| merged.subsumed)
+}
+
+fn opaque_qualifier_matches(identity: OpaqueIdentity<'_, '_>, qualifier: &[Ident]) -> bool {
+    match identity {
+        OpaqueIdentity::Known { key, schema } => {
+            match qualifier {
+                [table] => key_matches(key, table.value.as_str(), table.quote_style.is_some()),
+                [schema_part, table] => {
+                    schema.is_some_and(|schema| {
+                        key_matches(
+                            schema,
+                            schema_part.value.as_str(),
+                            schema_part.quote_style.is_some(),
+                        )
+                    }) && key_matches(key, table.value.as_str(), table.quote_style.is_some())
+                }
+                _ => false,
+            }
+        }
+        OpaqueIdentity::Anonymous => false,
+        OpaqueIdentity::AnyQualifier => true,
+    }
+}
+
+fn unqualified_definition_local<'db, DB: DatabaseLike, D: Copy>(
+    scope: &FromScope<'_, 'db, DB, D>,
+    visible_entries: usize,
+    opaque: D,
+    column: &Ident,
+    require_row_identity: bool,
+) -> Result<LookupOutcome<ResolvedColumn<'db, DB, D>>, LookupError> {
+    if scope.unqualified_poison
+        || scope.opaque.iter().any(|entry| entry.entry_index < visible_entries)
+    {
+        return Ok(LookupOutcome::Found(ResolvedColumn { source: None, definition: opaque }));
+    }
+    let mut definitions = Vec::new();
+    let mut candidates = Vec::new();
+    let boundary = visible_merged_boundary(&scope.merged, column, visible_entries);
     if boundary.is_some() {
-        sources.push(None);
+        definitions.push(ResolvedColumn { source: None, definition: opaque });
     }
     let start = boundary.unwrap_or(0);
-    for base in bases.iter().filter(|base| base.entry_index >= start) {
-        if base_exposes_column(base, column) {
-            // A null-extended side contributes no row identity, but its
-            // name exposure still makes a bare reference ambiguous, as in
-            // PostgreSQL.
-            if require_row_identity && base.nullable {
-                sources.push(None);
-            } else {
-                sources.push(Some(base.table));
-            }
+    for base in scope
+        .bases
+        .iter()
+        .filter(|base| base.entry_index >= start && base.entry_index < visible_entries)
+    {
+        if let Some(base_column) = find_base_column(base, column) {
+            definitions.push(ResolvedColumn {
+                source: (!require_row_identity || !base.nullable).then_some(base.table),
+                definition: base_column.definition,
+            });
             candidates.push(render_table_candidate(base.table));
         }
     }
-    for relation in derived.iter().filter(|relation| relation.entry_index >= start) {
+    for relation in scope
+        .derived
+        .iter()
+        .filter(|relation| relation.entry_index >= start && relation.entry_index < visible_entries)
+    {
         match find_derived_column(&relation.shape.columns, column) {
-            Some(PassThrough::Table(table)) => {
-                if require_row_identity && relation.nullable {
-                    sources.push(None);
-                } else {
-                    sources.push(Some(table));
-                }
-                candidates.push(render_table_candidate(table));
-            }
-            Some(PassThrough::Computed) => {
-                sources.push(None);
+            Some(DerivedMatch::Column(found)) => {
+                definitions.push(ResolvedColumn {
+                    source: (!require_row_identity || !relation.nullable)
+                        .then_some(found.source)
+                        .flatten(),
+                    definition: found.definition,
+                });
                 candidates.push(relation_key_display(relation));
             }
-            // The relation itself exposes the name twice, which is
-            // ambiguous even as the only exposure.
-            Some(PassThrough::Ambiguous) => {
-                sources.push(None);
-                sources.push(None);
+            Some(DerivedMatch::Ambiguous) => {
+                definitions.push(ResolvedColumn { source: None, definition: opaque });
+                definitions.push(ResolvedColumn { source: None, definition: opaque });
                 candidates.push(relation_key_display(relation));
             }
             None => {}
         }
     }
-
-    match sources.as_slice() {
-        [] => Ok(None),
-        [source] => Ok(*source),
+    match definitions.as_slice() {
+        [] => Ok(LookupOutcome::SearchParent),
+        [definition] => Ok(LookupOutcome::Found(*definition)),
         _ => {
-            // Two relations expose the name, the PostgreSQL `column reference
-            // is ambiguous` case, whether or not either side is computed.
             candidates.sort_unstable();
             candidates.dedup();
             Err(LookupError::AmbiguousTableLookup { object_name: column.value.clone(), candidates })
@@ -1390,34 +2915,21 @@ fn unqualified_column_source<'db, DB: DatabaseLike>(
     }
 }
 
-/// Resolves a single column reference to the base table it passes through.
-/// A pass-through reaches into derived relations: a column of a CTE reference
-/// or a derived subquery answers the base table its projection passes the
-/// column through from, or nothing when the output column is computed or the
-/// set-operation arms disagree. With `require_row_identity`, a derived
-/// relation only answers through a body that preserves row identity, and a
-/// null-extended outer-join side never answers. A `schema.table.column`
-/// reference resolves like the two-part form after checking the leading part
-/// against the base table's own schema, as PostgreSQL does, and answers
-/// nothing for a CTE, a derived relation, or a schema mismatch. A reference
-/// of four or more parts answers nothing: the database part is not modeled.
-fn resolve_source<'db, DB: DatabaseLike>(
-    expr: &Expr,
-    bases: &[FromTableRef<'_, 'db, DB>],
-    derived: &[DerivedRelationRef<'_, 'db, DB>],
-    merged: &[MergedName],
-    has_opaque: bool,
+fn resolve_definition_local<'db, DB: DatabaseLike, D: Copy>(
+    scope: &FromScope<'_, 'db, DB, D>,
+    visible_entries: usize,
+    opaque: D,
+    expression: &Expr,
     require_row_identity: bool,
-) -> Result<Option<&'db DB::Table>, LookupError> {
-    match expr {
+) -> Result<LookupOutcome<ResolvedColumn<'db, DB, D>>, LookupError> {
+    match expression {
         Expr::Identifier(column) => {
-            unqualified_column_source(
-                bases,
-                derived,
-                merged,
-                has_opaque,
-                require_row_identity,
+            unqualified_definition_local(
+                scope,
+                visible_entries,
+                opaque,
                 column,
+                require_row_identity,
             )
         }
         Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
@@ -1425,101 +2937,154 @@ fn resolve_source<'db, DB: DatabaseLike>(
             let qualifier = &parts[0];
             let value = qualifier.value.as_str();
             let quoted = qualifier.quote_style.is_some();
-            if let Some(base) = base_for_qualifier(bases, value, quoted, require_row_identity) {
-                if base_exposes_column(base, column) {
-                    return Ok(Some(base.table));
-                }
-                return Ok(None);
+            if let Some(base) = base_for_qualifier(
+                &scope.bases,
+                value,
+                quoted,
+                require_row_identity,
+                visible_entries,
+            ) {
+                return Ok(match find_base_column(base, column) {
+                    Some(column) => {
+                        LookupOutcome::Found(ResolvedColumn {
+                            source: Some(base.table),
+                            definition: column.definition,
+                        })
+                    }
+                    None => LookupOutcome::Stop,
+                });
             }
-            let Some(relation) =
-                derived_for_qualifier(derived, value, quoted, require_row_identity)
-            else {
-                return Ok(None);
-            };
-            match find_derived_column(&relation.shape.columns, column) {
-                Some(PassThrough::Table(table)) => Ok(Some(table)),
-                Some(PassThrough::Ambiguous) => {
-                    Err(LookupError::AmbiguousTableLookup {
-                        object_name: column.value.clone(),
-                        candidates: vec![relation_key_display(relation)],
-                    })
-                }
-                Some(PassThrough::Computed) | None => Ok(None),
+            if let Some(relation) = derived_for_qualifier(
+                &scope.derived,
+                value,
+                quoted,
+                require_row_identity,
+                visible_entries,
+            ) {
+                return match find_derived_column(&relation.shape.columns, column) {
+                    Some(DerivedMatch::Column(column)) => {
+                        Ok(LookupOutcome::Found(ResolvedColumn {
+                            source: column.source,
+                            definition: column.definition,
+                        }))
+                    }
+                    Some(DerivedMatch::Ambiguous) => {
+                        Err(LookupError::AmbiguousTableLookup {
+                            object_name: column.value.clone(),
+                            candidates: vec![relation_key_display(relation)],
+                        })
+                    }
+                    None => Ok(LookupOutcome::Stop),
+                };
+            }
+            if scope.opaque.iter().any(|entry| {
+                entry.entry_index < visible_entries
+                    && opaque_qualifier_matches(entry.identity, &parts[..1])
+            }) {
+                Ok(LookupOutcome::Found(ResolvedColumn { source: None, definition: opaque }))
+            } else {
+                Ok(LookupOutcome::SearchParent)
             }
         }
         Expr::CompoundIdentifier(parts) if parts.len() == 3 => {
-            let Some(base) = base_for_qualified_name(
-                bases,
+            if let Some(base) = base_for_qualified_name(
+                &scope.bases,
                 parts[0].value.as_str(),
                 parts[0].quote_style.is_some(),
                 parts[1].value.as_str(),
                 parts[1].quote_style.is_some(),
                 require_row_identity,
-            ) else {
-                return Ok(None);
-            };
-            if base_exposes_column(base, &parts[2]) { Ok(Some(base.table)) } else { Ok(None) }
+                visible_entries,
+            ) {
+                return Ok(match find_base_column(base, &parts[2]) {
+                    Some(column) => {
+                        LookupOutcome::Found(ResolvedColumn {
+                            source: Some(base.table),
+                            definition: column.definition,
+                        })
+                    }
+                    None => LookupOutcome::Stop,
+                });
+            }
+            if scope.opaque.iter().any(|entry| {
+                entry.entry_index < visible_entries
+                    && opaque_qualifier_matches(entry.identity, &parts[..2])
+            }) {
+                Ok(LookupOutcome::Found(ResolvedColumn { source: None, definition: opaque }))
+            } else {
+                Ok(LookupOutcome::SearchParent)
+            }
         }
-        _ => Ok(None),
+        _ => Ok(LookupOutcome::Stop),
     }
 }
 
-/// Resolves a single projected expression to the base table it passes
-/// through, or `Ok(None)` when it is not a pass-through column.
-pub(crate) fn column_source<'db, DB: DatabaseLike>(
-    expr: &Expr,
-    bases: &[FromTableRef<'_, 'db, DB>],
-    derived: &[DerivedRelationRef<'_, 'db, DB>],
-    merged: &[MergedName],
-    has_opaque: bool,
+fn column_source<'db, DB: DatabaseLike, D: Copy>(
+    expression: &Expr,
+    scope: &FromScope<'_, 'db, DB, D>,
+    visible_entries: usize,
+    opaque: D,
+    require_row_identity: bool,
 ) -> Result<Option<&'db DB::Table>, LookupError> {
-    resolve_source(expr, bases, derived, merged, has_opaque, false)
+    if require_row_identity
+        && scope
+            .derived
+            .iter()
+            .filter(|relation| relation.entry_index < visible_entries)
+            .any(|relation| !relation.shape.row_preserving)
+    {
+        return Ok(None);
+    }
+    match resolve_definition_local(
+        scope,
+        visible_entries,
+        opaque,
+        expression,
+        require_row_identity,
+    )? {
+        LookupOutcome::Found(column) => Ok(column.source),
+        LookupOutcome::SearchParent | LookupOutcome::Stop => Ok(None),
+    }
 }
-
-/// Resolves a projected expression for the row-identity question: a derived
-/// relation carries an answer only through a row-preserving body, a
-/// null-extended outer-join side never carries one, and any non-preserving
-/// relation poisons unqualified references.
-pub(crate) fn row_identity_source<'db, DB: DatabaseLike>(
-    expr: &Expr,
-    bases: &[FromTableRef<'_, 'db, DB>],
-    derived: &[DerivedRelationRef<'_, 'db, DB>],
-    merged: &[MergedName],
-    has_opaque: bool,
-) -> Result<Option<&'db DB::Table>, LookupError> {
-    resolve_source(expr, bases, derived, merged, has_opaque, true)
-}
-
-/// What one `FROM` factor contributes: the output names it exposes and the
-/// wildcard plan entry naming what it pushed.
-type FactorContribution = (Vec<(String, bool)>, Vec<WildcardEntry>);
 
 /// A base table's output names with the alias column list applied
 /// positionally. PostgreSQL replaces the originals with the aliases (a
 /// partial list keeps the tail's own names). More aliases than columns is a
 /// mismatch PostgreSQL rejects, reported here as `None` so the relation
 /// stays opaque.
-fn aliased_output_names<'db, DB: DatabaseLike>(
+fn aliased_output_columns<'query, 'db, DB, P>(
     table: &'db DB::Table,
-    alias: Option<&TableAlias>,
+    alias: Option<AstRef<'query, 'db, TableAlias>>,
     database: &'db DB,
-) -> Result<Option<Vec<(String, bool)>>, LookupError> {
-    let mut output_names: Vec<(String, bool)> = table
+    profile: &mut P,
+) -> Result<Option<BaseColumns<'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let mut output_columns = table
         .columns(database)?
-        .map(|column| (column.column_name().to_string(), column.column_name_is_quoted()))
-        .collect();
+        .map(|column| {
+            BaseColumnRef {
+                name: column.column_name().to_string(),
+                quoted: column.column_name_is_quoted(),
+                source: table,
+                definition: profile.base_definition(table, column),
+            }
+        })
+        .collect::<Vec<_>>();
     if let Some(table_alias) = alias
-        && !table_alias.columns.is_empty()
+        && !table_alias.get().columns.is_empty()
     {
-        if table_alias.columns.len() > output_names.len() {
+        if table_alias.get().columns.len() > output_columns.len() {
             return Ok(None);
         }
-        for (column, alias_column) in output_names.iter_mut().zip(&table_alias.columns) {
-            alias_column.name.value.clone_into(&mut column.0);
-            column.1 = alias_column.name.quote_style.is_some();
+        for (column, alias_column) in output_columns.iter_mut().zip(&table_alias.get().columns) {
+            alias_column.name.value.clone_into(&mut column.name);
+            column.quoted = alias_column.name.quote_style.is_some();
         }
     }
-    Ok(Some(output_names))
+    Ok(Some(output_columns))
 }
 
 /// Records a `FROM` relation that names a view, deriving its output columns
@@ -1539,66 +3104,62 @@ fn aliased_output_names<'db, DB: DatabaseLike>(
 /// A reference reaching a view already being derived closes a cycle, which
 /// PostgreSQL accepts at creation and refuses only on read, so the reference
 /// stays opaque rather than recursing.
-fn collect_view_factor<'a, 'db, DB: DatabaseLike>(
-    name: &ObjectName,
-    alias: Option<&TableAlias>,
-    key_value: &'a str,
-    key_quoted: bool,
-    entry_index: usize,
+fn collect_view_factor<'query, 'db, DB, P>(
+    name: AstRef<'query, 'db, ObjectName>,
+    alias: Option<AstRef<'query, 'db, TableAlias>>,
+    key: RelationKey<'query, 'db>,
+    schema: Option<RelationKey<'query, 'db>>,
     deriving: Deriving<'_, 'db, DB>,
-    scope: &mut FromScope<'a, 'db, DB>,
-) -> Result<Option<FactorContribution>, LookupError> {
-    let Some(target) = target_name_from_object_name(name) else {
-        scope.has_opaque = true;
-        return Ok(None);
+    profile: &mut P,
+) -> Result<FactorContribution<'query, 'db, DB, P::Definition>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let Some(target) = target_name_from_object_name(name.get()) else {
+        return Ok(opaque_factor(OpaqueIdentity::Known { key, schema }));
     };
-
     let (view, row_preserving) =
         if let Some(view) = deriving.database.resolve_target_view(target.clone())? {
             (DerivingView::Plain(view), true)
         } else if let Some(view) = deriving.database.resolve_target_materialized_view(target)? {
-            // A snapshot answers what a column's table is, and never that its
-            // rows are that table's rows.
             (DerivingView::Materialized(view), false)
         } else {
-            scope.has_opaque = true;
-            return Ok(None);
+            return Ok(opaque_factor(OpaqueIdentity::Known { key, schema }));
         };
-
-    let shape = derive_view_shape(view, row_preserving, deriving)?;
+    let shape = derive_view_shape(view, row_preserving, deriving, profile)?;
     let shape = match alias {
-        Some(table_alias) => apply_alias_columns(shape, table_alias),
+        Some(table_alias) => apply_alias_columns(shape, table_alias.get()),
         None => shape,
     };
     let Some(shape) = shape else {
-        scope.has_opaque = true;
-        return Ok(None);
+        return Ok(opaque_factor(OpaqueIdentity::Known { key, schema }));
     };
-
-    let names = shape
-        .columns
-        .iter()
-        .map(|column| (column.name.clone(), column.quoted))
-        .collect::<Vec<(String, bool)>>();
-    let entry = WildcardEntry::Derived(scope.derived.len());
-    scope.derived.push(DerivedRelationRef {
-        key_value: Some(key_value),
-        key_quoted,
-        nullable: false,
-        entry_index,
-        shape,
-    });
-    Ok(Some((names, vec![entry])))
+    let names = derived_column_names(&shape.columns);
+    Ok(FactorContribution {
+        relation: RelationContribution::Derived(DerivedRelationRef {
+            key: Some(key),
+            shape,
+            nullable: false,
+            entry_index: 0,
+        }),
+        names: Some(names),
+    })
 }
 
 /// The output shape of a view's definition, with the view's own column list
 /// applied, or [`None`] when the definition's columns cannot be enumerated or
 /// the reference closes a cycle.
-fn derive_view_shape<'db, DB: DatabaseLike>(
+fn derive_view_shape<'query, 'db, DB, P>(
     view: DerivingView<'db, DB>,
     row_preserving: bool,
     deriving: Deriving<'_, 'db, DB>,
-) -> Result<Option<DerivedShape<'db, DB>>, LookupError> {
+    profile: &mut P,
+) -> Result<Option<DerivedShape<'query, 'db, DB, P::Definition>>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
     if deriving.is_deriving(view) {
         return Ok(None);
     }
@@ -1606,152 +3167,314 @@ fn derive_view_shape<'db, DB: DatabaseLike>(
         DerivingView::Plain(view) => (view.definition(), view.declared_column_names()),
         DerivingView::Materialized(view) => (view.definition(), view.declared_column_names()),
     };
-
     let frame = DerivingFrame { view, parent: deriving.views };
     let inner = Deriving { database: deriving.database, views: Some(&frame) };
-
     let output_names = (!declared.is_empty()).then_some(OutputNameSource::Declared(declared));
-    let Some(mut shape) = derive_query_shape(definition, &[], output_names, inner)? else {
+    let parent = profile.no_parent();
+    let Some(mut shape) = derive_query_shape(
+        AstRef::Database(definition),
+        &[],
+        output_names,
+        inner,
+        parent,
+        profile,
+    )?
+    else {
         return Ok(None);
     };
-    if !declared.is_empty() {
-        if declared.len() > shape.columns.len() {
-            // More names than columns is a mismatch PostgreSQL refuses at
-            // creation, so nothing can be said about what it exposes.
-            return Ok(None);
-        }
-        for (column, (declared_name, declared_quoted)) in
-            shape.columns.iter_mut().zip(declared.iter())
-        {
-            declared_name.clone_into(&mut column.name);
-            column.quoted = *declared_quoted;
-        }
+    if declared.len() > shape.columns.len() {
+        return Ok(None);
+    }
+    for (column, (declared_name, declared_quoted)) in shape.columns.iter_mut().zip(declared.iter())
+    {
+        declared_name.clone_into(&mut column.name);
+        column.quoted = *declared_quoted;
     }
     shape.row_preserving &= row_preserving;
     Ok(Some(shape))
+}
+fn derived_column_names<DB: DatabaseLike, D: Copy>(
+    columns: &[DerivedColumn<'_, '_, DB, D>],
+) -> Vec<(String, bool)> {
+    columns.iter().map(|column| (column.name.clone(), column.quoted)).collect()
+}
+
+fn alias_key<'query, 'db>(alias: AstRef<'query, 'db, TableAlias>) -> RelationKey<'query, 'db> {
+    RelationKey {
+        value: alias.map(|alias| alias.name.value.as_str()),
+        quoted: alias.get().name.quote_style.is_some(),
+    }
+}
+
+fn object_name_key<'query, 'db>(
+    name: AstRef<'query, 'db, ObjectName>,
+) -> Option<RelationKey<'query, 'db>> {
+    match name {
+        AstRef::Query(name) => {
+            let part = name.0.last()?.as_ident()?;
+            Some(RelationKey {
+                value: AstRef::Query(part.value.as_str()),
+                quoted: part.quote_style.is_some(),
+            })
+        }
+        AstRef::Database(name) => {
+            let part = name.0.last()?.as_ident()?;
+            Some(RelationKey {
+                value: AstRef::Database(part.value.as_str()),
+                quoted: part.quote_style.is_some(),
+            })
+        }
+    }
+}
+
+fn object_name_schema<'query, 'db>(
+    name: AstRef<'query, 'db, ObjectName>,
+) -> Option<RelationKey<'query, 'db>> {
+    match name {
+        AstRef::Query(name) if name.0.len() == 2 => {
+            let part = name.0.first()?.as_ident()?;
+            Some(RelationKey {
+                value: AstRef::Query(part.value.as_str()),
+                quoted: part.quote_style.is_some(),
+            })
+        }
+        AstRef::Database(name) if name.0.len() == 2 => {
+            let part = name.0.first()?.as_ident()?;
+            Some(RelationKey {
+                value: AstRef::Database(part.value.as_str()),
+                quoted: part.quote_style.is_some(),
+            })
+        }
+        AstRef::Query(_) | AstRef::Database(_) => None,
+    }
+}
+
+fn stored_schema_key<'query, DB: DatabaseLike>(table: &DB::Table) -> RelationKey<'query, '_> {
+    RelationKey {
+        value: AstRef::Database(table.table_schema().unwrap_or("public")),
+        quoted: table.table_schema().is_some() && table.table_schema_is_quoted(),
+    }
+}
+
+fn opaque_factor<'query, 'db, DB: DatabaseLike, D: Copy>(
+    identity: OpaqueIdentity<'query, 'db>,
+) -> FactorContribution<'query, 'db, DB, D> {
+    FactorContribution { relation: RelationContribution::Opaque(identity), names: None }
+}
+
+fn factor_alias<'query, 'db>(
+    factor: AstRef<'query, 'db, TableFactor>,
+) -> Option<AstRef<'query, 'db, TableAlias>> {
+    factor.try_map(|factor| {
+        match factor {
+            TableFactor::Table { alias, .. }
+            | TableFactor::Derived { alias, .. }
+            | TableFactor::TableFunction { alias, .. }
+            | TableFactor::Function { alias, .. }
+            | TableFactor::NestedJoin { alias, .. } => alias.as_ref(),
+            _ => None,
+        }
+    })
+}
+
+fn factor_name<'query, 'db>(
+    factor: AstRef<'query, 'db, TableFactor>,
+) -> Option<AstRef<'query, 'db, ObjectName>> {
+    factor.try_map(|factor| {
+        match factor {
+            TableFactor::Table { name, .. } | TableFactor::Function { name, .. } => Some(name),
+            _ => None,
+        }
+    })
+}
+
+fn derived_factor_query<'query, 'db>(
+    factor: AstRef<'query, 'db, TableFactor>,
+) -> Option<AstRef<'query, 'db, Query>> {
+    factor.try_map(|factor| {
+        match factor {
+            TableFactor::Derived { subquery, .. } => Some(subquery.as_ref()),
+            _ => None,
+        }
+    })
+}
+
+fn table_function_expression<'query, 'db>(
+    factor: AstRef<'query, 'db, TableFactor>,
+) -> Option<AstRef<'query, 'db, Expr>> {
+    factor.try_map(|factor| {
+        match factor {
+            TableFactor::TableFunction { expr, .. } => Some(expr),
+            _ => None,
+        }
+    })
+}
+
+fn collect_table_factor<'query, 'db, DB, P>(
+    factor: AstRef<'query, 'db, TableFactor>,
+    has_arguments: bool,
+    deriving: Deriving<'_, 'db, DB>,
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    profile: &mut P,
+) -> Result<FactorContribution<'query, 'db, DB, P::Definition>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    let Some(name) = factor_name(factor) else {
+        return Ok(opaque_factor(OpaqueIdentity::Anonymous));
+    };
+    let alias = factor_alias(factor);
+    let Some(key) = alias.map(alias_key).or_else(|| object_name_key(name)) else {
+        return Ok(opaque_factor(OpaqueIdentity::Anonymous));
+    };
+    let schema = alias.is_none().then(|| object_name_schema(name)).flatten();
+    if has_arguments {
+        return Ok(opaque_factor(OpaqueIdentity::Known { key, schema: None }));
+    }
+    if let Some(cte) = find_cte(name.get(), cte_scope) {
+        let shape = match (cte.shape.clone(), alias) {
+            (Some(shape), Some(table_alias)) => apply_alias_columns(Some(shape), table_alias.get()),
+            (shape, _) => shape,
+        };
+        let Some(shape) = shape else {
+            return Ok(opaque_factor(OpaqueIdentity::Known { key, schema: None }));
+        };
+        let names = derived_column_names(&shape.columns);
+        return Ok(FactorContribution {
+            relation: RelationContribution::Derived(DerivedRelationRef {
+                key: Some(key),
+                shape,
+                nullable: false,
+                entry_index: 0,
+            }),
+            names: Some(names),
+        });
+    }
+    let database = deriving.database;
+    let Some(table) = resolve_object_name(name.get(), database)? else {
+        return collect_view_factor(name, alias, key, schema, deriving, profile);
+    };
+    let Some(output_columns) = aliased_output_columns(table, alias, database, profile)? else {
+        return Ok(opaque_factor(OpaqueIdentity::Known { key, schema }));
+    };
+    let names = output_columns.iter().map(|column| (column.name.clone(), column.quoted)).collect();
+    Ok(FactorContribution {
+        relation: RelationContribution::Base(FromTableRef {
+            key,
+            schema_key: alias.is_none().then(|| stored_schema_key::<DB>(table)),
+            table,
+            nullable: false,
+            entry_index: 0,
+            output_columns,
+        }),
+        names: Some(names),
+    })
 }
 
 /// Records a single `FROM` table factor into the scope, returning the output
 /// column names it contributes and the wildcard plan entry naming what it
 /// pushed, or `None` when the factor is opaque.
-fn collect_factor<'a, 'db, DB: DatabaseLike>(
-    factor: &'a TableFactor,
+fn collect_factor<'query, 'db, DB, P>(
+    factor: AstRef<'query, 'db, TableFactor>,
     deriving: Deriving<'_, 'db, DB>,
-    cte_scope: &[CteShape<'a, 'db, DB>],
-    scope: &mut FromScope<'a, 'db, DB>,
-) -> Result<Option<FactorContribution>, LookupError> {
-    let database = deriving.database;
-    let entry_index = scope.from_entry_count;
-    scope.from_entry_count += 1;
-    let names_of = |shape: &DerivedShape<'db, DB>| {
-        shape
-            .columns
-            .iter()
-            .map(|column| (column.name.clone(), column.quoted))
-            .collect::<Vec<(String, bool)>>()
-    };
-    match factor {
-        TableFactor::Table { name, alias, args, .. } => {
-            let (key_value, key_quoted) = match alias {
-                Some(table_alias) => {
-                    (table_alias.name.value.as_str(), table_alias.name.quote_style.is_some())
-                }
-                None => object_name_last_part(name).unwrap_or(("", false)),
-            };
-            if args.is_some() {
-                // A table-valued function call: its columns are not knowable
-                // from the SQL text.
-                scope.has_opaque = true;
-                return Ok(None);
-            }
-            if let Some(cte) = find_cte(name, cte_scope) {
-                // A CTE reference is not a base table, even if a base table
-                // shares the CTE's name.
-                let shape = match (cte.shape.clone(), alias) {
-                    (Some(shape), Some(table_alias)) => {
-                        apply_alias_columns(Some(shape), table_alias)
-                    }
-                    (shape, _) => shape,
-                };
-                let Some(shape) = shape else {
-                    scope.has_opaque = true;
-                    return Ok(None);
-                };
-                let names = names_of(&shape);
-                let entry = WildcardEntry::Derived(scope.derived.len());
-                scope.derived.push(DerivedRelationRef {
-                    key_value: Some(key_value),
-                    key_quoted,
-                    nullable: false,
-                    entry_index,
-                    shape,
-                });
-                return Ok(Some((names, vec![entry])));
-            }
-            let Some(table) = resolve_object_name(name, database)? else {
-                // A view is a relation too, and its definition sits in the
-                // database rather than in this statement, so its output
-                // columns are derived from there and recorded exactly as a
-                // CTE reference's are.
-                return collect_view_factor(
-                    name,
-                    alias.as_ref(),
-                    key_value,
-                    key_quoted,
-                    entry_index,
-                    deriving,
-                    scope,
-                );
-            };
-            let Some(output_names) = aliased_output_names(table, alias.as_ref(), database)? else {
-                scope.has_opaque = true;
-                return Ok(None);
-            };
-            let entry = WildcardEntry::Base(scope.bases.len());
-            scope.bases.push(FromTableRef {
-                key_value,
-                key_quoted,
-                table,
-                nullable: false,
-                entry_index,
-                output_names: output_names.clone(),
-            });
-            Ok(Some((output_names, vec![entry])))
+    cte_scope: &[CteShape<'query, 'db, DB, P::Definition>],
+    inherited_parent: P::Cursor,
+    local_parent: P::Cursor,
+    profile: &mut P,
+) -> Result<FactorContribution<'query, 'db, DB, P::Definition>, LookupError>
+where
+    DB: DatabaseLike,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    match factor.get() {
+        TableFactor::Table { args, .. } => {
+            collect_table_factor(factor, args.is_some(), deriving, cte_scope, profile)
         }
-        TableFactor::Derived { subquery, alias, .. } => {
-            let output_names = alias.as_ref().and_then(|alias| OutputNameSource::from_alias(alias));
-            let body = derive_query_shape(subquery, cte_scope, output_names, deriving)?;
-            // A derived table written without an alias (accepted since
-            // PostgreSQL 16) has no key a reference could qualify with, but
-            // its columns still answer bare references.
+        TableFactor::Derived { lateral, .. } => {
+            let Some(subquery) = derived_factor_query(factor) else {
+                return Ok(opaque_factor(OpaqueIdentity::Anonymous));
+            };
+            let alias = factor_alias(factor);
+            let output_names = alias.and_then(OutputNameSource::from_alias);
+            let parent = if *lateral { local_parent } else { inherited_parent };
+            let body =
+                derive_query_shape(subquery, cte_scope, output_names, deriving, parent, profile)?;
             let shape = match alias {
-                Some(table_alias) => apply_alias_columns(body, table_alias),
+                Some(table_alias) => apply_alias_columns(body, table_alias.get()),
                 None => body,
             };
             let Some(shape) = shape else {
-                scope.has_opaque = true;
-                return Ok(None);
+                return Ok(opaque_factor(match alias {
+                    Some(alias) => OpaqueIdentity::Known { key: alias_key(alias), schema: None },
+                    None => OpaqueIdentity::Anonymous,
+                }));
             };
-            let names = names_of(&shape);
-            let entry = WildcardEntry::Derived(scope.derived.len());
-            scope.derived.push(DerivedRelationRef {
-                key_value: alias.as_ref().map(|table_alias| table_alias.name.value.as_str()),
-                key_quoted: alias
-                    .as_ref()
-                    .is_some_and(|table_alias| table_alias.name.quote_style.is_some()),
-                nullable: false,
-                entry_index,
-                shape,
+            let names = derived_column_names(&shape.columns);
+            Ok(FactorContribution {
+                relation: RelationContribution::Derived(DerivedRelationRef {
+                    key: alias.map(alias_key),
+                    shape,
+                    nullable: false,
+                    entry_index: 0,
+                }),
+                names: Some(names),
+            })
+        }
+        TableFactor::TableFunction { .. } => {
+            let alias = factor_alias(factor);
+            let Some(expression) = table_function_expression(factor) else {
+                return Ok(opaque_factor(OpaqueIdentity::Anonymous));
+            };
+            let function_name = match expression {
+                AstRef::Query(Expr::Function(function)) => Some(AstRef::Query(&function.name)),
+                AstRef::Database(Expr::Function(function)) => {
+                    Some(AstRef::Database(&function.name))
+                }
+                AstRef::Query(_) | AstRef::Database(_) => None,
+            };
+            let key = alias.map(alias_key).or_else(|| function_name.and_then(object_name_key));
+            Ok(opaque_factor(key.map_or(OpaqueIdentity::Anonymous, |key| {
+                OpaqueIdentity::Known { key, schema: None }
+            })))
+        }
+        TableFactor::Function { .. } => {
+            let Some(name) = factor_name(factor) else {
+                return Ok(opaque_factor(OpaqueIdentity::Anonymous));
+            };
+            let alias = factor_alias(factor);
+            let key = alias.map(alias_key).or_else(|| object_name_key(name));
+            Ok(opaque_factor(key.map_or(OpaqueIdentity::Anonymous, |key| {
+                OpaqueIdentity::Known { key, schema: None }
+            })))
+        }
+        TableFactor::NestedJoin { .. } => {
+            let identity = factor_alias(factor).map_or(OpaqueIdentity::AnyQualifier, |alias| {
+                OpaqueIdentity::Known { key: alias_key(alias), schema: None }
             });
-            Ok(Some((names, vec![entry])))
+            Ok(opaque_factor(identity))
         }
-        // Nested joins, standalone function factors, and the rest stay
-        // opaque: their columns are not enumerated here.
-        _ => {
-            scope.has_opaque = true;
-            Ok(None)
-        }
+        _ => Ok(opaque_factor(OpaqueIdentity::Anonymous)),
     }
+}
+
+pub(crate) fn build_definition_graph<'query, 'db, DB: DatabaseLike>(
+    query: &'query Query,
+    database: &'db DB,
+) -> Result<(definition_graph::DefinitionGraph<'query, 'db, DB>, ScopeCursor), LookupError> {
+    let deriving = Deriving::of(database);
+    let mut profile = DefinitionDerivation::new();
+    let parent = profile.no_parent();
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return Ok(profile.empty_scope());
+    };
+    let cte_scope = match &query.with {
+        Some(with) => derive_cte_shapes(AstRef::Query(with), &[], deriving, parent, &mut profile)?,
+        None => Vec::new(),
+    };
+    let root =
+        collect_select_from(AstRef::Query(select), &cte_scope, deriving, parent, &mut profile)?;
+    Ok(profile.finish(root))
 }
 
 impl<DB: DatabaseLike> DQLLike<DB> for Query {
@@ -1777,15 +3500,9 @@ impl<DB: DatabaseLike> DQLLike<DB> for Query {
             GroupByExpr::Expressions(_, _) => {}
         }
 
-        let Some(FromScope { bases, derived, merged, from_entry_count, has_opaque, .. }) =
-            collect_from_clause(self, database)?
-        else {
+        let Some(scope) = collect_source_from_clause(self, database)? else {
             return Ok(None);
         };
-
-        // Rows may only pass through a derived relation whose body preserves
-        // row identity. Any other one poisons unqualified references here.
-        let opaque = has_opaque || derived.iter().any(|relation| !relation.shape.row_preserving);
 
         let mut source: Option<&'db DB::Table> = None;
         for item in &select.projection {
@@ -1800,10 +3517,10 @@ impl<DB: DatabaseLike> DQLLike<DB> for Query {
                 SelectItem::Wildcard(options) => {
                     if wildcard_replaces_values(options) {
                         None
-                    } else if from_entry_count == 1 && bases.len() == 1 {
-                        Some(bases[0].table)
-                    } else if from_entry_count == 1 && derived.len() == 1 {
-                        single_source_relation(&derived[0], database)
+                    } else if scope.from_entry_count == 1 && scope.bases.len() == 1 {
+                        Some(scope.bases[0].table)
+                    } else if scope.from_entry_count == 1 && scope.derived.len() == 1 {
+                        single_source_relation(&scope.derived[0], database)
                     } else {
                         None
                     }
@@ -1814,7 +3531,12 @@ impl<DB: DatabaseLike> DQLLike<DB> for Query {
                 SelectItem::QualifiedWildcard(kind, _) => {
                     match kind {
                         SelectItemQualifiedWildcardKind::ObjectName(object_name) => {
-                            match resolve_wildcard_target(&bases, &derived, object_name, true) {
+                            match resolve_wildcard_target(
+                                &scope.bases,
+                                &scope.derived,
+                                object_name,
+                                true,
+                            ) {
                                 Some(WildcardTarget::Base(base)) => Some(base.table),
                                 Some(WildcardTarget::Derived(relation)) => {
                                     single_source_relation(relation, database)
@@ -1826,7 +3548,7 @@ impl<DB: DatabaseLike> DQLLike<DB> for Query {
                     }
                 }
                 SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                    row_identity_source(expr, &bases, &derived, &merged, opaque)?
+                    column_source(expr, &scope, scope.from_entry_count, (), true)?
                 }
                 // Spark's `expr AS (a, b)` names several outputs for one
                 // expression, which is not a single pass-through column.
