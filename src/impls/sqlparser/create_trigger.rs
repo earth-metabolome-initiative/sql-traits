@@ -95,3 +95,37 @@ impl TriggerLike for CreateTrigger {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::{
+        ast::{Ident, ObjectNamePart, ObjectNamePartFunction},
+        dialect::PostgreSqlDialect,
+    };
+
+    use crate::{
+        prelude::ParserDB,
+        traits::{DatabaseLike, FunctionLike, TriggerLike},
+    };
+
+    #[test]
+    fn dynamic_and_empty_trigger_function_names_are_exposed() {
+        let database = ParserDB::parse::<PostgreSqlDialect>(
+            "CREATE TABLE docs(id INT);
+             CREATE FUNCTION touch() RETURNS TRIGGER AS 'BEGIN END' LANGUAGE plpgsql;
+             CREATE TRIGGER docs_touch AFTER INSERT ON docs
+             FOR EACH ROW EXECUTE FUNCTION touch();",
+        )
+        .expect("schema parses");
+        let mut trigger = database.triggers().next().expect("trigger exists").clone();
+        let function_name = &mut trigger.exec_body.as_mut().expect("execution body").func_desc.name;
+        function_name.0 = vec![ObjectNamePart::Function(ObjectNamePartFunction {
+            name: Ident::with_quote('"', "touch"),
+            args: Vec::new(),
+        })];
+        assert_eq!(trigger.function_name(), Some("touch"));
+        assert_eq!(trigger.function(&database).map(FunctionLike::name), Some("touch"));
+        trigger.exec_body.as_mut().expect("execution body").func_desc.name.0.clear();
+        assert_eq!(trigger.function_name(), None);
+    }
+}

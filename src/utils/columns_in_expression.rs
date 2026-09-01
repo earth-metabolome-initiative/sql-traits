@@ -124,7 +124,7 @@ mod tests {
     use sqlparser::{
         ast::{
             BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident,
-            ObjectName, ObjectNamePart, Statement,
+            ObjectName, ObjectNamePart, SelectItem, SetExpr, Statement,
         },
         dialect::GenericDialect,
         parser::Parser,
@@ -334,5 +334,21 @@ mod tests {
             columns_in_expression(&expr, "t", &columns).expect("tuple of known columns parses");
         let names: Vec<&str> = result.iter().map(ColumnLike::column_name).collect();
         assert_eq!(names, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn in_subqueries_only_read_the_outer_expression() {
+        let column = create_column("a");
+        let statements = Parser::parse_sql(&GenericDialect {}, "SELECT a IN (SELECT missing)")
+            .expect("query parses");
+        let Statement::Query(query) = &statements[0] else { panic!("expected a query") };
+        let SetExpr::Select(select) = query.body.as_ref() else { panic!("expected a select") };
+        let SelectItem::UnnamedExpr(expression) = &select.projection[0] else {
+            panic!("expected an expression")
+        };
+
+        let result = columns_in_expression(expression, "t", &[column]).expect("column resolves");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].column_name(), "a");
     }
 }

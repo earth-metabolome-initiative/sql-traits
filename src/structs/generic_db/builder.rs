@@ -710,3 +710,31 @@ impl<P: SchemaProfile> From<GenericDBBuilder<P>> for GenericDB<P> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        impls::SqlparserDialect,
+        structs::{ParserDBBuilder, SqlparserProfile},
+    };
+
+    #[test]
+    fn empty_bulk_additions_preserve_every_collection() {
+        let builder = ParserDBBuilder::new("catalog".to_string(), SqlparserDialect::Generic)
+            .add_tables(core::iter::empty())
+            .expect("empty tables are accepted")
+            .add_columns(core::iter::empty())
+            .add_indices(core::iter::empty())
+            .add_unique_indices(core::iter::empty())
+            .add_foreign_keys(core::iter::empty())
+            .add_policies(core::iter::empty())
+            .add_functions(core::iter::empty())
+            .add_roles(core::iter::empty())
+            .add_schemas(core::iter::empty())
+            .add_table_grants(core::iter::empty())
+            .add_column_grants(core::iter::empty());
+
+        let _: super::GenericDB<SqlparserProfile> = builder.into();
+    }
+}

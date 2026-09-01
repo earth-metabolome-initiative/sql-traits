@@ -4019,11 +4019,20 @@ impl<DB: DatabaseLike> DQLLike<DB> for Query {
 
 #[cfg(test)]
 mod tests {
-    use sqlparser::{ast::Statement, dialect::GenericDialect, parser::Parser};
+    use sqlparser::{
+        ast::{Ident, SelectItem, SetExpr, Statement, Table},
+        dialect::{BigQueryDialect, Dialect, GenericDialect},
+        parser::Parser,
+    };
 
+    use super::{
+        AstRef, DerivationProfile, OpaqueIdentity, RelationKey, SourceDerivation, cte_dependencies,
+        opaque_qualifier_matches, opaque_qualifier_matches_key, set_expr_ref,
+    };
     use crate::{
         errors::LookupError,
         prelude::ParserDB,
+        structs::{ColumnDefinition, ColumnScope},
         traits::{DQLLike, TableLike},
     };
 
@@ -4053,12 +4062,16 @@ mod tests {
         ParserDB::parse::<GenericDialect>(SCHEMA).expect("schema parses")
     }
 
-    fn query_of(sql: &str) -> sqlparser::ast::Query {
-        let mut statements = Parser::parse_sql(&GenericDialect {}, sql).expect("query parses");
+    fn query_of_with<D: Dialect>(dialect: &D, sql: &str) -> sqlparser::ast::Query {
+        let mut statements = Parser::parse_sql(dialect, sql).expect("query parses");
         match statements.pop().expect("one statement") {
             Statement::Query(query) => *query,
             other => panic!("expected a query, got {other:?}"),
         }
+    }
+
+    fn query_of(sql: &str) -> sqlparser::ast::Query {
+        query_of_with(&GenericDialect {}, sql)
     }
 
     fn source_name(sql: &str, db: &ParserDB) -> Option<String> {
@@ -4078,6 +4091,102 @@ mod tests {
              UNION ALL SELECT t{depth}.id FROM t{depth} WHERE false",
             nested_recursive_cte_body(inner)
         )
+    }
+
+    #[test]
+    fn source_profile_and_non_select_bodies_take_their_explicit_fallbacks() {
+        fn exercise_source_profile<'query, 'db>(
+            select: &'query sqlparser::ast::Select,
+            _database: &'db ParserDB,
+        ) {
+            let mut profile = SourceDerivation;
+            assert!(
+                <SourceDerivation as DerivationProfile<'query, 'db, ParserDB>>::cursor_for_select(
+                    &profile,
+                    AstRef::Query(select),
+                )
+                .is_none()
+            );
+            <SourceDerivation as DerivationProfile<'query, 'db, ParserDB>>::set_scope_owners_since(
+                &mut profile,
+                (),
+                (),
+                (),
+            );
+        }
+
+        let database = schema_db();
+        let select_query = query_of("SELECT id FROM users");
+        let SetExpr::Select(select) = select_query.body.as_ref() else {
+            panic!("expected a select body")
+        };
+        exercise_source_profile(select, &database);
+
+        let mut table_query = query_of("SELECT id FROM users");
+        *table_query.body = SetExpr::Table(Box::new(Table {
+            table_name: Some("users".to_string()),
+            schema_name: None,
+        }));
+        assert!(matches!(
+            set_expr_ref(AstRef::Query(table_query.body.as_ref())),
+            super::SetExprRef::Other
+        ));
+        assert!(matches!(
+            set_expr_ref(AstRef::Database(table_query.body.as_ref())),
+            super::SetExprRef::Other
+        ));
+        assert!(
+            super::collect_source_from_clause(&table_query, &database)
+                .expect("source collection succeeds")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn qualified_expression_wildcards_are_walked_before_the_shape_stays_opaque() {
+        let database = schema_db();
+        let query = query_of_with(
+            &BigQueryDialect {},
+            "SELECT d.x FROM (\
+                 SELECT f((SELECT id FROM users)).field.*, id AS x FROM users\
+             ) AS d",
+        );
+        let scope = ColumnScope::from_query(&query, &database).expect("scope builds");
+        let SetExpr::Select(select) = query.body.as_ref() else { panic!("expected a select body") };
+        let SelectItem::UnnamedExpr(reference) = &select.projection[0] else {
+            panic!("expected an expression projection")
+        };
+        assert!(matches!(
+            scope.resolve_column_definition(reference).expect("definition resolves"),
+            Some(ColumnDefinition::Opaque)
+        ));
+    }
+
+    #[test]
+    fn private_fallback_helpers_reject_unrepresentable_names() {
+        let key = RelationKey { value: AstRef::Query("table"), quoted: false };
+        let qualifier = [Ident::new("catalog"), Ident::new("schema"), Ident::new("table")];
+        assert!(!opaque_qualifier_matches_key(key, None, &qualifier));
+        assert!(!opaque_qualifier_matches(&OpaqueIdentity::Anonymous, &qualifier));
+
+        let ast = AstRef::Query("value");
+        assert_eq!(ast.clone().get(), "value");
+
+        let cte = &query_of("WITH c AS (SELECT 1 FROM schema.c) SELECT * FROM c")
+            .with
+            .expect("with clause")
+            .cte_tables[0];
+        assert_eq!(cte_dependencies(cte, &[]), Vec::<bool>::new());
+        let empty = sqlparser::ast::ObjectName(Vec::new());
+        let mut visitor = super::CteDependencyVisitor {
+            candidates: &[],
+            shadowed: Vec::new(),
+            dependencies: Vec::new(),
+        };
+        assert!(matches!(
+            sqlparser::ast::Visitor::pre_visit_relation(&mut visitor, &empty),
+            core::ops::ControlFlow::Continue(())
+        ));
     }
 
     #[test]

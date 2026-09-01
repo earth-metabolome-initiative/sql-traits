@@ -536,12 +536,17 @@ mod tests {
 
     use super::{
         object_name_identifiers, object_name_last_part, render_table_candidate,
-        resolve_object_name, resolve_table_object_name_in_iter,
+        render_view_candidate, resolve_object_name, resolve_table_object_name_in_iter,
         resolve_table_object_name_on_search_path_in_iter, resolve_target_from_candidates,
-        schema_from_object_name, table_matches_object_name, table_matches_target,
-        target_name_of_object_name,
+        resolve_view_on_search_path_in_iter, schema_from_object_name, table_matches_object_name,
+        table_matches_target, target_name_of_object_name,
     };
-    use crate::{errors::LookupError, prelude::ParserDB, structs::TargetName, traits::TableLike};
+    use crate::{
+        errors::LookupError,
+        prelude::ParserDB,
+        structs::TargetName,
+        traits::{DatabaseLike, TableLike},
+    };
 
     fn ident(value: &str, quoted: bool) -> Ident {
         if quoted { Ident::with_quote('"', value) } else { Ident::new(value) }
@@ -822,5 +827,25 @@ mod tests {
         assert_eq!(result.name(), "");
         assert!(!result.name_is_quoted());
         assert!(result.schema().is_none());
+    }
+
+    #[test]
+    fn views_render_and_resolve_on_the_search_path() {
+        let db = ParserDB::parse::<GenericDialect>(
+            "CREATE SCHEMA s;
+             CREATE TABLE t(id INT);
+             CREATE VIEW s.v AS SELECT id FROM t;",
+        )
+        .expect("schema parses");
+        let view = db.view(Some("s"), "v").expect("view exists");
+        assert_eq!(render_view_candidate(view), "s.v");
+        let resolved = resolve_view_on_search_path_in_iter(
+            db.views(),
+            &TargetName::new("v", false),
+            [("s", false)].into_iter(),
+        )
+        .expect("view resolves")
+        .expect("view matches");
+        assert_eq!(render_view_candidate(resolved), "s.v");
     }
 }

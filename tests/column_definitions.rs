@@ -11,7 +11,8 @@ use sqlparser::{
     },
     dialect::{
         BigQueryDialect, ClickHouseDialect, DatabricksDialect, Dialect, GenericDialect,
-        HiveDialect, PostgreSqlDialect, SnowflakeDialect,
+        HiveDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect, RedshiftSqlDialect,
+        SnowflakeDialect,
     },
     parser::Parser,
 };
@@ -109,6 +110,9 @@ fn recursive_ctes_with_non_enumerable_arms_remain_opaque() {
          ) SELECT c.x FROM c",
         "WITH RECURSIVE c(x) AS (\
              SELECT 1 UNION ALL VALUES (2)\
+         ) SELECT c.x FROM c",
+        "WITH RECURSIVE c(x, y) AS (\
+             SELECT 1 UNION ALL SELECT x FROM c\
          ) SELECT c.x FROM c",
     ] {
         let query = query(sql);
@@ -956,7 +960,7 @@ fn assert_injected_container_children_indexed(query: &Query, query_count: usize)
         context: Some(query.to_string()),
     };
     assert!(matches!(subquery.visit(&mut oracle), ControlFlow::Continue(())));
-    assert_eq!(oracle.select_count, query_count);
+    assert_eq!(oracle.select_count, query_count, "{query}");
 }
 
 fn assert_container_fixtures(fixtures: Vec<(Query, bool)>) {
@@ -981,6 +985,7 @@ fn assert_dialect_expression_children_indexed<D: Dialect>(dialect: &D, expressio
 fn omitted_query_containers_follow_the_sqlparser_visitor() {
     let mut fixtures: Vec<_> = [
         "SELECT d.x FROM (SELECT needle AS x FROM a ORDER BY needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a ORDER BY ALL) AS d",
         "SELECT d.x FROM (SELECT needle AS x FROM a LIMIT needle OFFSET needle) AS d",
         "SELECT d.x FROM (SELECT needle AS x FROM a LIMIT needle, needle) AS d",
     ]
@@ -1007,6 +1012,16 @@ fn omitted_query_containers_follow_the_sqlparser_visitor() {
         ),
         true,
     ));
+    fixtures.push((
+        query_with(
+            &ClickHouseDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a \
+                 ORDER BY needle WITH FILL INTERPOLATE (value AS needle)\
+             ) AS d",
+        ),
+        true,
+    ));
     fixtures.extend(
         [
             "LIMIT needle OFFSET needle",
@@ -1019,11 +1034,15 @@ fn omitted_query_containers_follow_the_sqlparser_visitor() {
             "TABLESAMPLE SYSTEM (needle) OFFSET needle",
             "CALL f(needle)",
             "PIVOT(SUM(needle) FOR id IN (1))",
+            "UNPIVOT(revenue FOR quarter IN (Q1, Q2))",
             "JOIN b ON needle",
+            "UNION ALL (SELECT needle FROM a)",
+            "INTERSECT DISTINCT (SELECT needle FROM a)",
+            "EXCEPT DISTINCT (SELECT needle FROM a)",
         ]
         .into_iter()
         .map(|pipe| {
-            (query(&format!("SELECT d.x FROM (SELECT needle AS x FROM a |> {pipe}) AS d")), true)
+            (query(&format!("SELECT d.x FROM (SELECT needle x FROM a |> {pipe}) AS d")), true)
         }),
     );
     let (values, values_count) = inject_nested_queries(
@@ -1038,10 +1057,11 @@ fn omitted_query_containers_follow_the_sqlparser_visitor() {
 fn omitted_select_containers_follow_the_sqlparser_visitor() {
     let mut fixtures: Vec<_> = [
         "SELECT d.x FROM (SELECT DISTINCT ON (needle) needle AS x FROM a) AS d",
+        "SELECT d.x FROM (SELECT needle AS x, a.* FROM a) AS d",
         "SELECT d.x FROM (\
              SELECT (\
                  SELECT a.id FROM a \
-                 START WITH needle CONNECT BY needle\
+                 START WITH needle CONNECT BY needle = PRIOR untouched\
              ) AS x\
          ) AS d",
         "SELECT d.x FROM (SELECT TOP (needle) needle AS x FROM a) AS d",
@@ -1071,10 +1091,27 @@ fn omitted_select_containers_follow_the_sqlparser_visitor() {
     assert_container_fixtures(fixtures);
 }
 
+#[allow(clippy::too_many_lines)]
 #[test]
 fn omitted_relation_containers_follow_the_sqlparser_visitor() {
     let mut fixtures: Vec<_> = [
         "SELECT d.x FROM (SELECT needle AS x FROM a JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a INNER JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a LEFT OUTER JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a RIGHT OUTER JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a FULL OUTER JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a CROSS JOIN b) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a CROSS APPLY b) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a OUTER APPLY b) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a SEMI JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a LEFT SEMI JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a RIGHT SEMI JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a ANTI JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a LEFT ANTI JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a RIGHT ANTI JOIN b ON needle) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a ARRAY JOIN b) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a LEFT ARRAY JOIN b) AS d",
+        "SELECT d.x FROM (SELECT needle AS x FROM a INNER ARRAY JOIN b) AS d",
         "SELECT d.x FROM (SELECT needle AS x FROM a, f(needle) AS f) AS d",
         "SELECT d.x FROM (SELECT needle AS x FROM a, TABLE(needle) AS f) AS d",
         "SELECT d.x FROM (SELECT needle AS x FROM a, LATERAL f(needle) AS f) AS d",
@@ -1115,6 +1152,18 @@ fn omitted_relation_containers_follow_the_sqlparser_visitor() {
         .map(|sql| (query(sql), false)),
     );
     fixtures.push((
+        query(
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM XMLTABLE(\
+                     XMLNAMESPACES('needle' AS n), needle PASSING needle \
+                     COLUMNS ordinal FOR ORDINALITY\
+                 ) AS xt\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
         query_with(
             &PostgreSqlDialect {},
             "SELECT d.x FROM (\
@@ -1146,6 +1195,111 @@ fn omitted_relation_containers_follow_the_sqlparser_visitor() {
             "SELECT d.x FROM (\
                  SELECT needle AS x \
                  FROM a FOR SYSTEM_TIME AS OF needle\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &ClickHouseDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM table_function(needle, SETTINGS setting = needle)\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query(
+            "SELECT d.x FROM (\
+                 SELECT needle x \
+                 FROM a AS sampled TABLESAMPLE SYSTEM (needle)\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &MySqlDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM JSON_TABLE(needle, '$[*]' COLUMNS(value INT PATH '$')) AS jt\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &MsSqlDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x \
+                 FROM OPENJSON(needle) WITH (value INT) AS jt\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &RedshiftSqlDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a, UNPIVOT needle AS value AT attribute\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &MySqlDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a STRAIGHT_JOIN b ON needle\
+             ) AS d",
+        ),
+        true,
+    ));
+    fixtures.push((
+        query_with(
+            &SnowflakeDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a ASOF JOIN b \
+                 MATCH_CONDITION (needle >= needle) ON needle\
+             ) AS d",
+        ),
+        true,
+    ));
+    fixtures.push((
+        query_with(
+            &SnowflakeDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a CHANGES(INFORMATION => DEFAULT) \
+                 AT(TIMESTAMP => TO_TIMESTAMP_TZ('needle')) \
+                 END(TIMESTAMP => TO_TIMESTAMP_TZ('needle'))\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &SnowflakeDialect {},
+            "SELECT d.x FROM (SELECT needle AS x FROM a[needle]) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &SnowflakeDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a \
+                 PIVOT(SUM(needle) FOR id IN (ANY ORDER BY needle))\
+             ) AS d",
+        ),
+        false,
+    ));
+    fixtures.push((
+        query_with(
+            &SnowflakeDialect {},
+            "SELECT d.x FROM (\
+                 SELECT needle AS x FROM a \
+                 PIVOT(SUM(needle) FOR id IN (SELECT needle FROM a))\
              ) AS d",
         ),
         false,
@@ -1238,9 +1392,16 @@ fn expression_container_children_follow_the_sqlparser_visitor() {
         "TRIM(needle, needle, needle)",
         "ARRAY[needle, needle]",
         "(needle, needle)",
+        "(needle, untouched)",
+        "(needle, a.payload)",
+        "(needle, 1)",
+        "(needle, DATE '2020-01-01')",
         "STRUCT(needle AS value)",
         "COALESCE(needle, needle)",
         "f(named => needle)",
+        "f(needle).field",
+        "f(needle, *)",
+        "f(needle, a.*)",
         "f(needle := needle)",
         "ARRAY_AGG(needle ORDER BY needle LIMIT needle)",
         "ANY_VALUE(needle HAVING MAX needle)",
@@ -1290,6 +1451,7 @@ fn dialect_specific_expression_children_follow_the_sqlparser_visitor() {
     );
     assert_dialect_expression_children_indexed(&DatabricksDialect {}, &["f(x -> needle)"]);
 }
+
 #[test]
 fn hive_clause_children_follow_the_sqlparser_visitor() {
     for (clause, expected_queries) in [
@@ -1477,6 +1639,42 @@ fn stored_view_nested_scope_uses_database_ast_references() {
         .as_deref(),
         Some("a")
     );
+}
+
+#[test]
+fn stored_view_query_containers_use_database_ast_references() {
+    let db = ParserDB::parse::<GenericDialect>(
+        "CREATE TABLE a(payload TEXT);
+         CREATE TABLE b(payload TEXT);
+         CREATE VIEW nested_containers AS
+         SELECT (SELECT a.payload FROM a) AS x
+         FROM a
+         JOIN b ON EXISTS (SELECT a.payload FROM a)
+         CROSS JOIN UNNEST(ARRAY[(SELECT a.payload FROM a)]) AS u
+         WHERE EXISTS (VALUES ((SELECT a.payload FROM a)))
+         ORDER BY (SELECT a.payload FROM a)
+         LIMIT (SELECT a.payload FROM a)
+         OFFSET (SELECT a.payload FROM a);",
+    )
+    .expect("schema parses");
+    let query = query("SELECT nested_containers.x FROM nested_containers");
+    let scope = ColumnScope::from_query(&query, &db).expect("scope builds");
+    let Some(ColumnDefinition::Expression { scope: defining_scope, .. }) = scope
+        .resolve_column_definition(&reference("nested_containers.x"))
+        .expect("output definition resolves")
+    else {
+        panic!("expected an expression definition")
+    };
+    let definition = db.view(None, "nested_containers").expect("view exists").definition();
+    let mut oracle = IndexedSelectOracle {
+        scope: defining_scope,
+        select_count: 0,
+        resolve_input: true,
+        injected_only: true,
+        context: Some(definition.to_string()),
+    };
+    assert!(matches!(definition.visit(&mut oracle), ControlFlow::Continue(())));
+    assert_eq!(oracle.select_count, 7);
 }
 #[test]
 fn stored_view_table_functions_use_database_ast_references() {

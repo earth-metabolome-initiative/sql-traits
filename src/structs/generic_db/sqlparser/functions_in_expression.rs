@@ -123,7 +123,10 @@ mod tests {
     //! the shapes that drive the un-tested branches: no-arg calls, nested
     //! calls, and call-twice-dedup.
 
-    use sqlparser::dialect::GenericDialect;
+    use sqlparser::{
+        ast::{Ident, ObjectName, ObjectNamePart, ObjectNamePartFunction},
+        dialect::GenericDialect,
+    };
 
     use crate::{
         prelude::ParserDB,
@@ -222,5 +225,42 @@ mod tests {
         assert!(names.contains(&"lo"));
         assert!(names.contains(&"hi"));
         assert!(names.contains(&"mid"));
+    }
+
+    #[test]
+    fn in_subqueries_only_read_the_outer_expression() {
+        let sql = "
+            CREATE FUNCTION outside_fn(x INT) RETURNS BOOLEAN AS 'SELECT TRUE';
+            CREATE FUNCTION inside_fn(x INT) RETURNS INT AS 'SELECT $1';
+            CREATE TABLE t (
+                id INT,
+                CHECK (outside_fn(id) IN (SELECT inside_fn(id)))
+            );
+        ";
+        let db = ParserDB::parse::<GenericDialect>(sql).expect("schema parses");
+        let table = db.table(None, "t").expect("table exists");
+        let check =
+            table.check_constraints(&db).expect("constraints resolve").next().expect("check");
+        let metadata = db.check_constraint_metadata(check).expect("metadata resolves");
+        let names: Vec<&str> = metadata.functions().map(FunctionLike::name).collect();
+        assert_eq!(names, vec!["outside_fn"]);
+    }
+
+    #[test]
+    fn dynamic_object_name_parts_match_their_function_name() {
+        let db = ParserDB::parse::<GenericDialect>(
+            "CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';",
+        )
+        .expect("schema parses");
+        let function = db.function("ping").expect("function exists");
+        let dynamic_name = ObjectName(vec![ObjectNamePart::Function(ObjectNamePartFunction {
+            name: Ident::new("ping"),
+            args: Vec::new(),
+        })]);
+        assert!(super::function_matches_object_name::<ParserDB>(function, &dynamic_name));
+        assert!(!super::function_matches_object_name::<ParserDB>(
+            function,
+            &ObjectName(Vec::new()),
+        ));
     }
 }

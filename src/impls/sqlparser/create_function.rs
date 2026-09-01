@@ -165,3 +165,29 @@ impl FunctionLike for CreateFunction {
         Ok(function_metadata(self, database)?.owner())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::{
+        ast::{Ident, ObjectNamePart, ObjectNamePartFunction},
+        dialect::PostgreSqlDialect,
+    };
+
+    use crate::{prelude::ParserDB, traits::FunctionLike};
+
+    #[test]
+    fn dynamic_and_empty_function_names_report_their_quote_state() {
+        let database = ParserDB::parse::<PostgreSqlDialect>(
+            "CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';",
+        )
+        .expect("schema parses");
+        let mut function = database.function("ping").expect("function exists").clone();
+        function.name.0 = vec![ObjectNamePart::Function(ObjectNamePartFunction {
+            name: Ident::with_quote('"', "ping"),
+            args: Vec::new(),
+        })];
+        assert!(function.name_is_quoted());
+        function.name.0.clear();
+        assert!(!function.name_is_quoted());
+    }
+}
