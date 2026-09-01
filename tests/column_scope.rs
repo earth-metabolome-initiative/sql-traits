@@ -310,6 +310,163 @@ fn recursive_arm_qualifies_through_the_cte_alias() {
 }
 
 #[test]
+fn recursive_cte_seeds_self_reference_from_anchor() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT);")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE tree AS (\
+           SELECT id FROM categories \
+           UNION ALL \
+           SELECT t.id FROM tree t WHERE false\
+         ) SELECT t.id FROM tree t",
+        &db,
+    )
+    .expect("resolves");
+    assert_eq!(resolved.as_deref(), Some("categories"));
+}
+
+#[test]
+fn recursive_cte_seeds_parenthesized_body() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT)")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE tree AS ((\
+           SELECT id FROM categories \
+           UNION ALL \
+           SELECT t.id FROM tree t WHERE false\
+         )) SELECT t.id FROM tree t",
+        &db,
+    )
+    .expect("resolves");
+    assert_eq!(resolved.as_deref(), Some("categories"));
+}
+
+#[test]
+fn recursive_cte_alias_columns_seed_self_reference() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT);")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE tree(node) AS (\
+           SELECT id FROM categories \
+           UNION ALL \
+           SELECT t.node FROM tree t WHERE false\
+         ) SELECT t.node FROM tree t",
+        &db,
+    )
+    .expect("resolves");
+    assert_eq!(resolved.as_deref(), Some("categories"));
+}
+
+#[test]
+fn recursive_cte_seeds_from_multiple_anchor_arms() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT);")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE tree AS (\
+           (SELECT id FROM categories WHERE id = 1 \
+            UNION ALL \
+            SELECT id FROM categories WHERE id = 2) \
+           UNION ALL \
+           SELECT t.id FROM tree t WHERE false\
+         ) SELECT t.id FROM tree t",
+        &db,
+    )
+    .expect("resolves");
+    assert_eq!(resolved.as_deref(), Some("categories"));
+}
+
+#[test]
+fn mutually_recursive_ctes_stay_opaque() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT)")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE \
+         a(id) AS (\
+             SELECT id FROM categories \
+             UNION ALL \
+             SELECT a.id FROM a JOIN b ON true\
+         ), \
+         b(id) AS (\
+             SELECT id FROM categories \
+             UNION ALL \
+             SELECT a.id FROM a\
+         ) \
+         SELECT a.id FROM a",
+        &db,
+    )
+    .expect("scope builds");
+    assert_eq!(resolved, None);
+}
+
+#[test]
+fn indirect_mutual_recursion_stays_opaque() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT)")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE \
+         a(id) AS (\
+             SELECT id FROM categories \
+             UNION ALL \
+             SELECT a.id FROM a JOIN b ON true\
+         ), \
+         b(id) AS (\
+             SELECT id FROM categories \
+             UNION ALL \
+             SELECT b.id FROM b JOIN c ON true\
+         ), \
+         c(id) AS (\
+             SELECT id FROM categories \
+             UNION ALL \
+             SELECT c.id FROM c JOIN a ON true\
+         ) \
+         SELECT a.id FROM a",
+        &db,
+    )
+    .expect("scope builds");
+    assert_eq!(resolved, None);
+}
+
+#[test]
+fn nested_cte_shadow_does_not_create_mutual_recursion() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT)")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE \
+         a(id) AS (\
+             WITH b AS (SELECT id FROM categories) \
+             SELECT id FROM categories \
+             UNION ALL \
+             SELECT a.id FROM a JOIN b ON true\
+         ), \
+         b(id) AS (\
+             SELECT id FROM categories \
+             UNION ALL \
+             SELECT b.id FROM b WHERE false\
+         ) \
+         SELECT a.id FROM a",
+        &db,
+    )
+    .expect("scope builds");
+    assert_eq!(resolved.as_deref(), Some("categories"));
+}
+
+#[test]
+fn recursive_cte_drops_source_when_recursive_arm_computes() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE categories(id INT);")
+        .expect("schema parses");
+    let resolved = resolve_projection(
+        "WITH RECURSIVE tree AS (\
+           SELECT id FROM categories \
+           UNION ALL \
+           SELECT t.id + 1 AS id FROM tree t WHERE false\
+         ) SELECT t.id FROM tree t",
+        &db,
+    )
+    .expect("resolves");
+    assert_eq!(resolved, None);
+}
+
+#[test]
 fn anonymous_derived_table_resolves_bare_but_never_qualifies() {
     let db = schema_db();
     // PostgreSQL 16+ accepts an unaliased derived table: the bare reference
