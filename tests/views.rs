@@ -11,13 +11,18 @@
 //! rows are that table's rows.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+extern crate alloc;
+
+use alloc::sync::Arc;
+
 use sql_traits::{
     errors::{Error, ObjectKind},
     prelude::*,
-    traits::grant::GrantRelation,
+    structs::{MaterializedView, ParserDBBuilder, View, ViewMetadata},
+    traits::{Metadata, grant::GrantRelation},
 };
 use sqlparser::{
-    ast::{SelectItem, SetExpr, Statement},
+    ast::{CreateView, Query, SelectItem, SetExpr, Statement},
     dialect::{GenericDialect, PostgreSqlDialect},
     parser::Parser,
 };
@@ -29,11 +34,15 @@ fn parse(sql: &str) -> Result<ParserDB, Error> {
 /// The table a reference resolves to inside a query, or `None` for no answer.
 fn resolve(schema: &str, query: &str, reference: &str) -> Option<String> {
     let db = ParserDB::parse::<GenericDialect>(schema).expect("the schema parses");
+    resolve_in_db(&db, query, reference)
+}
+
+fn resolve_in_db(db: &ParserDB, query: &str, reference: &str) -> Option<String> {
     let mut statements = Parser::parse_sql(&GenericDialect {}, query).expect("the query parses");
     let Statement::Query(query) = statements.pop().expect("one statement") else {
         panic!("expected a query");
     };
-    let scope = ColumnScope::from_query(&query, &db).expect("the scope builds");
+    let scope = ColumnScope::from_query(&query, db).expect("the scope builds");
     let mut wrapped = Parser::parse_sql(&GenericDialect {}, &format!("SELECT {reference}"))
         .expect("the reference parses");
     let Statement::Query(wrapped) = wrapped.pop().expect("one statement") else {
@@ -64,6 +73,76 @@ fn row_source(schema: &str, query: &str) -> Option<String> {
         .map(|table| table.table_name().to_string())
 }
 
+fn view_node(sql: &str) -> CreateView {
+    let mut statements =
+        Parser::parse_sql(&PostgreSqlDialect {}, sql).expect("the declaration parses");
+    let Statement::CreateView(view) = statements.pop().expect("one statement") else {
+        panic!("expected a view declaration");
+    };
+    view
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct DefaultView {
+    name: String,
+    schema: Option<String>,
+    definition: Query,
+}
+
+impl Metadata for DefaultView {
+    type Meta = ();
+}
+
+impl ViewLike for DefaultView {
+    type DB = ParserDB;
+
+    fn view_name(&self) -> &str {
+        &self.name
+    }
+
+    fn view_schema(&self) -> Option<&str> {
+        self.schema.as_deref()
+    }
+
+    fn is_materialized(&self) -> bool {
+        false
+    }
+
+    fn definition(&self) -> &Query {
+        &self.definition
+    }
+
+    fn declared_column_names(&self) -> &[(String, bool)] {
+        &[]
+    }
+}
+
+#[test]
+fn default_view_name_helpers_fold_unquoted_parts() {
+    let source =
+        parse("CREATE TABLE t (a INT); CREATE VIEW v AS SELECT a FROM t;").expect("schema");
+    let definition = source.view(None, "v").expect("view").definition().clone();
+    let qualified = DefaultView {
+        name: "MyView".to_string(),
+        schema: Some("MySchema".to_string()),
+        definition,
+    };
+
+    assert!(!qualified.view_name_is_quoted());
+    assert!(!qualified.view_schema_is_quoted());
+    assert_eq!(qualified.stored_view_name().as_ref(), "myview");
+    assert_eq!(qualified.stored_view_schema().as_deref(), Some("myschema"));
+    let target = qualified.target_name();
+    assert_eq!(target.name(), "MyView");
+    assert_eq!(target.schema(), Some("MySchema"));
+    assert!(!target.name_is_quoted());
+    assert!(!target.schema_is_quoted());
+
+    let bare = DefaultView { schema: None, ..qualified };
+    assert!(bare.stored_view_schema().is_none());
+    assert!(bare.target_name().schema().is_none());
+}
+
 #[test]
 fn a_view_is_recorded_and_listed_apart_from_tables() {
     let db = parse(
@@ -87,6 +166,35 @@ fn a_view_is_recorded_and_listed_apart_from_tables() {
     assert!(db.view(None, "m").is_none());
     assert!(db.materialized_view(None, "v").is_none());
     assert!(db.table(None, "v").is_none());
+}
+
+#[test]
+fn bulk_builder_orders_both_view_kinds_and_terminates_a_snapshot_cycle() {
+    let views = ["CREATE VIEW z AS SELECT 1 AS x", "CREATE VIEW a AS SELECT 1 AS x"].map(|sql| {
+        (Arc::new(View::from_node(&view_node(sql)).expect("named view")), ViewMetadata::default())
+    });
+    let materialized_views = [
+        "CREATE MATERIALIZED VIEW z_snapshot AS SELECT x FROM z_snapshot",
+        "CREATE MATERIALIZED VIEW a_snapshot AS SELECT 1 AS x",
+    ]
+    .map(|sql| {
+        (
+            Arc::new(MaterializedView::from_node(&view_node(sql)).expect("named view")),
+            ViewMetadata::default(),
+        )
+    });
+    let empty = parse("").expect("empty schema");
+    let db: ParserDB = ParserDBBuilder::new("test".to_string(), *empty.dialect())
+        .add_views(views)
+        .add_materialized_views(materialized_views)
+        .into();
+
+    assert_eq!(db.views().map(ViewLike::view_name).collect::<Vec<_>>(), ["a", "z"]);
+    assert_eq!(
+        db.materialized_views().map(ViewLike::view_name).collect::<Vec<_>>(),
+        ["a_snapshot", "z_snapshot"]
+    );
+    assert_eq!(resolve_in_db(&db, "SELECT 1 FROM z_snapshot", "z_snapshot.x"), None);
 }
 
 #[test]
@@ -289,6 +397,16 @@ fn dropping_a_view_frees_its_name() {
     assert!(db.view(None, "v").is_none());
     assert!(db.table(None, "v").is_some());
 
+    let db = parse(
+        "CREATE TABLE t (a INT);
+         CREATE MATERIALIZED VIEW m AS SELECT a FROM t;
+         DROP MATERIALIZED VIEW m;
+         CREATE TABLE m (x INT);",
+    )
+    .expect("the materialized view name is free again");
+    assert!(db.materialized_view(None, "m").is_none());
+    assert!(db.table(None, "m").is_some());
+
     let refused = parse("DROP VIEW nope;").expect_err("nothing holds the name");
     assert!(
         matches!(&refused, Error::RelationNotFound { object_kind, .. }
@@ -313,6 +431,17 @@ fn a_view_can_be_renamed_and_handed_to_a_role() {
     assert!(db.view(None, "v").is_none());
     let view = db.view(None, "w").expect("renamed");
     assert_eq!(db.view_metadata(view).expect("metadata").owner(), Some("r"));
+
+    let db = parse(
+        "CREATE TABLE t (a INT);
+         CREATE MATERIALIZED VIEW m AS SELECT a FROM t;
+         ALTER TABLE m RENAME TO n;
+         ALTER TABLE n OWNER TO CURRENT_USER;",
+    )
+    .expect("a materialized view can be renamed and handed to the current user");
+    assert!(db.materialized_view(None, "m").is_none());
+    let view = db.materialized_view(None, "n").expect("renamed");
+    assert_eq!(db.materialized_view_metadata(view).expect("metadata").owner(), None);
 
     let refused = parse(
         "CREATE TABLE t (a INT); CREATE VIEW v AS SELECT a FROM t; ALTER TABLE v RENAME TO t;",
@@ -383,6 +512,12 @@ fn a_column_reference_through_a_view_answers_the_table_underneath() {
 fn a_computed_view_column_answers_nothing() {
     let schema = "CREATE TABLE t (a INT); CREATE VIEW v AS SELECT count(*) AS n FROM t;";
     assert_eq!(resolve(schema, "SELECT 1 FROM v", "v.n"), None);
+}
+
+#[test]
+fn too_many_declared_names_leave_a_view_opaque() {
+    let schema = "CREATE TABLE t (a INT); CREATE VIEW v (x, y) AS SELECT a FROM t;";
+    assert_eq!(resolve(schema, "SELECT 1 FROM v", "v.x"), None);
 }
 
 #[test]
@@ -711,6 +846,15 @@ fn a_schema_holding_only_a_view_is_not_empty() {
     .expect_err("the schema holds a view");
     assert!(matches!(&refused, Error::SchemaNotEmpty { .. }), "got {refused:?}");
 
+    let refused = parse(
+        "CREATE SCHEMA s;
+         CREATE TABLE t (a INT);
+         CREATE MATERIALIZED VIEW s.m AS SELECT a FROM t;
+         DROP SCHEMA s;",
+    )
+    .expect_err("the schema holds a materialized view");
+    assert!(matches!(&refused, Error::SchemaNotEmpty { .. }), "got {refused:?}");
+
     parse(
         "CREATE SCHEMA s;
          CREATE TABLE t (a INT);
@@ -931,6 +1075,11 @@ fn a_column_grant_names_the_kind_of_relation_it_covers() {
          GRANT SELECT (a) ON v TO r;",
     )
     .expect("a column grant on a view is accepted");
+    assert_eq!(
+        db.unresolved_access_references().expect("the walk answers").count(),
+        0,
+        "the existing view satisfies its grant",
+    );
     let grant = db.column_grants().next().expect("one grant");
     assert!(grant.table(&db).is_none(), "the target is not a table");
     assert!(

@@ -722,8 +722,11 @@ mod tests {
     fn test_table_grant_ref_implementation() {
         let sql = r"
             CREATE TABLE my_table (id INT);
+            CREATE VIEW my_view AS SELECT id FROM my_table;
+            CREATE MATERIALIZED VIEW my_materialized AS SELECT id FROM my_table;
             CREATE ROLE app_user;
-            GRANT SELECT, INSERT ON my_table TO app_user WITH GRANT OPTION;
+            GRANT SELECT, INSERT ON my_table, my_view, my_materialized
+                TO app_user WITH GRANT OPTION;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
         let grant = db.table_grants().next().expect("Grant not found");
@@ -747,6 +750,13 @@ mod tests {
         assert!(<&_ as TableGrantLike>::applies_to_table(&grant_ref, table, &db));
         let tables: Vec<_> = <&_ as TableGrantLike>::tables(&grant_ref, &db).collect();
         assert_eq!(tables.len(), 1);
+
+        let relations: Vec<_> = <&_ as TableGrantLike>::relations(&grant_ref, &db).collect();
+        assert_eq!(relations.len(), 3);
+        let rendered: Vec<_> = relations.iter().map(|relation| format!("{relation:?}")).collect();
+        assert!(rendered.iter().any(|relation| relation.starts_with("Table(")));
+        assert!(rendered.iter().any(|relation| relation.starts_with("View(")));
+        assert!(rendered.iter().any(|relation| relation.starts_with("MaterializedView(")));
 
         let app_user = db.role("app_user").expect("Role not found");
         assert!(<&_ as GrantLike>::applies_to_role(&grant_ref, app_user));
@@ -774,6 +784,10 @@ mod tests {
         // ColumnGrantLike methods routed through &T.
         let table = <&_ as ColumnGrantLike>::table(&cg_ref, &db).expect("column grant has a table");
         assert_eq!(table.table_name(), "users");
+        assert!(matches!(
+            <&_ as ColumnGrantLike>::relation(&cg_ref, &db),
+            Some(GrantRelation::Table(_))
+        ));
         let cols: Vec<_> =
             <&_ as ColumnGrantLike>::columns(&cg_ref, table, &db).expect("columns").collect();
         assert!(!cols.is_empty(), "column grant must surface at least one column");
