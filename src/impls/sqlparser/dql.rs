@@ -592,6 +592,14 @@ fn wildcard_reshapes_output(options: &WildcardAdditionalOptions) -> bool {
         || options.opt_alias.is_some()
 }
 
+/// Whether a wildcard substitutes a computed value for one of the columns it
+/// expands (`REPLACE`). Such an output row is no longer a row of the source
+/// table, so it carries no row identity, whereas dropping or relabelling
+/// columns leaves the rows themselves intact.
+fn wildcard_replaces_values(options: &WildcardAdditionalOptions) -> bool {
+    options.opt_replace.is_some()
+}
+
 /// Derives the output shape of a plain `SELECT`: each projected column's name
 /// and pass-through source, enumerated from the projection (wildcards expand
 /// over the `FROM` relations they stand for).
@@ -1371,14 +1379,23 @@ impl<DB: DatabaseLike> DQLLike<DB> for Query {
                 // `*` is a single base-table row only when the FROM is exactly
                 // that one base table, or exactly one row-preserving derived
                 // relation whose every column passes through the same table.
-                SelectItem::Wildcard(_) => {
-                    if from_entry_count == 1 && bases.len() == 1 {
+                // `REPLACE` substitutes a computed value for one of the
+                // columns, so the output is no longer a source row, while
+                // `EXCLUDE`, `EXCEPT`, `ILIKE` and `RENAME` only drop or
+                // relabel columns and leave the rows themselves intact.
+                SelectItem::Wildcard(options) => {
+                    if wildcard_replaces_values(options) {
+                        None
+                    } else if from_entry_count == 1 && bases.len() == 1 {
                         Some(bases[0].table)
                     } else if from_entry_count == 1 && derived.len() == 1 {
                         single_source_relation(&derived[0], database)
                     } else {
                         None
                     }
+                }
+                SelectItem::QualifiedWildcard(_, options) if wildcard_replaces_values(options) => {
+                    None
                 }
                 SelectItem::QualifiedWildcard(kind, _) => {
                     match kind {
@@ -2156,5 +2173,26 @@ mod tests {
             ),
             None
         );
+    }
+
+    // `REPLACE` substitutes a computed value for one of the expanded columns,
+    // so the output row is no longer a row of the source table and carries no
+    // row identity. Dropping columns (`EXCLUDE`, `EXCEPT`, `ILIKE`) or
+    // relabelling them (`RENAME`) leaves the rows intact, so those still
+    // answer.
+    #[test]
+    fn replacing_wildcard_carries_no_row_identity() {
+        let db = schema_db();
+        assert_eq!(source_name("SELECT * REPLACE ('x' AS name) FROM users", &db), None);
+        assert_eq!(source_name("SELECT users.* REPLACE ('x' AS name) FROM users", &db), None);
+        for sql in [
+            "SELECT * EXCLUDE (name) FROM users",
+            "SELECT * EXCEPT (name) FROM users",
+            "SELECT * ILIKE 'id%' FROM users",
+            "SELECT * RENAME (name AS handle) FROM users",
+            "SELECT users.* EXCLUDE (name) FROM users",
+        ] {
+            assert_eq!(source_name(sql, &db), Some("users".to_string()), "{sql}");
+        }
     }
 }
