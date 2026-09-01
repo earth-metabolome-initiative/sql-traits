@@ -126,25 +126,13 @@ impl<'db, DB: DatabaseLike> Deriving<'_, 'db, DB> {
 }
 
 /// One output column of a base relation.
-struct BaseColumnRef<'db, DB: DatabaseLike, D: Copy> {
+struct BaseColumnRef<D: Copy> {
     name: String,
     quoted: bool,
-    source: &'db DB::Table,
     definition: D,
 }
 
-type BaseColumns<'db, DB, D> = Vec<BaseColumnRef<'db, DB, D>>;
-
-impl<DB: DatabaseLike, D: Copy> Clone for BaseColumnRef<'_, DB, D> {
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            quoted: self.quoted,
-            source: self.source,
-            definition: self.definition,
-        }
-    }
-}
+type BaseColumns<D> = Vec<BaseColumnRef<D>>;
 
 #[derive(Clone, Copy)]
 struct RelationKey<'query, 'db> {
@@ -158,7 +146,7 @@ struct FromTableRef<'query, 'db, DB: DatabaseLike, D: Copy> {
     table: &'db DB::Table,
     nullable: bool,
     entry_index: usize,
-    output_columns: Vec<BaseColumnRef<'db, DB, D>>,
+    output_columns: BaseColumns<D>,
 }
 
 /// One output column of a derivable relation.
@@ -899,44 +887,42 @@ where
     Ok(shapes)
 }
 
-fn select_body_ref<'query, 'db>(
-    body: AstRef<'query, 'db, SetExpr>,
-) -> Option<AstRef<'query, 'db, Select>> {
-    body.try_map(|body| {
-        match body {
-            SetExpr::Select(select) => Some(select.as_ref()),
-            _ => None,
-        }
-    })
+enum SetExprRef<'query, 'db> {
+    Select(AstRef<'query, 'db, Select>),
+    Query(AstRef<'query, 'db, Query>),
+    SetOperation {
+        operator: SetOperator,
+        quantifier: SetQuantifier,
+        left: AstRef<'query, 'db, SetExpr>,
+        right: AstRef<'query, 'db, SetExpr>,
+    },
+    Other,
 }
 
-fn query_body_ref<'query, 'db>(
-    body: AstRef<'query, 'db, SetExpr>,
-) -> Option<AstRef<'query, 'db, Query>> {
-    body.try_map(|body| {
-        match body {
-            SetExpr::Query(query) => Some(query.as_ref()),
-            _ => None,
+fn set_expr_ref<'query, 'db>(body: AstRef<'query, 'db, SetExpr>) -> SetExprRef<'query, 'db> {
+    match body {
+        AstRef::Query(SetExpr::Select(select)) => SetExprRef::Select(AstRef::Query(select)),
+        AstRef::Database(SetExpr::Select(select)) => SetExprRef::Select(AstRef::Database(select)),
+        AstRef::Query(SetExpr::Query(query)) => SetExprRef::Query(AstRef::Query(query)),
+        AstRef::Database(SetExpr::Query(query)) => SetExprRef::Query(AstRef::Database(query)),
+        AstRef::Query(SetExpr::SetOperation { op, set_quantifier, left, right }) => {
+            SetExprRef::SetOperation {
+                operator: *op,
+                quantifier: *set_quantifier,
+                left: AstRef::Query(left),
+                right: AstRef::Query(right),
+            }
         }
-    })
-}
-
-fn set_operation_arms<'query, 'db>(
-    body: AstRef<'query, 'db, SetExpr>,
-) -> Option<(AstRef<'query, 'db, SetExpr>, AstRef<'query, 'db, SetExpr>)> {
-    let left = body.try_map(|body| {
-        match body {
-            SetExpr::SetOperation { left, .. } => Some(left.as_ref()),
-            _ => None,
+        AstRef::Database(SetExpr::SetOperation { op, set_quantifier, left, right }) => {
+            SetExprRef::SetOperation {
+                operator: *op,
+                quantifier: *set_quantifier,
+                left: AstRef::Database(left),
+                right: AstRef::Database(right),
+            }
         }
-    })?;
-    let right = body.try_map(|body| {
-        match body {
-            SetExpr::SetOperation { right, .. } => Some(right.as_ref()),
-            _ => None,
-        }
-    })?;
-    Some((left, right))
+        AstRef::Query(_) | AstRef::Database(_) => SetExprRef::Other,
+    }
 }
 
 fn derive_recursive_cte_query_shape<'query, 'db, DB, P>(
@@ -954,15 +940,11 @@ where
 {
     let checkpoint = profile.checkpoint();
     let mut scoped;
-    let scope = match &query.get().with {
-        Some(_) => {
-            let Some(with) = query.try_map(|query| query.with.as_ref()) else {
-                return Ok(None);
-            };
-            scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
-            &mut scoped
-        }
-        None => cte_scope,
+    let scope = if let Some(with) = query.try_map(|query| query.with.as_ref()) {
+        scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
+        &mut scoped
+    } else {
+        cte_scope
     };
     let result = derive_recursive_cte_set_expr_shape(
         query.map(|query| query.body.as_ref()),
@@ -993,19 +975,13 @@ where
     P: DerivationProfile<'query, 'db, DB>,
 {
     let output_names = OutputNameSource::from_alias(alias);
-    match body.get() {
-        SetExpr::Query(_) => {
-            let Some(query) = query_body_ref(body) else {
-                return Ok(None);
-            };
+    match set_expr_ref(body) {
+        SetExprRef::Query(query) => {
             derive_recursive_cte_query_shape(
                 query, cte_scope, position, alias, deriving, parent, profile,
             )
         }
-        SetExpr::SetOperation { op: SetOperator::Union, set_quantifier, .. } => {
-            let Some((left, right)) = set_operation_arms(body) else {
-                return Ok(None);
-            };
+        SetExprRef::SetOperation { operator: SetOperator::Union, quantifier, left, right } => {
             let Some(left_shape) =
                 derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?
             else {
@@ -1034,7 +1010,7 @@ where
                 left_shape,
                 right_shape,
                 SetOperator::Union,
-                *set_quantifier,
+                quantifier,
                 true,
                 deriving,
                 profile,
@@ -1060,15 +1036,11 @@ where
 {
     let checkpoint = profile.checkpoint();
     let scoped;
-    let scope = match &query.get().with {
-        Some(_) => {
-            let Some(with) = query.try_map(|query| query.with.as_ref()) else {
-                return Ok(None);
-            };
-            scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
-            &scoped
-        }
-        None => cte_scope,
+    let scope = if let Some(with) = query.try_map(|query| query.with.as_ref()) {
+        scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
+        &scoped
+    } else {
+        cte_scope
     };
     let result = derive_set_expr_shape(
         query.map(|query| query.body.as_ref()),
@@ -1099,23 +1071,14 @@ where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
 {
-    match body.get() {
-        SetExpr::Select(_) => {
-            let Some(select) = select_body_ref(body) else {
-                return Ok(None);
-            };
+    match set_expr_ref(body) {
+        SetExprRef::Select(select) => {
             derive_select_shape(select, cte_scope, output_names.as_ref(), deriving, parent, profile)
         }
-        SetExpr::Query(_) => {
-            let Some(query) = query_body_ref(body) else {
-                return Ok(None);
-            };
+        SetExprRef::Query(query) => {
             derive_query_shape(query, cte_scope, output_names, deriving, parent, profile)
         }
-        SetExpr::SetOperation { op, set_quantifier, .. } => {
-            let Some((left, right)) = set_operation_arms(body) else {
-                return Ok(None);
-            };
+        SetExprRef::SetOperation { operator, quantifier, left, right } => {
             let Some(left_shape) =
                 derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?
             else {
@@ -1135,14 +1098,14 @@ where
             Ok(merge_set_operation_shapes(
                 left_shape,
                 right_shape,
-                *op,
-                *set_quantifier,
+                operator,
+                quantifier,
                 false,
                 deriving,
                 profile,
             ))
         }
-        _ => Ok(None),
+        SetExprRef::Other => Ok(None),
     }
 }
 
@@ -1315,15 +1278,11 @@ where
     P: DerivationProfile<'query, 'db, DB>,
 {
     let scoped_ctes;
-    let cte_scope = match &query.get().with {
-        Some(_) => {
-            let Some(with) = query.try_map(|query| query.with.as_ref()) else {
-                return Ok(());
-            };
-            scoped_ctes = derive_cte_shapes(with, outer_ctes, deriving, parent, profile)?;
-            &scoped_ctes
-        }
-        None => outer_ctes,
+    let cte_scope = if let Some(with) = query.try_map(|query| query.with.as_ref()) {
+        scoped_ctes = derive_cte_shapes(with, outer_ctes, deriving, parent, profile)?;
+        &scoped_ctes
+    } else {
+        outer_ctes
     };
     index_nested_set_scopes(
         query.map(|query| query.body.as_ref()),
@@ -1345,29 +1304,20 @@ where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
 {
-    match body.get() {
-        SetExpr::Select(_) => {
-            let Some(select) = select_body_ref(body) else {
-                return Ok(());
-            };
+    match set_expr_ref(body) {
+        SetExprRef::Select(select) => {
             let scope = collect_select_from(select, cte_scope, deriving, parent, profile)?;
             let cursor = profile.cursor(&scope);
             index_select_expression_queries(select, cte_scope, deriving, cursor, profile)
         }
-        SetExpr::Query(_) => {
-            let Some(query) = query_body_ref(body) else {
-                return Ok(());
-            };
+        SetExprRef::Query(query) => {
             index_nested_query_scopes(query, cte_scope, deriving, parent, profile)
         }
-        SetExpr::SetOperation { .. } => {
-            let Some((left, right)) = set_operation_arms(body) else {
-                return Ok(());
-            };
+        SetExprRef::SetOperation { left, right, .. } => {
             index_nested_set_scopes(left, cte_scope, deriving, parent, profile)?;
             index_nested_set_scopes(right, cte_scope, deriving, parent, profile)
         }
-        _ => Ok(()),
+        SetExprRef::Other => Ok(()),
     }
 }
 
@@ -1442,280 +1392,150 @@ where
     Ok(())
 }
 
-struct NestedQueryIndexer<'walk, 'derive, 'query, 'db, DB, P>
-where
-    DB: DatabaseLike,
-    P: DerivationProfile<'query, 'db, DB>,
-{
-    cte_scope: &'walk [CteShape<'query, 'db, DB, P::Definition>],
-    deriving: Deriving<'derive, 'db, DB>,
-    parent: P::Cursor,
-    profile: &'walk mut P,
+struct NestedQueryWalker<F> {
+    query: F,
 }
 
-impl<'query, 'db, DB, P> NestedQueryIndexer<'_, '_, 'query, 'db, DB, P>
+impl<'source, F> NestedQueryWalker<F>
 where
-    DB: DatabaseLike,
-    P: DerivationProfile<'query, 'db, DB>,
+    F: FnMut(&'source Query) -> Result<(), LookupError>,
 {
-    fn query(&mut self, query: AstRef<'query, 'db, Query>) -> Result<(), LookupError> {
-        index_nested_query_scopes(query, self.cte_scope, self.deriving, self.parent, self.profile)
+    fn query(&mut self, query: &'source Query) -> Result<(), LookupError> {
+        (self.query)(query)
     }
 
-    fn child<T: ?Sized>(
+    fn optional_expression(
         &mut self,
-        node: AstRef<'query, 'db, T>,
-        child: impl for<'source> FnOnce(&'source T) -> Option<&'source Expr>,
+        expression: Option<&'source Expr>,
     ) -> Result<(), LookupError> {
-        let Some(expression) = node.try_map(child) else {
-            return Ok(());
-        };
-        self.expression(expression)
-    }
-
-    fn children<T: ?Sized>(
-        &mut self,
-        node: AstRef<'query, 'db, T>,
-        children: impl for<'source> FnOnce(&'source T) -> Option<&'source [Expr]>,
-    ) -> Result<(), LookupError> {
-        let Some(expressions) = node.try_map(children) else {
-            return Ok(());
-        };
-        for expression in expressions.iter() {
+        if let Some(expression) = expression {
             self.expression(expression)?;
         }
         Ok(())
     }
 
-    fn query_child<T: ?Sized>(
-        &mut self,
-        node: AstRef<'query, 'db, T>,
-        child: impl for<'source> FnOnce(&'source T) -> Option<&'source Query>,
-    ) -> Result<(), LookupError> {
-        let Some(query) = node.try_map(child) else {
-            return Ok(());
-        };
-        self.query(query)
+    fn expressions(&mut self, expressions: &'source [Expr]) -> Result<(), LookupError> {
+        for expression in expressions {
+            self.expression(expression)?;
+        }
+        Ok(())
     }
 
-    fn access(&mut self, access: AstRef<'query, 'db, AccessExpr>) -> Result<(), LookupError> {
-        match access.get() {
-            AccessExpr::Dot(_) => {
-                self.child(access, |access| {
-                    let AccessExpr::Dot(expression) = access else {
-                        return None;
-                    };
-                    Some(expression)
-                })
-            }
-            AccessExpr::Subscript(_) => {
-                let Some(subscript) = access.try_map(|access| {
-                    let AccessExpr::Subscript(subscript) = access else {
-                        return None;
-                    };
-                    Some(subscript)
-                }) else {
-                    return Ok(());
-                };
-                self.subscript(subscript)
+    fn expression_pair(
+        &mut self,
+        left: &'source Expr,
+        right: &'source Expr,
+    ) -> Result<(), LookupError> {
+        self.expression(left)?;
+        self.expression(right)
+    }
+
+    fn access(&mut self, access: &'source AccessExpr) -> Result<(), LookupError> {
+        match access {
+            AccessExpr::Dot(expression) => self.expression(expression),
+            AccessExpr::Subscript(subscript) => self.subscript(subscript),
+        }
+    }
+
+    fn subscript(&mut self, subscript: &'source Subscript) -> Result<(), LookupError> {
+        match subscript {
+            Subscript::Index { index } => self.expression(index),
+            Subscript::Slice { lower_bound, upper_bound, stride } => {
+                self.optional_expression(lower_bound.as_ref())?;
+                self.optional_expression(upper_bound.as_ref())?;
+                self.optional_expression(stride.as_ref())
             }
         }
     }
 
-    fn subscript(&mut self, subscript: AstRef<'query, 'db, Subscript>) -> Result<(), LookupError> {
-        match subscript.get() {
-            Subscript::Index { .. } => {
-                self.child(subscript, |subscript| {
-                    let Subscript::Index { index } = subscript else {
-                        return None;
-                    };
-                    Some(index)
-                })
+    fn json_path_element(&mut self, element: &'source JsonPathElem) -> Result<(), LookupError> {
+        match element {
+            JsonPathElem::Bracket { key } | JsonPathElem::ColonBracket { key } => {
+                self.expression(key)
             }
-            Subscript::Slice { .. } => {
-                self.child(subscript, |subscript| {
-                    let Subscript::Slice { lower_bound, .. } = subscript else {
-                        return None;
-                    };
-                    lower_bound.as_ref()
-                })?;
-                self.child(subscript, |subscript| {
-                    let Subscript::Slice { upper_bound, .. } = subscript else {
-                        return None;
-                    };
-                    upper_bound.as_ref()
-                })?;
-                self.child(subscript, |subscript| {
-                    let Subscript::Slice { stride, .. } = subscript else {
-                        return None;
-                    };
-                    stride.as_ref()
-                })
-            }
+            JsonPathElem::Dot { .. } => Ok(()),
         }
-    }
-
-    fn json_path_element(
-        &mut self,
-        element: AstRef<'query, 'db, JsonPathElem>,
-    ) -> Result<(), LookupError> {
-        self.child(element, |element| {
-            match element {
-                JsonPathElem::Bracket { key } | JsonPathElem::ColonBracket { key } => Some(key),
-                JsonPathElem::Dot { .. } => None,
-            }
-        })
     }
 
     fn function_argument_expression(
         &mut self,
-        argument: AstRef<'query, 'db, FunctionArgExpr>,
+        argument: &'source FunctionArgExpr,
     ) -> Result<(), LookupError> {
-        match argument.get() {
-            FunctionArgExpr::Expr(_) => {
-                self.child(argument, |argument| {
-                    let FunctionArgExpr::Expr(expression) = argument else {
-                        return None;
-                    };
-                    Some(expression)
-                })
-            }
-            FunctionArgExpr::WildcardWithOptions(_) => {
-                let Some(options) = argument.try_map(|argument| {
-                    let FunctionArgExpr::WildcardWithOptions(options) = argument else {
-                        return None;
-                    };
-                    Some(options)
-                }) else {
-                    return Ok(());
-                };
-                self.wildcard_options(options)
-            }
+        match argument {
+            FunctionArgExpr::Expr(expression) => self.expression(expression),
+            FunctionArgExpr::WildcardWithOptions(options) => self.wildcard_options(options),
             FunctionArgExpr::QualifiedWildcard(_) | FunctionArgExpr::Wildcard => Ok(()),
         }
     }
 
-    fn function_argument(
-        &mut self,
-        argument: AstRef<'query, 'db, FunctionArg>,
-    ) -> Result<(), LookupError> {
-        if matches!(argument.get(), FunctionArg::ExprNamed { .. }) {
-            self.child(argument, |argument| {
-                let FunctionArg::ExprNamed { name, .. } = argument else {
-                    return None;
-                };
-                Some(name)
-            })?;
+    fn function_argument(&mut self, argument: &'source FunctionArg) -> Result<(), LookupError> {
+        match argument {
+            FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => {
+                self.function_argument_expression(arg)
+            }
+            FunctionArg::ExprNamed { name, arg, .. } => {
+                self.expression(name)?;
+                self.function_argument_expression(arg)
+            }
         }
-        let Some(value) = argument.try_map(|argument| {
-            match argument {
-                FunctionArg::Named { arg, .. }
-                | FunctionArg::ExprNamed { arg, .. }
-                | FunctionArg::Unnamed(arg) => Some(arg),
+    }
+
+    fn order_by(&mut self, order: &'source OrderByExpr) -> Result<(), LookupError> {
+        self.expression(&order.expr)?;
+        if let Some(fill) = &order.with_fill {
+            self.optional_expression(fill.from.as_ref())?;
+            self.optional_expression(fill.to.as_ref())?;
+            self.optional_expression(fill.step.as_ref())?;
+        }
+        Ok(())
+    }
+
+    fn window_bound(&mut self, bound: &'source WindowFrameBound) -> Result<(), LookupError> {
+        match bound {
+            WindowFrameBound::Preceding(value) | WindowFrameBound::Following(value) => {
+                self.optional_expression(value.as_deref())
             }
-        }) else {
-            return Ok(());
-        };
-        self.function_argument_expression(value)
+            WindowFrameBound::CurrentRow => Ok(()),
+        }
     }
 
-    fn order_by(&mut self, order: AstRef<'query, 'db, OrderByExpr>) -> Result<(), LookupError> {
-        self.child(order, |order| Some(&order.expr))?;
-        let Some(fill) = order.try_map(|order| order.with_fill.as_ref()) else {
+    fn window(&mut self, window: &'source WindowType) -> Result<(), LookupError> {
+        let WindowType::WindowSpec(specification) = window else {
             return Ok(());
         };
-        self.child(fill, |fill| fill.from.as_ref())?;
-        self.child(fill, |fill| fill.to.as_ref())?;
-        self.child(fill, |fill| fill.step.as_ref())
-    }
-
-    fn window_bound(
-        &mut self,
-        bound: AstRef<'query, 'db, WindowFrameBound>,
-    ) -> Result<(), LookupError> {
-        self.child(bound, |bound| {
-            match bound {
-                WindowFrameBound::Preceding(value) | WindowFrameBound::Following(value) => {
-                    value.as_deref()
-                }
-                WindowFrameBound::CurrentRow => None,
-            }
-        })
-    }
-
-    fn window(&mut self, window: AstRef<'query, 'db, WindowType>) -> Result<(), LookupError> {
-        let Some(specification) = window.try_map(|window| {
-            let WindowType::WindowSpec(specification) = window else {
-                return None;
-            };
-            Some(specification)
-        }) else {
-            return Ok(());
-        };
-        self.children(specification, |specification| Some(specification.partition_by.as_slice()))?;
-        for order in specification.map(|specification| specification.order_by.as_slice()).iter() {
+        self.expressions(&specification.partition_by)?;
+        for order in &specification.order_by {
             self.order_by(order)?;
         }
-        let start = specification.map(|specification| &specification.window_frame);
-        if let Some(bound) = start.try_map(|frame| frame.as_ref().map(|frame| &frame.start_bound)) {
-            self.window_bound(bound)?;
-        }
-        if let Some(bound) =
-            start.try_map(|frame| frame.as_ref().and_then(|frame| frame.end_bound.as_ref()))
-        {
-            self.window_bound(bound)?;
+        if let Some(frame) = &specification.window_frame {
+            self.window_bound(&frame.start_bound)?;
+            if let Some(bound) = &frame.end_bound {
+                self.window_bound(bound)?;
+            }
         }
         Ok(())
     }
 
     fn function_clause(
         &mut self,
-        clause: AstRef<'query, 'db, FunctionArgumentClause>,
+        clause: &'source FunctionArgumentClause,
     ) -> Result<(), LookupError> {
-        match clause.get() {
-            FunctionArgumentClause::Where(_) | FunctionArgumentClause::Limit(_) => {
-                self.child(clause, |clause| {
-                    match clause {
-                        FunctionArgumentClause::Where(expression)
-                        | FunctionArgumentClause::Limit(expression) => Some(expression),
-                        _ => None,
-                    }
-                })
-            }
-            FunctionArgumentClause::OrderBy(_) => {
-                let Some(orders) = clause.try_map(|clause| {
-                    let FunctionArgumentClause::OrderBy(orders) = clause else {
-                        return None;
-                    };
-                    Some(orders.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for order in orders.iter() {
+        match clause {
+            FunctionArgumentClause::Where(expression)
+            | FunctionArgumentClause::Limit(expression) => self.expression(expression),
+            FunctionArgumentClause::OrderBy(orders) => {
+                for order in orders {
                     self.order_by(order)?;
                 }
                 Ok(())
             }
-            FunctionArgumentClause::OnOverflow(_) => {
-                self.child(clause, |clause| {
-                    let FunctionArgumentClause::OnOverflow(
-                        sqlparser::ast::ListAggOnOverflow::Truncate { filler, .. },
-                    ) = clause
-                    else {
-                        return None;
-                    };
-                    filler.as_deref()
-                })
-            }
-            FunctionArgumentClause::Having(_) => {
-                self.child(clause, |clause| {
-                    let FunctionArgumentClause::Having(bound) = clause else {
-                        return None;
-                    };
-                    Some(&bound.1)
-                })
-            }
-            FunctionArgumentClause::IgnoreOrRespectNulls(_)
+            FunctionArgumentClause::OnOverflow(sqlparser::ast::ListAggOnOverflow::Truncate {
+                filler,
+                ..
+            }) => self.optional_expression(filler.as_deref()),
+            FunctionArgumentClause::Having(bound) => self.expression(&bound.1),
+            FunctionArgumentClause::OnOverflow(_)
+            | FunctionArgumentClause::IgnoreOrRespectNulls(_)
             | FunctionArgumentClause::Separator(_)
             | FunctionArgumentClause::JsonNullClause(_)
             | FunctionArgumentClause::JsonReturningClause(_) => Ok(()),
@@ -1724,39 +1544,16 @@ where
 
     fn function_arguments(
         &mut self,
-        arguments: AstRef<'query, 'db, FunctionArguments>,
+        arguments: &'source FunctionArguments,
     ) -> Result<(), LookupError> {
-        match arguments.get() {
+        match arguments {
             FunctionArguments::None => Ok(()),
-            FunctionArguments::Subquery(_) => {
-                self.query_child(arguments, |arguments| {
-                    let FunctionArguments::Subquery(query) = arguments else {
-                        return None;
-                    };
-                    Some(query.as_ref())
-                })
-            }
-            FunctionArguments::List(_) => {
-                let Some(values) = arguments.try_map(|arguments| {
-                    let FunctionArguments::List(list) = arguments else {
-                        return None;
-                    };
-                    Some(list.args.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for value in values.iter() {
-                    self.function_argument(value)?;
+            FunctionArguments::Subquery(query) => self.query(query),
+            FunctionArguments::List(list) => {
+                for argument in &list.args {
+                    self.function_argument(argument)?;
                 }
-                let Some(clauses) = arguments.try_map(|arguments| {
-                    let FunctionArguments::List(list) = arguments else {
-                        return None;
-                    };
-                    Some(list.clauses.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for clause in clauses.iter() {
+                for clause in &list.clauses {
                     self.function_clause(clause)?;
                 }
                 Ok(())
@@ -1764,14 +1561,14 @@ where
         }
     }
 
-    fn function(&mut self, function: AstRef<'query, 'db, Function>) -> Result<(), LookupError> {
-        self.function_arguments(function.map(|function| &function.parameters))?;
-        self.function_arguments(function.map(|function| &function.args))?;
-        self.child(function, |function| function.filter.as_deref())?;
-        if let Some(window) = function.try_map(|function| function.over.as_ref()) {
+    fn function(&mut self, function: &'source Function) -> Result<(), LookupError> {
+        self.function_arguments(&function.parameters)?;
+        self.function_arguments(&function.args)?;
+        self.optional_expression(function.filter.as_deref())?;
+        if let Some(window) = &function.over {
             self.window(window)?;
         }
-        for order in function.map(|function| function.within_group.as_slice()).iter() {
+        for order in &function.within_group {
             self.order_by(order)?;
         }
         Ok(())
@@ -1779,399 +1576,184 @@ where
 
     fn wildcard_options(
         &mut self,
-        options: AstRef<'query, 'db, WildcardAdditionalOptions>,
+        options: &'source WildcardAdditionalOptions,
     ) -> Result<(), LookupError> {
-        let Some(items) = options.try_map(|options| {
-            options.opt_replace.as_ref().map(|replace| replace.items.as_slice())
-        }) else {
-            return Ok(());
-        };
-        for item in items.iter() {
-            self.child(item, |item| Some(&item.expr))?;
+        if let Some(replace) = &options.opt_replace {
+            for item in &replace.items {
+                self.expression(&item.expr)?;
+            }
         }
         Ok(())
     }
 
-    fn case_when(&mut self, case: AstRef<'query, 'db, CaseWhen>) -> Result<(), LookupError> {
-        self.child(case, |case| Some(&case.condition))?;
-        self.child(case, |case| Some(&case.result))
+    fn case_when(&mut self, case: &'source CaseWhen) -> Result<(), LookupError> {
+        self.expression(&case.condition)?;
+        self.expression(&case.result)
     }
 
-    fn dictionary_field(
+    fn dictionary_field(&mut self, field: &'source DictionaryField) -> Result<(), LookupError> {
+        self.expression(&field.value)
+    }
+
+    fn map_entry(&mut self, entry: &'source MapEntry) -> Result<(), LookupError> {
+        self.expression(&entry.key)?;
+        self.expression(&entry.value)
+    }
+
+    fn expression_with_many(
         &mut self,
-        field: AstRef<'query, 'db, DictionaryField>,
+        expression: &'source Expr,
+        expressions: &'source [Expr],
     ) -> Result<(), LookupError> {
-        self.child(field, |field| Some(field.value.as_ref()))
+        self.expression(expression)?;
+        self.expressions(expressions)
     }
 
-    fn map_entry(&mut self, entry: AstRef<'query, 'db, MapEntry>) -> Result<(), LookupError> {
-        self.child(entry, |entry| Some(entry.key.as_ref()))?;
-        self.child(entry, |entry| Some(entry.value.as_ref()))
-    }
-
-    fn query_expression(
+    fn expression_triple(
         &mut self,
-        expression: AstRef<'query, 'db, Expr>,
+        first: &'source Expr,
+        second: &'source Expr,
+        third: &'source Expr,
     ) -> Result<(), LookupError> {
-        match expression.get() {
-            Expr::InSubquery { .. } => {
-                self.child(expression, |expression| {
-                    let Expr::InSubquery { expr, .. } = expression else {
-                        return None;
-                    };
-                    Some(expr.as_ref())
-                })?;
-                self.query_child(expression, |expression| {
-                    let Expr::InSubquery { subquery, .. } = expression else {
-                        return None;
-                    };
-                    Some(subquery.as_ref())
-                })
-            }
-            Expr::Exists { .. } | Expr::Subquery(_) => {
-                self.query_child(expression, |expression| {
-                    match expression {
-                        Expr::Exists { subquery, .. } | Expr::Subquery(subquery) => {
-                            Some(subquery.as_ref())
-                        }
-                        _ => None,
-                    }
-                })
-            }
-            _ => Ok(()),
+        self.expression(first)?;
+        self.expression(second)?;
+        self.expression(third)
+    }
+
+    fn trim_expression(
+        &mut self,
+        expression: &'source Expr,
+        trim_what: Option<&'source Expr>,
+        trim_characters: Option<&'source [Expr]>,
+    ) -> Result<(), LookupError> {
+        self.expression(expression)?;
+        self.optional_expression(trim_what)?;
+        if let Some(characters) = trim_characters {
+            self.expressions(characters)?;
         }
+        Ok(())
     }
 
-    fn access_expression(
+    fn case_expression(
         &mut self,
-        expression: AstRef<'query, 'db, Expr>,
+        operand: Option<&'source Expr>,
+        conditions: &'source [CaseWhen],
+        else_result: Option<&'source Expr>,
     ) -> Result<(), LookupError> {
-        match expression.get() {
-            Expr::CompoundFieldAccess { .. } => {
-                self.child(expression, |expression| {
-                    let Expr::CompoundFieldAccess { root, .. } = expression else {
-                        return None;
-                    };
-                    Some(root.as_ref())
-                })?;
-                let Some(chain) = expression.try_map(|expression| {
-                    let Expr::CompoundFieldAccess { access_chain, .. } = expression else {
-                        return None;
-                    };
-                    Some(access_chain.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for access in chain.iter() {
+        self.optional_expression(operand)?;
+        for case in conditions {
+            self.case_when(case)?;
+        }
+        self.optional_expression(else_result)
+    }
+
+    fn expression_groups(&mut self, groups: &'source [Vec<Expr>]) -> Result<(), LookupError> {
+        for group in groups {
+            self.expressions(group)?;
+        }
+        Ok(())
+    }
+
+    fn dictionary_fields(&mut self, fields: &'source [DictionaryField]) -> Result<(), LookupError> {
+        for field in fields {
+            self.dictionary_field(field)?;
+        }
+        Ok(())
+    }
+
+    fn map_entries(&mut self, entries: &'source [MapEntry]) -> Result<(), LookupError> {
+        for entry in entries {
+            self.map_entry(entry)?;
+        }
+        Ok(())
+    }
+
+    fn expression(&mut self, expression: &'source Expr) -> Result<(), LookupError> {
+        match expression {
+            Expr::InSubquery { expr, subquery, .. } => {
+                self.expression(expr)?;
+                self.query(subquery)
+            }
+            Expr::Exists { subquery, .. } | Expr::Subquery(subquery) => self.query(subquery),
+            Expr::CompoundFieldAccess { root, access_chain, .. } => {
+                self.expression(root)?;
+                for access in access_chain {
                     self.access(access)?;
                 }
                 Ok(())
             }
-            Expr::JsonAccess { .. } => {
-                self.child(expression, |expression| {
-                    let Expr::JsonAccess { value, .. } = expression else {
-                        return None;
-                    };
-                    Some(value.as_ref())
-                })?;
-                let Some(path) = expression.try_map(|expression| {
-                    let Expr::JsonAccess { path, .. } = expression else {
-                        return None;
-                    };
-                    Some(path.path.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for element in path.iter() {
+            Expr::JsonAccess { value, path } => {
+                self.expression(value)?;
+                for element in &path.path {
                     self.json_path_element(element)?;
                 }
                 Ok(())
             }
-            _ => Ok(()),
-        }
-    }
-
-    fn operator_expression(
-        &mut self,
-        expression: AstRef<'query, 'db, Expr>,
-    ) -> Result<(), LookupError> {
-        match expression.get() {
-            Expr::IsFalse(_)
-            | Expr::IsNotFalse(_)
-            | Expr::IsTrue(_)
-            | Expr::IsNotTrue(_)
-            | Expr::IsNull(_)
-            | Expr::IsNotNull(_)
-            | Expr::IsUnknown(_)
-            | Expr::IsNotUnknown(_)
-            | Expr::IsJson { .. }
-            | Expr::IsNormalized { .. }
-            | Expr::UnaryOp { .. }
-            | Expr::Cast { .. }
-            | Expr::Extract { .. }
-            | Expr::Ceil { .. }
-            | Expr::Floor { .. }
-            | Expr::Collate { .. }
-            | Expr::Nested(_)
-            | Expr::Prefixed { .. }
-            | Expr::Named { .. }
-            | Expr::Interval(_)
-            | Expr::OuterJoin(_)
-            | Expr::Prior(_)
-            | Expr::Lambda(_) => self.child(expression, unary_expression_child),
-            Expr::IsDistinctFrom(_, _)
-            | Expr::IsNotDistinctFrom(_, _)
-            | Expr::InUnnest { .. }
-            | Expr::BinaryOp { .. }
-            | Expr::Like { .. }
-            | Expr::ILike { .. }
-            | Expr::SimilarTo { .. }
-            | Expr::RLike { .. }
-            | Expr::AnyOp { .. }
-            | Expr::AllOp { .. }
-            | Expr::AtTimeZone { .. }
-            | Expr::Position { .. }
-            | Expr::MemberOf(_) => {
-                self.child(expression, left_expression_child)?;
-                self.child(expression, right_expression_child)
+            Expr::IsFalse(expression)
+            | Expr::IsNotFalse(expression)
+            | Expr::IsTrue(expression)
+            | Expr::IsNotTrue(expression)
+            | Expr::IsNull(expression)
+            | Expr::IsNotNull(expression)
+            | Expr::IsUnknown(expression)
+            | Expr::IsNotUnknown(expression)
+            | Expr::Nested(expression)
+            | Expr::OuterJoin(expression)
+            | Expr::Prior(expression)
+            | Expr::IsJson { expr: expression, .. }
+            | Expr::IsNormalized { expr: expression, .. }
+            | Expr::UnaryOp { expr: expression, .. }
+            | Expr::Cast { expr: expression, .. }
+            | Expr::Extract { expr: expression, .. }
+            | Expr::Ceil { expr: expression, .. }
+            | Expr::Floor { expr: expression, .. }
+            | Expr::Collate { expr: expression, .. }
+            | Expr::Named { expr: expression, .. }
+            | Expr::Prefixed { value: expression, .. } => self.expression(expression),
+            Expr::Interval(interval) => self.expression(&interval.value),
+            Expr::Lambda(lambda) => self.expression(&lambda.body),
+            Expr::IsDistinctFrom(left, right)
+            | Expr::IsNotDistinctFrom(left, right)
+            | Expr::BinaryOp { left, right, .. }
+            | Expr::AnyOp { left, right, .. }
+            | Expr::AllOp { left, right, .. } => self.expression_pair(left, right),
+            Expr::InUnnest { expr, array_expr, .. } => self.expression_pair(expr, array_expr),
+            Expr::Like { expr, pattern, .. }
+            | Expr::ILike { expr, pattern, .. }
+            | Expr::SimilarTo { expr, pattern, .. }
+            | Expr::RLike { expr, pattern, .. } => self.expression_pair(expr, pattern),
+            Expr::AtTimeZone { timestamp, time_zone } => self.expression_pair(timestamp, time_zone),
+            Expr::Position { expr, r#in } => self.expression_pair(expr, r#in),
+            Expr::MemberOf(member) => self.expression_pair(&member.value, &member.array),
+            Expr::InList { expr, list, .. } => self.expression_with_many(expr, list),
+            Expr::Between { expr, low, high, .. } => self.expression_triple(expr, low, high),
+            Expr::Convert { expr, styles, .. } => self.expression_with_many(expr, styles),
+            Expr::Substring { expr, substring_from, substring_for, .. } => {
+                self.expression(expr)?;
+                self.optional_expression(substring_from.as_deref())?;
+                self.optional_expression(substring_for.as_deref())
             }
-            _ => Ok(()),
-        }
-    }
-
-    fn list_expression(
-        &mut self,
-        expression: AstRef<'query, 'db, Expr>,
-    ) -> Result<(), LookupError> {
-        match expression.get() {
-            Expr::InList { .. } => {
-                self.child(expression, |expression| {
-                    let Expr::InList { expr, .. } = expression else {
-                        return None;
-                    };
-                    Some(expr.as_ref())
-                })?;
-                self.children(expression, |expression| {
-                    let Expr::InList { list, .. } = expression else {
-                        return None;
-                    };
-                    Some(list.as_slice())
-                })
+            Expr::Trim { expr, trim_what, trim_characters, .. } => {
+                self.trim_expression(expr, trim_what.as_deref(), trim_characters.as_deref())
             }
-            Expr::Between { .. } => {
-                for child in
-                    [between_expression as fn(&Expr) -> Option<&Expr>, between_low, between_high]
-                {
-                    self.child(expression, child)?;
-                }
-                Ok(())
+            Expr::Overlay { expr, overlay_what, overlay_from, overlay_for } => {
+                self.expression(expr)?;
+                self.expression(overlay_what)?;
+                self.expression(overlay_from)?;
+                self.optional_expression(overlay_for.as_deref())
             }
-            Expr::Convert { .. } => {
-                self.child(expression, unary_expression_child)?;
-                self.children(expression, |expression| {
-                    let Expr::Convert { styles, .. } = expression else {
-                        return None;
-                    };
-                    Some(styles.as_slice())
-                })
+            Expr::Function(function) => self.function(function),
+            Expr::Case { operand, conditions, else_result, .. } => {
+                self.case_expression(operand.as_deref(), conditions, else_result.as_deref())
             }
-            Expr::Substring { .. } => {
-                self.child(expression, substring_expression)?;
-                self.child(expression, substring_start)?;
-                self.child(expression, substring_length)
+            Expr::GroupingSets(groups) | Expr::Cube(groups) | Expr::Rollup(groups) => {
+                self.expression_groups(groups)
             }
-            Expr::Trim { .. } => {
-                self.child(expression, trim_expression)?;
-                self.child(expression, trim_what)?;
-                self.children(expression, |expression| {
-                    let Expr::Trim { trim_characters, .. } = expression else {
-                        return None;
-                    };
-                    trim_characters.as_deref()
-                })
-            }
-            Expr::Overlay { .. } => {
-                for child in [
-                    overlay_expression as fn(&Expr) -> Option<&Expr>,
-                    overlay_value,
-                    overlay_start,
-                    overlay_length,
-                ] {
-                    self.child(expression, child)?;
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn call_expression(
-        &mut self,
-        expression: AstRef<'query, 'db, Expr>,
-    ) -> Result<(), LookupError> {
-        match expression.get() {
-            Expr::Function(_) => {
-                let Some(function) = expression.try_map(|expression| {
-                    let Expr::Function(function) = expression else {
-                        return None;
-                    };
-                    Some(function)
-                }) else {
-                    return Ok(());
-                };
-                self.function(function)
-            }
-            Expr::Case { .. } => {
-                self.child(expression, |expression| {
-                    let Expr::Case { operand, .. } = expression else {
-                        return None;
-                    };
-                    operand.as_deref()
-                })?;
-                let Some(cases) = expression.try_map(|expression| {
-                    let Expr::Case { conditions, .. } = expression else {
-                        return None;
-                    };
-                    Some(conditions.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for case in cases.iter() {
-                    self.case_when(case)?;
-                }
-                self.child(expression, |expression| {
-                    let Expr::Case { else_result, .. } = expression else {
-                        return None;
-                    };
-                    else_result.as_deref()
-                })
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn collection_expression(
-        &mut self,
-        expression: AstRef<'query, 'db, Expr>,
-    ) -> Result<(), LookupError> {
-        match expression.get() {
-            Expr::GroupingSets(_) | Expr::Cube(_) | Expr::Rollup(_) => {
-                let Some(groups) = expression.try_map(|expression| {
-                    match expression {
-                        Expr::GroupingSets(groups) | Expr::Cube(groups) | Expr::Rollup(groups) => {
-                            Some(groups.as_slice())
-                        }
-                        _ => None,
-                    }
-                }) else {
-                    return Ok(());
-                };
-                for group in groups.iter() {
-                    self.children(group, |group| Some(group.as_slice()))?;
-                }
-                Ok(())
-            }
-            Expr::Tuple(_) | Expr::Struct { .. } | Expr::Array(_) => {
-                self.children(expression, |expression| {
-                    match expression {
-                        Expr::Tuple(expressions) => Some(expressions.as_slice()),
-                        Expr::Struct { values, .. } => Some(values.as_slice()),
-                        Expr::Array(array) => Some(array.elem.as_slice()),
-                        _ => None,
-                    }
-                })
-            }
-            Expr::Dictionary(_) => {
-                let Some(fields) = expression.try_map(|expression| {
-                    let Expr::Dictionary(fields) = expression else {
-                        return None;
-                    };
-                    Some(fields.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for field in fields.iter() {
-                    self.dictionary_field(field)?;
-                }
-                Ok(())
-            }
-            Expr::Map(_) => {
-                let Some(entries) = expression.try_map(|expression| {
-                    let Expr::Map(map) = expression else {
-                        return None;
-                    };
-                    Some(map.entries.as_slice())
-                }) else {
-                    return Ok(());
-                };
-                for entry in entries.iter() {
-                    self.map_entry(entry)?;
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn expression(&mut self, expression: AstRef<'query, 'db, Expr>) -> Result<(), LookupError> {
-        match expression.get() {
-            Expr::InSubquery { .. } | Expr::Exists { .. } | Expr::Subquery(_) => {
-                self.query_expression(expression)
-            }
-            Expr::CompoundFieldAccess { .. } | Expr::JsonAccess { .. } => {
-                self.access_expression(expression)
-            }
-            Expr::IsFalse(_)
-            | Expr::IsNotFalse(_)
-            | Expr::IsTrue(_)
-            | Expr::IsNotTrue(_)
-            | Expr::IsNull(_)
-            | Expr::IsNotNull(_)
-            | Expr::IsUnknown(_)
-            | Expr::IsNotUnknown(_)
-            | Expr::IsDistinctFrom(_, _)
-            | Expr::IsNotDistinctFrom(_, _)
-            | Expr::IsJson { .. }
-            | Expr::IsNormalized { .. }
-            | Expr::InUnnest { .. }
-            | Expr::BinaryOp { .. }
-            | Expr::Like { .. }
-            | Expr::ILike { .. }
-            | Expr::SimilarTo { .. }
-            | Expr::RLike { .. }
-            | Expr::AnyOp { .. }
-            | Expr::AllOp { .. }
-            | Expr::UnaryOp { .. }
-            | Expr::Cast { .. }
-            | Expr::AtTimeZone { .. }
-            | Expr::Extract { .. }
-            | Expr::Ceil { .. }
-            | Expr::Floor { .. }
-            | Expr::Position { .. }
-            | Expr::Collate { .. }
-            | Expr::Nested(_)
-            | Expr::Prefixed { .. }
-            | Expr::Named { .. }
-            | Expr::Interval(_)
-            | Expr::OuterJoin(_)
-            | Expr::Prior(_)
-            | Expr::Lambda(_)
-            | Expr::MemberOf(_) => self.operator_expression(expression),
-            Expr::InList { .. }
-            | Expr::Between { .. }
-            | Expr::Convert { .. }
-            | Expr::Substring { .. }
-            | Expr::Trim { .. }
-            | Expr::Overlay { .. } => self.list_expression(expression),
-            Expr::Function(_) | Expr::Case { .. } => self.call_expression(expression),
-            Expr::GroupingSets(_)
-            | Expr::Cube(_)
-            | Expr::Rollup(_)
-            | Expr::Tuple(_)
-            | Expr::Struct { .. }
-            | Expr::Dictionary(_)
-            | Expr::Map(_)
-            | Expr::Array(_) => self.collection_expression(expression),
+            Expr::Tuple(expressions) => self.expressions(expressions),
+            Expr::Struct { values, .. } => self.expressions(values),
+            Expr::Array(array) => self.expressions(&array.elem),
+            Expr::Dictionary(fields) => self.dictionary_fields(fields),
+            Expr::Map(map) => self.map_entries(&map.entries),
             Expr::Identifier(_)
             | Expr::CompoundIdentifier(_)
             | Expr::Value(_)
@@ -2181,158 +1763,6 @@ where
             | Expr::QualifiedWildcard(_, _) => Ok(()),
         }
     }
-}
-
-fn unary_expression_child(expression: &Expr) -> Option<&Expr> {
-    match expression {
-        Expr::IsFalse(expression)
-        | Expr::IsNotFalse(expression)
-        | Expr::IsTrue(expression)
-        | Expr::IsNotTrue(expression)
-        | Expr::IsNull(expression)
-        | Expr::IsNotNull(expression)
-        | Expr::IsUnknown(expression)
-        | Expr::IsNotUnknown(expression)
-        | Expr::Nested(expression)
-        | Expr::OuterJoin(expression)
-        | Expr::Prior(expression) => Some(expression.as_ref()),
-        Expr::IsJson { expr, .. }
-        | Expr::IsNormalized { expr, .. }
-        | Expr::UnaryOp { expr, .. }
-        | Expr::Convert { expr, .. }
-        | Expr::Cast { expr, .. }
-        | Expr::Extract { expr, .. }
-        | Expr::Ceil { expr, .. }
-        | Expr::Floor { expr, .. }
-        | Expr::Collate { expr, .. }
-        | Expr::Named { expr, .. } => Some(expr.as_ref()),
-        Expr::Prefixed { value, .. } => Some(value.as_ref()),
-        Expr::Interval(interval) => Some(interval.value.as_ref()),
-        Expr::Lambda(lambda) => Some(lambda.body.as_ref()),
-        _ => None,
-    }
-}
-
-fn left_expression_child(expression: &Expr) -> Option<&Expr> {
-    match expression {
-        Expr::IsDistinctFrom(left, _)
-        | Expr::IsNotDistinctFrom(left, _)
-        | Expr::BinaryOp { left, .. }
-        | Expr::AnyOp { left, .. }
-        | Expr::AllOp { left, .. } => Some(left.as_ref()),
-        Expr::InUnnest { expr, .. }
-        | Expr::Like { expr, .. }
-        | Expr::ILike { expr, .. }
-        | Expr::SimilarTo { expr, .. }
-        | Expr::RLike { expr, .. }
-        | Expr::Position { expr, .. } => Some(expr.as_ref()),
-        Expr::AtTimeZone { timestamp, .. } => Some(timestamp.as_ref()),
-        Expr::MemberOf(member) => Some(member.value.as_ref()),
-        _ => None,
-    }
-}
-
-fn right_expression_child(expression: &Expr) -> Option<&Expr> {
-    match expression {
-        Expr::IsDistinctFrom(_, right)
-        | Expr::IsNotDistinctFrom(_, right)
-        | Expr::BinaryOp { right, .. }
-        | Expr::AnyOp { right, .. }
-        | Expr::AllOp { right, .. } => Some(right.as_ref()),
-        Expr::InUnnest { array_expr, .. } => Some(array_expr.as_ref()),
-        Expr::Like { pattern, .. }
-        | Expr::ILike { pattern, .. }
-        | Expr::SimilarTo { pattern, .. }
-        | Expr::RLike { pattern, .. } => Some(pattern.as_ref()),
-        Expr::AtTimeZone { time_zone, .. } => Some(time_zone.as_ref()),
-        Expr::Position { r#in, .. } => Some(r#in.as_ref()),
-        Expr::MemberOf(member) => Some(member.array.as_ref()),
-        _ => None,
-    }
-}
-
-fn between_expression(expression: &Expr) -> Option<&Expr> {
-    let Expr::Between { expr, .. } = expression else {
-        return None;
-    };
-    Some(expr.as_ref())
-}
-
-fn between_low(expression: &Expr) -> Option<&Expr> {
-    let Expr::Between { low, .. } = expression else {
-        return None;
-    };
-    Some(low.as_ref())
-}
-
-fn between_high(expression: &Expr) -> Option<&Expr> {
-    let Expr::Between { high, .. } = expression else {
-        return None;
-    };
-    Some(high.as_ref())
-}
-
-fn substring_expression(expression: &Expr) -> Option<&Expr> {
-    let Expr::Substring { expr, .. } = expression else {
-        return None;
-    };
-    Some(expr.as_ref())
-}
-
-fn substring_start(expression: &Expr) -> Option<&Expr> {
-    let Expr::Substring { substring_from, .. } = expression else {
-        return None;
-    };
-    substring_from.as_deref()
-}
-
-fn substring_length(expression: &Expr) -> Option<&Expr> {
-    let Expr::Substring { substring_for, .. } = expression else {
-        return None;
-    };
-    substring_for.as_deref()
-}
-
-fn trim_expression(expression: &Expr) -> Option<&Expr> {
-    let Expr::Trim { expr, .. } = expression else {
-        return None;
-    };
-    Some(expr.as_ref())
-}
-
-fn trim_what(expression: &Expr) -> Option<&Expr> {
-    let Expr::Trim { trim_what, .. } = expression else {
-        return None;
-    };
-    trim_what.as_deref()
-}
-
-fn overlay_expression(expression: &Expr) -> Option<&Expr> {
-    let Expr::Overlay { expr, .. } = expression else {
-        return None;
-    };
-    Some(expr.as_ref())
-}
-
-fn overlay_value(expression: &Expr) -> Option<&Expr> {
-    let Expr::Overlay { overlay_what, .. } = expression else {
-        return None;
-    };
-    Some(overlay_what.as_ref())
-}
-
-fn overlay_start(expression: &Expr) -> Option<&Expr> {
-    let Expr::Overlay { overlay_from, .. } = expression else {
-        return None;
-    };
-    Some(overlay_from.as_ref())
-}
-
-fn overlay_length(expression: &Expr) -> Option<&Expr> {
-    let Expr::Overlay { overlay_for, .. } = expression else {
-        return None;
-    };
-    overlay_for.as_deref()
 }
 
 fn index_expression_queries<'query, 'db, DB, P>(
@@ -2346,7 +1776,36 @@ where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
 {
-    NestedQueryIndexer { cte_scope, deriving, parent, profile }.expression(expression)
+    match expression {
+        AstRef::Query(expression) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Query(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                },
+            }
+            .expression(expression)
+        }
+        AstRef::Database(expression) => {
+            NestedQueryWalker {
+                query: |query| {
+                    index_nested_query_scopes(
+                        AstRef::Database(query),
+                        cte_scope,
+                        deriving,
+                        parent,
+                        profile,
+                    )
+                },
+            }
+            .expression(expression)
+        }
+    }
 }
 
 fn derived_projection_source<'db, DB: DatabaseLike, D: Copy>(
@@ -2666,10 +2125,10 @@ fn base_exposes_column<DB: DatabaseLike, D: Copy>(
     })
 }
 
-fn find_base_column<'scope, 'db, DB: DatabaseLike, D: Copy>(
-    base: &'scope FromTableRef<'_, 'db, DB, D>,
+fn find_base_column<'scope, DB: DatabaseLike, D: Copy>(
+    base: &'scope FromTableRef<'_, '_, DB, D>,
     column: &Ident,
-) -> Option<&'scope BaseColumnRef<'db, DB, D>> {
+) -> Option<&'scope BaseColumnRef<D>> {
     base.output_columns.iter().find(|candidate| {
         identifiers_match(
             &candidate.name,
@@ -2792,15 +2251,6 @@ struct ResolvedColumn<'db, DB: DatabaseLike, D: Copy> {
     definition: D,
 }
 
-impl<DB: DatabaseLike, D: Copy> Copy for ResolvedColumn<'_, DB, D> {}
-
-#[expect(clippy::expl_impl_clone_on_copy, reason = "derive would require DB: Clone")]
-impl<DB: DatabaseLike, D: Copy> Clone for ResolvedColumn<'_, DB, D> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
 enum LookupOutcome<T> {
     Found(T),
     SearchParent,
@@ -2904,9 +2354,9 @@ fn unqualified_definition_local<'db, DB: DatabaseLike, D: Copy>(
             None => {}
         }
     }
-    match definitions.as_slice() {
-        [] => Ok(LookupOutcome::SearchParent),
-        [definition] => Ok(LookupOutcome::Found(*definition)),
+    match definitions.len() {
+        0 => Ok(LookupOutcome::SearchParent),
+        1 => Ok(LookupOutcome::Found(definitions.swap_remove(0))),
         _ => {
             candidates.sort_unstable();
             candidates.dedup();
@@ -3057,7 +2507,7 @@ fn aliased_output_columns<'query, 'db, DB, P>(
     alias: Option<AstRef<'query, 'db, TableAlias>>,
     database: &'db DB,
     profile: &mut P,
-) -> Result<Option<BaseColumns<'db, DB, P::Definition>>, LookupError>
+) -> Result<Option<BaseColumns<P::Definition>>, LookupError>
 where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
@@ -3068,7 +2518,6 @@ where
             BaseColumnRef {
                 name: column.column_name().to_string(),
                 quoted: column.column_name_is_quoted(),
-                source: table,
                 definition: profile.base_definition(table, column),
             }
         })

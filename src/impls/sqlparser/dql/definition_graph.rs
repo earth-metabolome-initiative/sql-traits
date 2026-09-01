@@ -1,5 +1,5 @@
 use alloc::{borrow::ToOwned, vec::Vec};
-use core::{fmt, marker::PhantomData, slice};
+use core::{marker::PhantomData, slice};
 
 use sqlparser::ast::{Expr, Select, SetOperator};
 
@@ -123,16 +123,6 @@ pub(crate) struct DefinitionGraph<'query, 'db, DB: DatabaseLike> {
     definitions: Vec<DefinitionNode<'query, 'db, DB>>,
     scopes: Vec<ScopeNode<'query, 'db, DB>>,
     select_index: Vec<SelectIndex>,
-}
-
-impl<DB: DatabaseLike> fmt::Debug for DefinitionGraph<'_, '_, DB> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DefinitionGraph")
-            .field("definitions", &self.definitions.len())
-            .field("scopes", &self.scopes.len())
-            .finish()
-    }
 }
 
 impl<'query, 'db, DB: DatabaseLike> DefinitionGraph<'query, 'db, DB> {
@@ -420,7 +410,6 @@ pub(crate) fn table_graph<'db, DB: DatabaseLike>(
             output_columns.push(BaseColumnRef {
                 name: column.column_name().to_owned(),
                 quoted: column.column_name_is_quoted(),
-                source: table,
                 definition,
             });
         }
