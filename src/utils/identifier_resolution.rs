@@ -7,7 +7,7 @@
 
 use alloc::{borrow::Cow, string::String};
 
-use sqlparser::ast::{Function, Ident, ObjectNamePart};
+use sqlparser::ast::{Function, Ident};
 use unicode_normalization::UnicodeNormalization;
 
 /// Parsed lookup identifier from a textual query.
@@ -134,20 +134,14 @@ pub fn stored_ident_name(ident: &Ident) -> Cow<'_, str> {
     normalize_identifier(&ident.value, ident.quote_style.is_some())
 }
 
-/// Returns the terminal identifier of a written function name.
-fn terminal_ident(part: &ObjectNamePart) -> &Ident {
-    match part {
-        ObjectNamePart::Identifier(ident) => ident,
-        ObjectNamePart::Function(function) => &function.name,
-    }
-}
-
 /// Returns the folded terminal name of a call, and [`None`] when that name was
-/// quoted.
+/// quoted or is built at run time.
 ///
 /// This is the form a keyword or a display name is compared against, so a
 /// quoted spelling is refused rather than folded: `"now"` is a function
-/// somebody declared under that exact name, not the keyword `now`.
+/// somebody declared under that exact name, not the keyword `now`. A part some
+/// dialects spell as a call, such as `IDENTIFIER('now')`, names whatever it
+/// returns when the statement runs, so no name can be read from it either.
 ///
 /// The qualifier is ignored, so this says what a call is called and not which
 /// function it reaches. Use [`builtin_function_name`] to decide whether a call
@@ -174,7 +168,7 @@ fn terminal_ident(part: &ObjectNamePart) -> &Ident {
 /// ```
 #[must_use]
 pub fn folded_function_name(function: &Function) -> Option<String> {
-    let terminal = terminal_ident(function.name.0.last()?);
+    let terminal = function.name.0.last()?.as_ident()?;
     terminal.quote_style.is_none().then(|| terminal.value.to_ascii_lowercase())
 }
 
@@ -186,7 +180,8 @@ pub fn folded_function_name(function: &Function) -> Option<String> {
 /// which the quoted spelling `"pg_catalog"` also names. Every other schema
 /// names a declared function whatever the terminal says, which is how
 /// `app.now()` shadows the clock, and a name of three or more parts is refused
-/// outright.
+/// outright. So is a part built at run time, such as `IDENTIFIER('now')`,
+/// because what it will name is unknown until the statement runs.
 ///
 /// A caller that reads a builtin as something it can trust, a clock or a
 /// current-user probe, has to refuse those spellings: taking `app.now()` for
@@ -223,8 +218,8 @@ pub fn folded_function_name(function: &Function) -> Option<String> {
 #[must_use]
 pub fn builtin_function_name(function: &Function) -> Option<String> {
     let (schema, terminal) = match function.name.0.as_slice() {
-        [terminal] => (None, terminal_ident(terminal)),
-        [schema, terminal] => (Some(terminal_ident(schema)), terminal_ident(terminal)),
+        [terminal] => (None, terminal.as_ident()?),
+        [schema, terminal] => (Some(schema.as_ident()?), terminal.as_ident()?),
         _ => return None,
     };
     if schema.is_some_and(|schema| stored_ident_name(schema) != "pg_catalog") {
@@ -236,7 +231,10 @@ pub fn builtin_function_name(function: &Function) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use sqlparser::{
-        ast::{Expr, Function, Ident, ObjectNamePart, ObjectNamePartFunction},
+        ast::{
+            Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectNamePart,
+            ObjectNamePartFunction, Value,
+        },
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
@@ -283,30 +281,37 @@ mod tests {
         assert_eq!(builtin_function_name(&call("\"PG_CATALOG\".now()")), None);
     }
 
-    /// A name part spelled as a call, which Snowflake's `IDENTIFIER(...)`
-    /// produces, is read by the identifier it carries.
+    /// A name part some dialects spell as a call, `IDENTIFIER('now')`, names
+    /// whatever the call returns when the statement runs. Nothing static can
+    /// be read from it, in either position, so both helpers refuse it rather
+    /// than reading the producing function's own name.
     #[test]
-    fn a_dynamic_name_part_is_read_by_its_identifier() {
-        let dynamic = |value: &str| {
+    fn a_name_part_built_at_run_time_reads_as_no_name() {
+        let identifier_of = |spelled: &str| {
             ObjectNamePart::Function(ObjectNamePartFunction {
-                name: Ident::new(value),
-                args: Vec::new(),
+                name: Ident::new("IDENTIFIER"),
+                args: alloc::vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(
+                    Value::SingleQuotedString(String::from(spelled)).into()
+                )))],
             })
         };
 
         let mut unqualified = call("now()");
-        unqualified.name.0 = alloc::vec![dynamic("NOW")];
-        assert_eq!(folded_function_name(&unqualified).as_deref(), Some("now"));
-        assert_eq!(builtin_function_name(&unqualified).as_deref(), Some("now"));
+        unqualified.name.0 = alloc::vec![identifier_of("now")];
+        assert_eq!(folded_function_name(&unqualified), None);
+        assert_eq!(builtin_function_name(&unqualified), None);
 
         let mut qualified = call("app.now()");
-        qualified.name.0 = alloc::vec![dynamic("pg_catalog"), dynamic("now")];
-        assert_eq!(builtin_function_name(&qualified).as_deref(), Some("now"));
-
-        qualified.name.0 = alloc::vec![dynamic("app"), dynamic("now")];
+        qualified.name.0 =
+            alloc::vec![identifier_of("pg_catalog"), ObjectNamePart::Identifier(Ident::new("now"))];
         assert_eq!(builtin_function_name(&qualified), None);
 
-        // An empty name has no terminal identifier to read.
+        qualified.name.0 =
+            alloc::vec![ObjectNamePart::Identifier(Ident::new("pg_catalog")), identifier_of("now")];
+        assert_eq!(folded_function_name(&qualified), None);
+        assert_eq!(builtin_function_name(&qualified), None);
+
+        // An empty name has no terminal part to read.
         unqualified.name.0.clear();
         assert_eq!(folded_function_name(&unqualified), None);
         assert_eq!(builtin_function_name(&unqualified), None);
