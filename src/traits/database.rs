@@ -480,7 +480,57 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// reporting ambiguity, use [`Self::resolve_target_table`]. To resolve a
     /// parser node, use
     /// [`ParserDB::resolve_table_object_name_on_search_path`](crate::structs::ParserDB::resolve_table_object_name_on_search_path).
+    /// To ask for the table stored under an exact identity rather than for
+    /// what a reference denotes, use [`Self::table_by_stored_identity`].
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
+
+    /// Returns the table stored under exactly this identity.
+    ///
+    /// Both parts are read as the catalog holds them, the form
+    /// [`TableLike::stored_table_schema`] and [`TableLike::stored_table_name`]
+    /// report: nothing folds, no quoting is interpreted, so a quote character
+    /// stands for itself and matches only a stored name carrying one, and a
+    /// table stored without a schema is not reached by a `public` qualifier.
+    /// A caller that normalized a name once asks for that name back this way.
+    ///
+    /// [`Self::table`] answers the other question, what a written reference
+    /// denotes, so it folds an unquoted name and reads no schema and `public`
+    /// as one place.
+    ///
+    /// The body here scans [`Self::tables`], which an implementation holding
+    /// an index of its own overrides, as [`GenericDB`] does.
+    ///
+    /// [`GenericDB`]: crate::structs::GenericDB
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "CREATE TABLE \"Docs\" (id INT); CREATE TABLE plain (id INT);",
+    /// )?;
+    ///
+    /// assert!(db.table_by_stored_identity(None, "Docs").is_some());
+    /// assert!(db.table_by_stored_identity(None, "docs").is_none());
+    /// assert!(db.table_by_stored_identity(Some("public"), "plain").is_none());
+    /// assert!(db.table_by_stored_identity(None, "plain").is_some());
+    ///
+    /// // A written reference folds an unquoted name, and either spelling of
+    /// // the default schema reaches a table stored in it.
+    /// assert!(db.table(None, "PLAIN").is_some());
+    /// assert!(db.table(Some("public"), "plain").is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn table_by_stored_identity(&self, schema: Option<&str>, name: &str) -> Option<&Self::Table> {
+        self.tables().find(|table| {
+            table.stored_table_schema().as_deref() == schema && table.stored_table_name() == name
+        })
+    }
 
     /// Iterates over the plain views defined in the schema.
     ///

@@ -256,6 +256,18 @@ pub(crate) fn stored_table_key<T: TableLike>(table: &T) -> RelationKey {
     }
 }
 
+/// Key a stored identity is found under, taking each part exactly as stored.
+///
+/// The index folds a schema-less relation into `public`, so this key reaches
+/// the bucket holding both spellings and the caller separates them by
+/// comparing the stored parts.
+pub(crate) fn stored_identity_key(schema: Option<&str>, name: &str) -> RelationKey {
+    RelationKey {
+        schema: schema.map_or_else(|| String::from("public"), String::from),
+        name: String::from(name),
+    }
+}
+
 /// Key a stored view is indexed under, folding a schema-less view into
 /// `public` exactly as a table is folded.
 pub(crate) fn stored_view_key<V: ViewLike>(view: &V) -> RelationKey {

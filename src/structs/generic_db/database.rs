@@ -10,7 +10,7 @@ use crate::{
         identifier_resolution::{normalize_identifier, stored_identifier_matches_lookup},
         object_name::{
             RelationKey, lookup_key, render_view_candidate, resolve_one_relation,
-            resolve_target_from_candidates, target_key,
+            resolve_target_from_candidates, stored_identity_key, target_key,
         },
     },
 };
@@ -60,6 +60,14 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
 
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table> {
         self.indexed_tables(&lookup_key(schema, table_name)).next()
+    }
+
+    fn table_by_stored_identity(&self, schema: Option<&str>, name: &str) -> Option<&Self::Table> {
+        // One bucket holds both spellings of the default schema, so the probe
+        // narrows to a name and the comparison decides the identity.
+        self.indexed_tables(&stored_identity_key(schema, name)).find(|table| {
+            table.stored_table_schema().as_deref() == schema && table.stored_table_name() == name
+        })
     }
 
     fn views(&self) -> impl Iterator<Item = &Self::View> {

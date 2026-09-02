@@ -1146,6 +1146,32 @@ fn the_inherited_resolver_walks_the_default_schema() -> Result<(), LookupError> 
     Ok(())
 }
 
+/// The inherited identity lookup compares both parts as stored, so it neither
+/// folds a name nor reads the absent schema as `public`, unlike the written
+/// lookup right beside it.
+#[test]
+fn the_inherited_identity_lookup_compares_stored_parts() {
+    let catalog = catalog();
+
+    let bare = catalog
+        .table_by_stored_identity(None, "docs")
+        .expect("one table is stored without a schema");
+    assert_eq!(bare.table_schema(), None);
+
+    let qualified =
+        catalog.table_by_stored_identity(Some("app"), "docs").expect("one is stored in `app`");
+    assert_eq!(qualified.table_schema(), Some("app"));
+
+    assert!(catalog.table_by_stored_identity(Some("public"), "docs").is_none());
+    assert!(catalog.table_by_stored_identity(None, "Docs").is_none());
+    assert!(catalog.table_by_stored_identity(Some("audit"), "docs").is_none());
+
+    // The written lookup keeps folding and keeps reading both spellings of the
+    // default schema as one place.
+    assert!(catalog.table(Some("public"), "docs").is_some());
+    assert!(catalog.table(None, "DOCS").is_some());
+}
+
 /// The inherited view resolvers answer nothing for a catalog holding no views,
 /// rather than reaching for a table of that name.
 #[test]
