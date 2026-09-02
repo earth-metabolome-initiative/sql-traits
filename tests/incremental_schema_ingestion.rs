@@ -112,9 +112,9 @@ fn postgres_catalog_and_created_collations_survive_incremental_statements() {
     let catalog = PostgresCatalog::empty()
         .with_collation(PostgresCatalogCollation::new("base", false).with_deterministic(false))
         .with_collatable_type(PostgresCatalogType::new("text", false));
-    let input = ParseOptions::default()
-        .with_postgres_catalog(catalog)
-        .ingestor::<PostgreSqlDialect>("test".to_owned());
+    let options = ParseOptions::default().with_postgres_catalog(catalog);
+    assert_eq!(options.postgres_catalog().collations().count(), 1);
+    let input = options.ingestor::<PostgreSqlDialect>("test".to_owned());
     let input = statements("CREATE COLLATION ci FROM base;")
         .into_iter()
         .try_fold(input, ParserDBIngestor::apply_statement)

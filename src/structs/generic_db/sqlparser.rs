@@ -3418,12 +3418,13 @@ impl ParserDBIngestor {
         statements: impl IntoIterator<Item = Statement>,
     ) -> Result<Self, crate::errors::Error> {
         let Self { builder, active_postgres_catalog, collation_metadata, access_resolution } = self;
+        let mut statements = statements.into_iter();
         let (builder, active_postgres_catalog, collation_metadata) = ParserDB::apply_statements(
             builder,
             active_postgres_catalog,
             collation_metadata,
             access_resolution,
-            statements,
+            &mut statements,
         )?;
         Ok(Self { builder, active_postgres_catalog, collation_metadata, access_resolution })
     }
@@ -5478,7 +5479,7 @@ impl ParserDB {
         mut active_postgres_catalog: PostgresCatalog,
         mut collation_metadata: Vec<CreatedCollationMetadata>,
         access_resolution: AccessResolution,
-        statements: impl IntoIterator<Item = Statement>,
+        statements: &mut dyn Iterator<Item = Statement>,
     ) -> Result<
         (ParserDBBuilder, PostgresCatalog, Vec<CreatedCollationMetadata>),
         crate::errors::Error,
