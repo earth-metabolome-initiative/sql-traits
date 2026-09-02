@@ -9,7 +9,7 @@ use sqlparser::{ast::Statement, dialect::Dialect};
 use crate::{
     errors::Error,
     impls::SqlparserDialect,
-    structs::{ParserDB, PostgresCatalog},
+    structs::{ParserDB, ParserDBIngestor, PostgresCatalog},
 };
 
 /// How an access control statement is resolved against the objects the parsed
@@ -106,6 +106,33 @@ impl ParseOptions {
         &self.postgres_catalog
     }
 
+    /// Returns the owned settings used during ingestion.
+    pub(super) fn into_parts(self) -> (AccessResolution, PostgresCatalog) {
+        (self.access_resolution, self.postgres_catalog)
+    }
+
+    /// Starts statement-by-statement ingestion under these options.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let statements =
+    ///     Parser::parse_sql(&PostgreSqlDialect {}, "CREATE TABLE docs (id uuid PRIMARY KEY);")?;
+    /// let mut input = ParseOptions::default().ingestor::<PostgreSqlDialect>("docs".to_string());
+    /// for statement in statements {
+    ///     input = input.apply_statement(statement)?;
+    /// }
+    /// assert!(input.snapshot().table(None, "docs").is_some());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    #[must_use]
+    pub fn ingestor<D: Dialect + 'static>(self, catalog_name: String) -> ParserDBIngestor {
+        ParserDBIngestor::with_options::<D>(catalog_name, self)
+    }
+
     /// Parses SQL under these options using the specified dialect.
     ///
     /// See [`ParserDB::parse`], which this method configures.
@@ -136,7 +163,7 @@ impl ParseOptions {
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```
     pub fn parse<D: Dialect + Default + 'static>(self, sql: &str) -> Result<ParserDB, Error> {
-        ParserDB::parse_with_options::<D>(sql, &self)
+        ParserDB::parse_with_options::<D>(sql, self)
     }
 
     /// Builds a [`ParserDB`] from already parsed statements under these
@@ -176,7 +203,7 @@ impl ParseOptions {
             statements,
             catalog_name,
             SqlparserDialect::default(),
-            &self,
+            self,
         )
     }
 
@@ -191,7 +218,7 @@ impl ParseOptions {
         catalog_name: String,
         dialect: SqlparserDialect,
     ) -> Result<ParserDB, Error> {
-        ParserDB::from_statements_with_options(statements, catalog_name, dialect, &self)
+        ParserDB::from_statements_with_options(statements, catalog_name, dialect, self)
     }
 
     /// Parses SQL from a file or directory path under these options.
@@ -217,6 +244,6 @@ impl ParseOptions {
     /// parsing fails.
     #[cfg(feature = "std")]
     pub fn from_paths<D: Dialect + Default>(self, paths: &[&Path]) -> Result<ParserDB, Error> {
-        ParserDB::from_paths_with_options::<D>(paths, &self)
+        ParserDB::from_paths_with_options::<D>(paths, self)
     }
 }

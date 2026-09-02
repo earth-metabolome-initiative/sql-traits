@@ -107,6 +107,14 @@ struct CreatedCollationMetadata {
     postgres_deterministic: Option<bool>,
 }
 
+/// A statement-by-statement builder that produces queryable schema snapshots.
+pub struct ParserDBIngestor {
+    builder: ParserDBBuilder,
+    active_postgres_catalog: PostgresCatalog,
+    collation_metadata: Vec<CreatedCollationMetadata>,
+    access_resolution: AccessResolution,
+}
+
 #[derive(Clone, Copy)]
 struct ActiveCollations<'a> {
     created: &'a [CreatedCollationMetadata],
@@ -3287,6 +3295,162 @@ pub enum UnresolvedAccessReference<'a> {
     },
 }
 
+impl ParserDBIngestor {
+    /// Starts an empty schema using the named parser dialect.
+    #[must_use]
+    pub fn new<D: Dialect + 'static>(catalog_name: String) -> Self {
+        Self::with_options::<D>(catalog_name, ParseOptions::default())
+    }
+
+    fn with_options<D: Dialect + 'static>(catalog_name: String, options: ParseOptions) -> Self {
+        Self::with_dialect(catalog_name, SqlparserDialect::of::<D>(), options)
+    }
+
+    fn with_dialect(
+        catalog_name: String,
+        dialect: SqlparserDialect,
+        options: ParseOptions,
+    ) -> Self {
+        let (access_resolution, postgres_catalog) = options.into_parts();
+        let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect);
+        let active_postgres_catalog = if matches!(dialect, SqlparserDialect::PostgreSql) {
+            postgres_catalog
+        } else {
+            PostgresCatalog::empty()
+        };
+
+        let any_type = DataType::Custom(
+            ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
+            vec![],
+        );
+
+        let arg = |data_type: DataType| {
+            OperateFunctionArg { mode: None, name: None, data_type, default_expr: None }
+        };
+
+        // The mode, not a name: an argument reader hands back what the input
+        // declares, and `VARIADIC` as a name would invent an argument called
+        // that.
+        let variadic_arg = |data_type: DataType| {
+            OperateFunctionArg {
+                mode: Some(ArgMode::Variadic),
+                name: None,
+                data_type,
+                default_expr: None,
+            }
+        };
+
+        let builtins = vec![
+            ("length", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("len", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("char_length", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("character_length", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("octet_length", vec![arg(DataType::Text)], DataType::Int(None)),
+            ("coalesce", vec![variadic_arg(any_type.clone())], any_type.clone()),
+            ("nullif", vec![arg(any_type.clone()), arg(any_type.clone())], any_type.clone()),
+            ("now", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
+            ("current_timestamp", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
+            ("current_date", vec![], DataType::Date),
+            ("current_time", vec![], DataType::Time(None, TimezoneInfo::WithTimeZone)),
+            ("localtimestamp", vec![], DataType::Timestamp(None, TimezoneInfo::None)),
+            ("localtime", vec![], DataType::Time(None, TimezoneInfo::None)),
+            ("gen_random_uuid", vec![], DataType::Uuid),
+            ("uuidv4", vec![], DataType::Uuid),
+            ("uuidv7", vec![], DataType::Uuid),
+            (
+                "uuidv7",
+                vec![arg(DataType::Interval { fields: None, precision: None })],
+                DataType::Uuid,
+            ),
+            ("count", vec![arg(any_type.clone())], DataType::BigInt(None)),
+            ("sum", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
+            ("avg", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
+            ("min", vec![arg(any_type.clone())], any_type.clone()),
+            ("max", vec![arg(any_type.clone())], any_type.clone()),
+            ("current_user", vec![], DataType::Text),
+            ("session_user", vec![], DataType::Text),
+            ("user", vec![], DataType::Text),
+        ];
+
+        // Qualified the way PostgreSQL holds them, in `pg_catalog` rather than
+        // in the schema a `CREATE FUNCTION` lands in. A user function that
+        // shadows a builtin is accepted by the server for exactly that reason,
+        // so without the qualifier the duplicate check would refuse it.
+        for (name, args, return_type) in builtins {
+            let create_function = CreateFunction {
+                or_alter: false,
+                or_replace: false,
+                temporary: false,
+                if_not_exists: false,
+                name: ObjectName(vec![
+                    ObjectNamePart::Identifier(Ident::new("pg_catalog")),
+                    ObjectNamePart::Identifier(Ident::new(name)),
+                ]),
+                args: Some(args),
+                return_type: Some(FunctionReturnType::DataType(return_type)),
+                function_body: Some(CreateFunctionBody::AsBeforeOptions {
+                    body: Expr::Value(ValueWithSpan {
+                        value: Value::SingleQuotedString(String::new()),
+                        span: Span::empty(),
+                    }),
+                    link_symbol: None,
+                }),
+                behavior: None,
+                called_on_null: None,
+                parallel: None,
+                using: None,
+                language: Some(Ident::new("internal")),
+                determinism_specifier: None,
+                options: None,
+                remote_connection: None,
+                security: None,
+                set_params: vec![],
+            };
+            builder = builder.add_function(Arc::new(create_function), FunctionMetadata::default());
+        }
+
+        let collation_metadata = Vec::new();
+        Self { builder, active_postgres_catalog, collation_metadata, access_resolution }
+    }
+
+    fn apply_statements(
+        self,
+        statements: impl IntoIterator<Item = Statement>,
+    ) -> Result<Self, crate::errors::Error> {
+        let Self { builder, active_postgres_catalog, collation_metadata, access_resolution } = self;
+        let mut statements = statements.into_iter();
+        let (builder, active_postgres_catalog, collation_metadata) = ParserDB::apply_statements(
+            builder,
+            active_postgres_catalog,
+            collation_metadata,
+            access_resolution,
+            &mut statements,
+        )?;
+        Ok(Self { builder, active_postgres_catalog, collation_metadata, access_resolution })
+    }
+
+    /// Applies one statement to the current schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the statement is invalid for the current schema.
+    pub fn apply_statement(self, statement: Statement) -> Result<Self, crate::errors::Error> {
+        self.apply_statements(core::iter::once(statement))
+    }
+
+    /// Returns a queryable snapshot without consuming the builder.
+    #[must_use]
+    pub fn snapshot(&self) -> ParserDB {
+        self.builder.snapshot()
+    }
+
+    /// Returns the final queryable schema.
+    #[must_use]
+    pub fn finish(self) -> ParserDB {
+        self.builder.into()
+    }
+}
+
 impl ParserDB {
     /// Resolves a schema using a parsed SQL identifier.
     ///
@@ -5280,7 +5444,6 @@ impl ParserDB {
     /// let db = ParserDB::from_statements(statements, "test".to_string()).unwrap();
     /// assert_eq!(db.catalog_name(), "test");
     /// ```
-    #[allow(clippy::too_many_lines)]
     pub fn from_statements(
         statements: Vec<Statement>,
         catalog_name: String,
@@ -5302,118 +5465,26 @@ impl ParserDB {
         catalog_name: String,
         dialect: SqlparserDialect,
     ) -> Result<Self, crate::errors::Error> {
-        let options = ParseOptions::default();
-        Self::from_statements_with_options(statements, catalog_name, dialect, &options)
+        Self::from_statements_with_options(
+            statements,
+            catalog_name,
+            dialect,
+            ParseOptions::default(),
+        )
     }
 
-    /// Same as [`Self::from_statements_with_dialect`] but under caller-chosen
-    /// [`ParseOptions`].
     #[allow(clippy::too_many_lines)]
-    pub(crate) fn from_statements_with_options(
-        statements: Vec<Statement>,
-        catalog_name: String,
-        dialect: SqlparserDialect,
-        options: &ParseOptions,
-    ) -> Result<Self, crate::errors::Error> {
-        let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect);
-        let mut active_postgres_catalog = if matches!(dialect, SqlparserDialect::PostgreSql) {
-            options.postgres_catalog().clone()
-        } else {
-            PostgresCatalog::empty()
-        };
-
-        let any_type = DataType::Custom(
-            ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
-            vec![],
-        );
-
-        let arg = |data_type: DataType| {
-            OperateFunctionArg { mode: None, name: None, data_type, default_expr: None }
-        };
-
-        // The mode, not a name: an argument reader hands back what the input
-        // declares, and `VARIADIC` as a name would invent an argument called
-        // that.
-        let variadic_arg = |data_type: DataType| {
-            OperateFunctionArg {
-                mode: Some(ArgMode::Variadic),
-                name: None,
-                data_type,
-                default_expr: None,
-            }
-        };
-
-        let builtins = vec![
-            ("length", vec![arg(DataType::Text)], DataType::Int(None)),
-            ("len", vec![arg(DataType::Text)], DataType::Int(None)),
-            ("char_length", vec![arg(DataType::Text)], DataType::Int(None)),
-            ("character_length", vec![arg(DataType::Text)], DataType::Int(None)),
-            ("octet_length", vec![arg(DataType::Text)], DataType::Int(None)),
-            ("coalesce", vec![variadic_arg(any_type.clone())], any_type.clone()),
-            ("nullif", vec![arg(any_type.clone()), arg(any_type.clone())], any_type.clone()),
-            ("now", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
-            ("current_timestamp", vec![], DataType::Timestamp(None, TimezoneInfo::WithTimeZone)),
-            ("current_date", vec![], DataType::Date),
-            ("current_time", vec![], DataType::Time(None, TimezoneInfo::WithTimeZone)),
-            ("localtimestamp", vec![], DataType::Timestamp(None, TimezoneInfo::None)),
-            ("localtime", vec![], DataType::Time(None, TimezoneInfo::None)),
-            ("gen_random_uuid", vec![], DataType::Uuid),
-            ("uuidv4", vec![], DataType::Uuid),
-            ("uuidv7", vec![], DataType::Uuid),
-            (
-                "uuidv7",
-                vec![arg(DataType::Interval { fields: None, precision: None })],
-                DataType::Uuid,
-            ),
-            ("count", vec![arg(any_type.clone())], DataType::BigInt(None)),
-            ("sum", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
-            ("avg", vec![arg(any_type.clone())], DataType::Numeric(ExactNumberInfo::None)),
-            ("min", vec![arg(any_type.clone())], any_type.clone()),
-            ("max", vec![arg(any_type.clone())], any_type.clone()),
-            ("current_user", vec![], DataType::Text),
-            ("session_user", vec![], DataType::Text),
-            ("user", vec![], DataType::Text),
-        ];
-
-        // Qualified the way PostgreSQL holds them, in `pg_catalog` rather than
-        // in the schema a `CREATE FUNCTION` lands in. A user function that
-        // shadows a builtin is accepted by the server for exactly that reason,
-        // so without the qualifier the duplicate check would refuse it.
-        for (name, args, return_type) in builtins {
-            let create_function = CreateFunction {
-                or_alter: false,
-                or_replace: false,
-                temporary: false,
-                if_not_exists: false,
-                name: ObjectName(vec![
-                    ObjectNamePart::Identifier(Ident::new("pg_catalog")),
-                    ObjectNamePart::Identifier(Ident::new(name)),
-                ]),
-                args: Some(args),
-                return_type: Some(FunctionReturnType::DataType(return_type)),
-                function_body: Some(CreateFunctionBody::AsBeforeOptions {
-                    body: Expr::Value(ValueWithSpan {
-                        value: Value::SingleQuotedString(String::new()),
-                        span: Span::empty(),
-                    }),
-                    link_symbol: None,
-                }),
-                behavior: None,
-                called_on_null: None,
-                parallel: None,
-                using: None,
-                language: Some(Ident::new("internal")),
-                determinism_specifier: None,
-                options: None,
-                remote_connection: None,
-                security: None,
-                set_params: vec![],
-            };
-            builder = builder.add_function(Arc::new(create_function), FunctionMetadata::default());
-        }
-
-        let mut collation_metadata = Vec::new();
-
+    fn apply_statements(
+        mut builder: ParserDBBuilder,
+        mut active_postgres_catalog: PostgresCatalog,
+        mut collation_metadata: Vec<CreatedCollationMetadata>,
+        access_resolution: AccessResolution,
+        statements: &mut dyn Iterator<Item = Statement>,
+    ) -> Result<
+        (ParserDBBuilder, PostgresCatalog, Vec<CreatedCollationMetadata>),
+        crate::errors::Error,
+    > {
+        let dialect = *builder.dialect();
         for statement in statements {
             match statement {
                 Statement::CreateFunction(create_function) => {
@@ -6281,7 +6352,7 @@ impl ParserDB {
                                 // an absent table first, and skipped entirely
                                 // when `IF EXISTS` excused an absent one, since
                                 // the statement then did nothing at all.
-                                if options.access_resolution() == AccessResolution::ClosedWorld
+                                if access_resolution == AccessResolution::ClosedWorld
                                     && let Some(ident) = &role_ident
                                     && builder.resolve_table_object_name(&alter_table.name)?.is_some()
                                 {
@@ -6436,7 +6507,7 @@ impl ParserDB {
                 }
                 Statement::CreatePolicy(policy) => {
                     require_named(&policy.table_name, crate::errors::ObjectKind::Table)?;
-                    if options.access_resolution() == AccessResolution::ClosedWorld {
+                    if access_resolution == AccessResolution::ClosedWorld {
                         validate_policy_roles(
                             &builder,
                             &policy.name.value,
@@ -6563,7 +6634,7 @@ impl ParserDB {
                         }
                     };
 
-                    if options.access_resolution() == AccessResolution::ClosedWorld {
+                    if access_resolution == AccessResolution::ClosedWorld {
                         let authorization_ident = match &schema_name {
                             SchemaName::Simple(_) => None,
                             SchemaName::UnnamedAuthorization(auth)
@@ -6596,7 +6667,7 @@ impl ParserDB {
                     }
                 }
                 Statement::Grant(grant) => {
-                    if options.access_resolution() == AccessResolution::ClosedWorld {
+                    if access_resolution == AccessResolution::ClosedWorld {
                         validate_access_targets_against_builder(
                             &builder,
                             &grant.grantees,
@@ -6623,7 +6694,7 @@ impl ParserDB {
                 Statement::Revoke(revoke) => {
                     // A revoke naming no recorded grant is a no-op, as it is in
                     // the database.
-                    if options.access_resolution() == AccessResolution::ClosedWorld {
+                    if access_resolution == AccessResolution::ClosedWorld {
                         validate_access_targets_against_builder(
                             &builder,
                             &revoke.grantees,
@@ -6735,7 +6806,7 @@ impl ParserDB {
                             // After the function, because the database reports
                             // an absent function first. The keyword owners name
                             // no role, so there is nothing to look for.
-                            if options.access_resolution() == AccessResolution::ClosedWorld
+                            if access_resolution == AccessResolution::ClosedWorld
                                 && let Owner::Ident(ident) = &new_owner
                             {
                                 validate_owner_role_ident(
@@ -6834,7 +6905,7 @@ impl ParserDB {
                             Arc::make_mut(&mut builder.policies_mut()[index].0).name = new_name;
                         }
                         AlterPolicyOperation::Apply { to, using, with_check } => {
-                            if options.access_resolution() == AccessResolution::ClosedWorld {
+                            if access_resolution == AccessResolution::ClosedWorld {
                                 validate_policy_roles(
                                     &builder,
                                     &name.value,
@@ -6966,7 +7037,7 @@ impl ParserDB {
                                 current_schema_quoted = new_schema_quoted;
                             }
                             AlterSchemaOperation::OwnerTo { owner } => {
-                                if options.access_resolution() == AccessResolution::ClosedWorld {
+                                if access_resolution == AccessResolution::ClosedWorld {
                                     validate_owner_role(&builder, owner, &current_schema_name)?;
                                 }
                                 // Update the authorization
@@ -7013,8 +7084,19 @@ impl ParserDB {
                 }
             }
         }
+        Ok((builder, active_postgres_catalog, collation_metadata))
+    }
 
-        Ok(builder.into())
+    /// Same as [`Self::from_statements_with_dialect`] but under caller-chosen
+    /// [`ParseOptions`].
+    pub(crate) fn from_statements_with_options(
+        statements: Vec<Statement>,
+        catalog_name: String,
+        dialect: SqlparserDialect,
+        options: ParseOptions,
+    ) -> Result<Self, crate::errors::Error> {
+        let ingestor = ParserDBIngestor::with_dialect(catalog_name, dialect, options);
+        Ok(ingestor.apply_statements(statements)?.finish())
     }
 
     /// Parses SQL using the specified dialect.
@@ -7050,14 +7132,13 @@ impl ParserDB {
     /// # }
     /// ```
     pub fn parse<D: Dialect + Default + 'static>(sql: &str) -> Result<Self, crate::errors::Error> {
-        let options = ParseOptions::default();
-        Self::parse_with_options::<D>(sql, &options)
+        Self::parse_with_options::<D>(sql, ParseOptions::default())
     }
 
     /// Same as [`Self::parse`] but under caller-chosen [`ParseOptions`].
     pub(crate) fn parse_with_options<D: Dialect + Default + 'static>(
         sql: &str,
-        options: &ParseOptions,
+        options: ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
         let dialect = D::default();
         let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
@@ -7161,15 +7242,14 @@ impl ParserDB {
     /// parsing fails.
     #[cfg(feature = "std")]
     pub fn from_paths<D: Dialect + Default>(paths: &[&Path]) -> Result<Self, crate::errors::Error> {
-        let options = ParseOptions::default();
-        Self::from_paths_with_options::<D>(paths, &options)
+        Self::from_paths_with_options::<D>(paths, ParseOptions::default())
     }
 
     /// Same as [`Self::from_paths`] but under caller-chosen [`ParseOptions`].
     #[cfg(feature = "std")]
     pub(crate) fn from_paths_with_options<D: Dialect + Default>(
         paths: &[&Path],
-        options: &ParseOptions,
+        options: ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
         let mut statements = Vec::new();
         let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
