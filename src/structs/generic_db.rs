@@ -16,7 +16,7 @@ pub use builder::GenericDBBuilder;
 pub(crate) use profile::Stored;
 pub use profile::{Meta, SchemaProfile};
 pub use sqlparser::{
-    AccessResolution, ParseOptions, ParserDB, ParserDBBuilder, PostgresCatalog,
+    AccessResolution, ParseOptions, ParserDB, ParserDBBuilder, ParserDBIngestor, PostgresCatalog,
     PostgresCatalogCollation, PostgresCatalogType, SqlparserProfile, UnresolvedAccessReference,
 };
 

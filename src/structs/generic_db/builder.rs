@@ -103,6 +103,32 @@ pub struct GenericDBBuilder<P: SchemaProfile> {
 }
 
 impl<P: SchemaProfile> GenericDBBuilder<P> {
+    /// Returns a database without consuming the current builder.
+    pub(crate) fn snapshot(&self) -> GenericDB<P> {
+        Self {
+            dialect: self.dialect.clone(),
+            catalog_name: self.catalog_name.clone(),
+            timezone: self.timezone.clone(),
+            tables: self.tables.clone(),
+            views: self.views.clone(),
+            materialized_views: self.materialized_views.clone(),
+            columns: self.columns.clone(),
+            indices: self.indices.clone(),
+            unique_indices: self.unique_indices.clone(),
+            foreign_keys: self.foreign_keys.clone(),
+            functions: self.functions.clone(),
+            triggers: self.triggers.clone(),
+            policies: self.policies.clone(),
+            check_constraints: self.check_constraints.clone(),
+            roles: self.roles.clone(),
+            schemas: self.schemas.clone(),
+            table_grants: self.table_grants.clone(),
+            column_grants: self.column_grants.clone(),
+            search_path: self.search_path.clone(),
+        }
+        .into()
+    }
+
     /// Returns a mutable reference to the tables list.
     pub(crate) fn tables_mut(&mut self) -> &mut Vec<Stored<P::Table>> {
         &mut self.tables
