@@ -1106,3 +1106,23 @@ impl From<ParserError> for Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_error_reasons_render_every_variant() {
+        assert_eq!(InheritedChange::AddConstraint.to_string(), "add a constraint to");
+        assert_eq!(InheritedChange::AddColumn.to_string(), "add a column to");
+        assert_eq!(InheritedChange::RenameColumn.to_string(), "rename a column of");
+        assert_eq!(RequiredValue::CoveredByKey.to_string(), "a key covers it");
+        assert_eq!(RequiredValue::EnforcedByParent.to_string(), "a parent requires it");
+    }
+
+    #[test]
+    fn parser_errors_keep_the_parser_cause() {
+        let error = Error::from(ParserError::ParserError("broken SQL".to_string()));
+        assert!(matches!(error, Error::SqlParserError { .. }));
+    }
+}

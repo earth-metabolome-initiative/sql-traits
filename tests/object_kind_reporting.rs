@@ -210,10 +210,15 @@ fn every_kind_renders_its_own_spelling() {
         (ObjectKind::Table, "Table"),
         (ObjectKind::View, "View"),
         (ObjectKind::MaterializedView, "Materialized view"),
+        (ObjectKind::Column, "Column"),
         (ObjectKind::Index, "Index"),
         (ObjectKind::UniqueIndex, "Unique index"),
         (ObjectKind::CheckConstraint, "Check constraint"),
         (ObjectKind::Policy, "Policy"),
+        (ObjectKind::Function, "Function"),
+        (ObjectKind::Trigger, "Trigger"),
+        (ObjectKind::Role, "Role"),
+        (ObjectKind::Schema, "Schema"),
     ] {
         assert_eq!(
             kind.not_in_database("x").to_string(),

@@ -119,7 +119,7 @@ impl<DB: DatabaseLike> DMLLike<DB> for Delete {
 #[cfg(test)]
 mod tests {
     use sqlparser::{
-        ast::Statement,
+        ast::{SetExpr, Statement, TableObject},
         dialect::{GenericDialect, MySqlDialect},
         parser::Parser,
     };
@@ -241,5 +241,32 @@ mod tests {
             panic!("expected delete");
         };
         assert!(matches!(delete.target_table(&db), Err(LookupError::InvalidObjectName { .. })));
+    }
+
+    #[test]
+    fn insert_query_target_is_not_a_base_table() {
+        let db = schema_db();
+        let Statement::Insert(mut insert) = parse_one("INSERT INTO users VALUES (1, 'x')") else {
+            panic!("expected insert")
+        };
+        let Statement::Query(query) = parse_one("SELECT id, name FROM users") else {
+            panic!("expected query")
+        };
+        insert.table = TableObject::TableQuery(query);
+        assert!(matches!(insert.target_table(&db), Err(LookupError::InvalidObjectName { .. })));
+    }
+
+    #[test]
+    fn update_derived_target_is_not_a_base_table() {
+        let db = schema_db();
+        let Statement::Update(mut update) = parse_one("UPDATE users SET name = 'x'") else {
+            panic!("expected update")
+        };
+        let Statement::Query(query) = parse_one("SELECT * FROM (SELECT * FROM users) AS d") else {
+            panic!("expected query")
+        };
+        let SetExpr::Select(select) = query.body.as_ref() else { panic!("expected select") };
+        update.table.relation = select.from[0].relation.clone();
+        assert!(matches!(update.target_table(&db), Err(LookupError::InvalidObjectName { .. })));
     }
 }
