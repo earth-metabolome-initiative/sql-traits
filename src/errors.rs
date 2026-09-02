@@ -139,6 +139,15 @@ pub enum LookupError {
         /// Deterministically ordered list of matching candidates.
         candidates: Vec<String>,
     },
+    /// Function resolution by name matched more than one declaration, which
+    /// happens when a name carries several argument lists.
+    #[error("Ambiguous function lookup `{object_name}`; candidates: {candidates:?}")]
+    AmbiguousFunctionLookup {
+        /// Name the lookup asked for, as written.
+        object_name: String,
+        /// Deterministically ordered list of matching declarations.
+        candidates: Vec<String>,
+    },
     /// Table resolution found no matching table for a name that is required to
     /// denote one.
     #[error("Table `{object_name}` not found.")]

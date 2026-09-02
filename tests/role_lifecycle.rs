@@ -28,7 +28,7 @@ fn rename_repoints_every_modeled_role_reference() {
 
     let renamed = database.role("Renamed_Owner").expect("renamed role resolves");
     let docs = database.table(None, "docs").expect("docs exists");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
     let created_schema = database.schema("created_schema").expect("created_schema exists");
     let altered_schema = database.schema("altered_schema").expect("altered_schema exists");
     let child = database.role("child_role").expect("child resolves");

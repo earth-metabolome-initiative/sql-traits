@@ -93,7 +93,7 @@ fn test_array_function_types() {
     let statements = Parser::parse_sql(&PostgreSqlDialect {}, ddl).expect("parses");
     let database =
         ParserDB::from_statements(statements, "test".to_string()).expect("schema builds");
-    let function = database.function("first_tag").expect("function exists");
+    let function = database.function(None, "first_tag").expect("function exists");
 
     assert_eq!(function.argument_type_names(&database).collect::<Vec<_>>(), vec!["TEXT[]"]);
     assert_eq!(function.return_type_name(&database).as_deref(), Some("TEXT[]"));

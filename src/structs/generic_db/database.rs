@@ -1,16 +1,20 @@
 //! Implementation of the `DatabaseLike` trait for `GenericDB`.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use crate::{
     errors::LookupError,
     structs::{GenericDB, SchemaProfile, TargetName, generic_db::RelationSlot},
-    traits::{DatabaseLike, FunctionLike, TableLike},
+    traits::{DatabaseLike, TableLike},
     utils::{
-        identifier_resolution::{normalize_identifier, stored_identifier_matches_lookup},
+        identifier_resolution::normalize_identifier,
         object_name::{
-            RelationKey, lookup_key, render_view_candidate, resolve_one_relation,
-            resolve_target_from_candidates, stored_identity_key, target_key,
+            RelationKey, function_has_stored_identity, lookup_key, render_view_candidate,
+            resolve_one_function, resolve_one_relation, resolve_target_from_candidates,
+            stored_identity_key, target_key,
         },
     },
 };
@@ -143,11 +147,29 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
         self.functions.iter().map(|(func, _)| func.as_ref())
     }
 
-    fn function(&self, name: &str) -> Option<&Self::Function> {
-        self.functions.iter().find_map(|(function, _)| {
-            stored_identifier_matches_lookup(function.name(), function.name_is_quoted(), name)
-                .then_some(function.as_ref())
-        })
+    fn function(&self, schema: Option<&str>, name: &str) -> Option<&Self::Function> {
+        self.indexed_functions(&lookup_key(schema, name)).next()
+    }
+
+    fn function_by_stored_identity(
+        &self,
+        schema: Option<&str>,
+        name: &str,
+    ) -> Result<Option<&Self::Function>, LookupError> {
+        // One bucket holds both spellings of the default schema, so the probe
+        // narrows by name and the comparison decides the identity.
+        let candidates: Vec<&P::Function> = self
+            .indexed_functions(&stored_identity_key(schema, name))
+            .filter(|function| function_has_stored_identity(*function, schema, name))
+            .collect();
+        resolve_one_function(name, &candidates)
+    }
+
+    fn resolve_target_function(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::Function>, LookupError> {
+        self.resolve_target_function_on_path(&target)
     }
 
     fn policies(&self) -> impl Iterator<Item = &Self::Policy> {
@@ -175,6 +197,49 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// Slots of every relation whose stored identity equals `key`.
     fn indexed_relation_slots(&self, key: &RelationKey) -> &[RelationSlot] {
         self.relation_index.get(key).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// Functions whose stored identity equals `key`, in storage order.
+    fn indexed_functions(&self, key: &RelationKey) -> impl Iterator<Item = &P::Function> {
+        self.function_index
+            .get(key)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter_map(|position| self.functions.get(*position))
+            .map(|(function, _)| function.as_ref())
+    }
+
+    /// Resolves a written function reference through the index, walking the
+    /// search path for an unqualified name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousFunctionLookup`] when the name carries
+    /// several declarations in the schema that wins.
+    fn resolve_target_function_on_path(
+        &self,
+        target: &TargetName<'_>,
+    ) -> Result<Option<&P::Function>, LookupError> {
+        let written = target.to_string();
+        if target.schema().is_some() {
+            let candidates: Vec<&P::Function> =
+                self.indexed_functions(&target_key(target)).collect();
+            return resolve_one_function(&written, &candidates);
+        }
+
+        let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
+        for (entry_schema, entry_quoted) in &self.search_path {
+            let key = RelationKey {
+                schema: normalize_identifier(entry_schema, *entry_quoted).into_owned(),
+                name: name.clone(),
+            };
+            let candidates: Vec<&P::Function> = self.indexed_functions(&key).collect();
+            if !candidates.is_empty() {
+                return resolve_one_function(&written, &candidates);
+            }
+        }
+
+        Ok(None)
     }
 
     /// Whether any relation of any kind answers `key`.

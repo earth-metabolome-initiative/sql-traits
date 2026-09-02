@@ -127,6 +127,7 @@ struct MemoryCheckConstraint {
 struct MemoryFunction {
     name: String,
     schema: Option<String>,
+    argument_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -283,10 +284,11 @@ impl DatabaseLike for MemoryCatalog {
         self.tables.iter().position(|candidate| candidate == table)
     }
 
-    fn function(&self, name: &str) -> Option<&Self::Function> {
-        self.functions
-            .iter()
-            .find(|function| stored_identifier_matches_lookup(&function.name, false, name))
+    fn function(&self, schema: Option<&str>, name: &str) -> Option<&Self::Function> {
+        self.functions.iter().find(|function| {
+            stored_identifier_matches_lookup(&function.name, false, name)
+                && schema_answers(function.schema.as_deref(), false, schema)
+        })
     }
 
     fn policies(&self) -> impl Iterator<Item = &Self::Policy> {
@@ -730,7 +732,7 @@ impl FunctionLike for MemoryFunction {
         &'db self,
         _database: &'db Self::DB,
     ) -> impl Iterator<Item = Cow<'db, str>> {
-        core::iter::empty()
+        self.argument_types.iter().map(|declared| Cow::Borrowed(declared.as_str()))
     }
 
     fn argument_names<'db>(
@@ -1103,6 +1105,14 @@ fn column(table_schema: Option<&str>, table_name: &str, name: &str) -> MemoryCol
     }
 }
 
+fn function(schema: Option<&str>, name: &str, argument_types: &[&str]) -> MemoryFunction {
+    MemoryFunction {
+        name: String::from(name),
+        schema: schema.map(String::from),
+        argument_types: argument_types.iter().map(|declared| String::from(*declared)).collect(),
+    }
+}
+
 /// Two tables named the same in two schemas, one of them the default schema
 /// the inherited resolver walks.
 fn catalog() -> MemoryCatalog {
@@ -1114,6 +1124,13 @@ fn catalog() -> MemoryCatalog {
             column(Some("app"), "docs", "id"),
             column(Some("app"), "docs", "body"),
             column(Some("app"), "notes", "id"),
+        ],
+        functions: vec![
+            function(None, "touch", &[]),
+            function(Some("app"), "touch", &[]),
+            function(Some("audit"), "hidden", &[]),
+            function(Some("app"), "overloaded", &["INT"]),
+            function(Some("app"), "overloaded", &["TEXT"]),
         ],
         schemas: vec![MemorySchema { name: String::from("app"), name_is_quoted: false }],
         roles: vec![MemoryRole { name: String::from("reader"), name_is_quoted: false }],
@@ -1170,6 +1187,58 @@ fn the_inherited_identity_lookup_compares_stored_parts() {
     // default schema as one place.
     assert!(catalog.table(Some("public"), "docs").is_some());
     assert!(catalog.table(None, "DOCS").is_some());
+}
+
+/// The inherited function resolver reads a qualified reference in its own
+/// schema, an unqualified one through the default schema, and says so when a
+/// name carries several declarations.
+#[test]
+fn the_inherited_function_resolver_walks_the_default_schema() -> Result<(), LookupError> {
+    let catalog = catalog();
+
+    let bare = catalog
+        .resolve_target_function(TargetName::new("touch", false))?
+        .expect("the default schema holds one");
+    assert_eq!(bare.target_name().schema(), None);
+
+    let qualified = catalog
+        .resolve_target_function(TargetName::new("touch", false).with_schema("app", false))?
+        .expect("the qualified reference resolves");
+    assert_eq!(qualified.target_name().schema(), Some("app"));
+
+    // `audit` is not on the path, so nothing unqualified reaches into it.
+    assert!(catalog.resolve_target_function(TargetName::new("hidden", false))?.is_none());
+    assert!(catalog.resolve_target_function(TargetName::new("absent", false))?.is_none());
+
+    let ambiguous = TargetName::new("overloaded", false).with_schema("app", false);
+    assert!(matches!(
+        catalog.resolve_target_function(ambiguous),
+        Err(LookupError::AmbiguousFunctionLookup { .. })
+    ));
+
+    Ok(())
+}
+
+/// The inherited function identity lookup compares both parts as stored, and
+/// reports a name carrying several declarations rather than choosing one.
+#[test]
+fn the_inherited_function_identity_lookup_compares_stored_parts() -> Result<(), LookupError> {
+    let catalog = catalog();
+
+    assert!(catalog.function_by_stored_identity(None, "touch")?.is_some());
+    assert!(catalog.function_by_stored_identity(Some("app"), "touch")?.is_some());
+    assert!(catalog.function_by_stored_identity(Some("public"), "touch")?.is_none());
+    assert!(catalog.function_by_stored_identity(Some("app"), "Touch")?.is_none());
+    assert!(matches!(
+        catalog.function_by_stored_identity(Some("app"), "overloaded"),
+        Err(LookupError::AmbiguousFunctionLookup { .. })
+    ));
+
+    // The written lookup takes the qualifier apart from the name and folds it.
+    assert!(catalog.function(Some("APP"), "touch").is_some());
+    assert!(catalog.function(None, "hidden").is_none());
+
+    Ok(())
 }
 
 /// The inherited view resolvers answer nothing for a catalog holding no views,

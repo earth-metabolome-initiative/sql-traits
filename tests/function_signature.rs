@@ -25,12 +25,12 @@ fn the_language_clause_is_reported_as_written_and_as_stored() {
     let database = db("CREATE FUNCTION one() RETURNS INT LANGUAGE SQL AS 'SELECT 1';
          CREATE FUNCTION two() RETURNS INT LANGUAGE plpgsql AS 'BEGIN RETURN 2; END';");
 
-    let one = database.function("one").expect("one exists");
+    let one = database.function(None, "one").expect("one exists");
     assert_eq!(one.language(), Some("SQL"));
     assert!(!one.language_is_quoted());
     assert_eq!(one.stored_language().as_deref(), Some("sql"));
 
-    let two = database.function("two").expect("two exists");
+    let two = database.function(None, "two").expect("two exists");
     assert_eq!(two.language(), Some("plpgsql"));
     assert_eq!(two.stored_language().as_deref(), Some("plpgsql"));
 }
@@ -41,7 +41,7 @@ fn the_language_clause_is_reported_as_written_and_as_stored() {
 #[test]
 fn a_quoted_language_name_keeps_its_case() {
     let database = db(r#"CREATE FUNCTION one() RETURNS INT LANGUAGE "SQL" AS 'SELECT 1';"#);
-    let one = database.function("one").expect("one exists");
+    let one = database.function(None, "one").expect("one exists");
 
     assert_eq!(one.language(), Some("SQL"));
     assert!(one.language_is_quoted());
@@ -56,7 +56,7 @@ fn an_omitted_language_clause_names_no_language() {
     let database =
         ParserDB::parse::<GenericDialect>("CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';")
             .expect("schema builds");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     assert_eq!(function.language(), None);
     assert_eq!(function.stored_language(), None);
@@ -66,7 +66,7 @@ fn an_omitted_language_clause_names_no_language() {
 fn arguments_report_the_names_they_are_declared_under() {
     let database = db("CREATE FUNCTION is_member(doc_id INT, role TEXT) RETURNS BOOL
              LANGUAGE sql AS 'SELECT true';");
-    let function = database.function("is_member").expect("is_member exists");
+    let function = database.function(None, "is_member").expect("is_member exists");
 
     let arguments: Vec<_> = function.argument_names(&database).collect();
     let names: Vec<Option<&str>> = names_of(&arguments);
@@ -85,7 +85,7 @@ fn arguments_report_the_names_they_are_declared_under() {
 fn a_quoted_argument_name_keeps_its_case() {
     let database = db(r#"CREATE FUNCTION f("DocId" INT, "Role" TEXT) RETURNS BOOL LANGUAGE sql
              AS 'SELECT true';"#);
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     let arguments: Vec<_> = function.argument_names(&database).collect();
     let names: Vec<Option<&str>> = names_of(&arguments);
@@ -108,7 +108,7 @@ fn a_quoted_argument_name_keeps_its_case() {
 #[test]
 fn an_argument_declared_as_a_bare_type_has_no_name() {
     let database = db("CREATE FUNCTION f(INT, TEXT) RETURNS BOOL LANGUAGE sql AS 'SELECT true';");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     assert_eq!(function.argument_names(&database).collect::<Vec<_>>(), vec![None, None]);
     assert_eq!(function.stored_argument_names(&database).collect::<Vec<_>>(), vec![None, None]);
@@ -120,7 +120,7 @@ fn an_argument_declared_as_a_bare_type_has_no_name() {
 fn argument_names_line_up_with_argument_types() {
     let database = db("CREATE FUNCTION f(a INT, TEXT, INOUT c BOOL) RETURNS BOOL LANGUAGE sql
              AS 'SELECT true';");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     let arguments: Vec<_> = function.argument_names(&database).collect();
     let names: Vec<Option<&str>> = names_of(&arguments);
@@ -137,13 +137,16 @@ fn argument_names_line_up_with_argument_types() {
 fn a_variadic_argument_is_named_only_when_the_input_names_it() {
     let database = db("CREATE FUNCTION f(VARIADIC items INT[]) RETURNS BOOL LANGUAGE sql
              AS 'SELECT true';");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
     assert_eq!(
         function.argument_names(&database).collect::<Vec<_>>(),
         vec![Some(TargetName::new("items", false))]
     );
 
-    let builtin = database.function("coalesce").expect("coalesce is registered");
+    // A registered builtin resides in the catalog schema, so the lookup names
+    // it.
+    let builtin =
+        database.function(Some("pg_catalog"), "coalesce").expect("coalesce is registered");
     assert_eq!(builtin.argument_names(&database).collect::<Vec<_>>(), vec![None]);
 }
 
@@ -154,7 +157,7 @@ fn a_replaced_function_reports_the_new_declaration() {
     let database = db("CREATE FUNCTION f(old_id INT) RETURNS BOOL LANGUAGE sql AS 'SELECT true';
          CREATE OR REPLACE FUNCTION f(new_id INT) RETURNS BOOL LANGUAGE plpgsql
              AS 'BEGIN RETURN true; END';");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     assert_eq!(function.stored_language().as_deref(), Some("plpgsql"));
     assert_eq!(
@@ -173,20 +176,20 @@ fn a_return_body_is_an_expression_and_a_string_body_is_text() {
          CREATE FUNCTION dollar(a INT) RETURNS INT LANGUAGE sql AS $$SELECT a$$;
          CREATE FUNCTION constant() RETURNS TEXT LANGUAGE sql RETURN 'text';");
 
-    let added = database.function("added").expect("added exists");
+    let added = database.function(None, "added").expect("added exists");
     assert_eq!(added.body(), None);
     assert_eq!(added.body_expression().map(ToString::to_string).as_deref(), Some("a + b"));
 
-    let quoted = database.function("quoted").expect("quoted exists");
+    let quoted = database.function(None, "quoted").expect("quoted exists");
     assert_eq!(quoted.body(), Some("SELECT a"));
     assert_eq!(quoted.body_expression(), None);
 
-    let dollar = database.function("dollar").expect("dollar exists");
+    let dollar = database.function(None, "dollar").expect("dollar exists");
     assert_eq!(dollar.body(), Some("SELECT a"));
     assert_eq!(dollar.body_expression(), None);
 
     // A returned string constant is the expression, not body text to parse.
-    let constant = database.function("constant").expect("constant exists");
+    let constant = database.function(None, "constant").expect("constant exists");
     assert_eq!(constant.body(), None);
     assert_eq!(constant.body_expression().map(ToString::to_string).as_deref(), Some("'text'"));
 }
@@ -197,7 +200,7 @@ fn a_return_body_is_an_expression_and_a_string_body_is_text() {
 fn out_and_default_carrying_arguments_keep_their_positions() {
     let database = db("CREATE FUNCTION f(IN a INT DEFAULT 1, OUT b TEXT, INOUT c BOOL)
              RETURNS INT LANGUAGE sql AS 'SELECT 1';");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     let arguments: Vec<_> = function.argument_names(&database).collect();
     let names: Vec<Option<&str>> = names_of(&arguments);
@@ -215,7 +218,7 @@ fn out_and_default_carrying_arguments_keep_their_positions() {
 #[test]
 fn a_non_ascii_argument_name_folds_the_way_postgresql_stores_it() {
     let database = db("CREATE FUNCTION f(RÔLE TEXT) RETURNS BOOL LANGUAGE sql AS 'SELECT true';");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     assert_eq!(
         function.stored_argument_names(&database).next().expect("one argument").as_deref(),
@@ -231,7 +234,7 @@ fn the_readers_answer_under_another_dialect() {
         "CREATE FUNCTION f(doc_id INT) RETURNS BOOL LANGUAGE sql AS 'SELECT true';",
     )
     .expect("schema builds");
-    let function = database.function("f").expect("f exists");
+    let function = database.function(None, "f").expect("f exists");
 
     assert_eq!(function.stored_language().as_deref(), Some("sql"));
     assert_eq!(
@@ -255,7 +258,7 @@ fn configuration_parameters_follow_create_and_alter_order() {
              SET search_path FROM CURRENT AS 'SELECT 1';");
     let parameters = |name: &str| {
         database
-            .function(name)
+            .function(None, name)
             .expect("function exists")
             .configuration_parameters()
             .iter()
@@ -275,7 +278,7 @@ fn configuration_parameter_prefixes_remain_distinct() {
              SET a.b.c TO x SET other.b.c TO y AS 'SELECT 1';
          ALTER FUNCTION f() RESET a.b.c;");
     let parameters = database
-        .function("f")
+        .function(None, "f")
         .expect("function exists")
         .configuration_parameters()
         .iter()
