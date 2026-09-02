@@ -136,3 +136,158 @@ fn postgres_catalog_and_created_collations_survive_incremental_statements() {
     assert_eq!(collation.name().name(), "ci");
     assert_eq!(collation.postgres_deterministic(), Some(false));
 }
+
+#[test]
+fn finished_schema_resumes_ingestion() {
+    let input = ParserDBIngestor::new::<PostgreSqlDialect>("test".to_owned());
+    let input = statements("CREATE TABLE t (id INT PRIMARY KEY);")
+        .into_iter()
+        .try_fold(input, ParserDBIngestor::apply_statement)
+        .expect("table applies");
+
+    let input = input.finish().into_ingestor();
+    let input = statements("ALTER TABLE t ADD COLUMN label TEXT;")
+        .into_iter()
+        .try_fold(input, ParserDBIngestor::apply_statement)
+        .expect("alter applies after resumption");
+
+    let database = input.finish();
+    let table = database.table(None, "t").expect("table exists");
+    assert!(table.column("id", &database).expect("column lookup runs").is_some());
+    assert!(table.column("label", &database).expect("column lookup runs").is_some());
+}
+
+#[test]
+fn resumed_ingestion_preserves_options_and_created_collations() {
+    use sql_traits::{
+        structs::{
+            AccessResolution, ParseOptions, PostgresCatalog, PostgresCatalogCollation,
+            PostgresCatalogType,
+        },
+        traits::ColumnCollation,
+    };
+
+    let catalog = PostgresCatalog::empty()
+        .with_collation(PostgresCatalogCollation::new("base", false).with_deterministic(false))
+        .with_collatable_type(PostgresCatalogType::new("text", false));
+    let input = ParseOptions::default()
+        .with_access_resolution(AccessResolution::OpenWorld)
+        .with_postgres_catalog(catalog)
+        .ingestor::<PostgreSqlDialect>("test".to_owned());
+    let input = statements("CREATE COLLATION ci FROM base;")
+        .into_iter()
+        .try_fold(input, ParserDBIngestor::apply_statement)
+        .expect("collation applies");
+
+    let input = input.finish().into_ingestor();
+    let input = statements("GRANT SELECT ON missing_table TO missing_role;")
+        .into_iter()
+        .try_fold(input, ParserDBIngestor::apply_statement)
+        .expect("open world grant applies after resumption");
+    let input = statements("CREATE TABLE u (name TEXT COLLATE ci);")
+        .into_iter()
+        .try_fold(input, ParserDBIngestor::apply_statement)
+        .expect("table applies after resumption");
+
+    let database = input.finish();
+    assert_eq!(database.table_grants().count(), 1);
+    let table = database.table(None, "u").expect("table exists");
+    let column =
+        table.column("name", &database).expect("column lookup runs").expect("column exists");
+    let ColumnCollation::Named(collation) =
+        column.collation(&database).expect("collation metadata resolves")
+    else {
+        panic!("expected a named collation")
+    };
+    assert_eq!(collation.name().name(), "ci");
+    assert_eq!(collation.postgres_deterministic(), Some(false));
+}
+
+#[test]
+fn batch_parsed_database_resumes_ingestion() {
+    let database = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (id INT PRIMARY KEY);")
+        .expect("schema builds");
+
+    let input = statements("ALTER TABLE t ADD COLUMN label TEXT;")
+        .into_iter()
+        .try_fold(database.into_ingestor(), ParserDBIngestor::apply_statement)
+        .expect("alter applies after resumption");
+
+    let database = input.finish();
+    let table = database.table(None, "t").expect("table exists");
+    assert!(table.column("label", &database).expect("column lookup runs").is_some());
+}
+
+#[test]
+fn resumed_ingestion_preserves_closed_world_resolution() {
+    let database = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (id INT PRIMARY KEY);")
+        .expect("schema builds");
+
+    let result = statements("GRANT SELECT ON t TO missing_role;")
+        .into_iter()
+        .try_fold(database.into_ingestor(), ParserDBIngestor::apply_statement);
+
+    assert!(result.is_err(), "closed world must still refuse a grant to an unknown role");
+}
+
+#[test]
+fn one_shot_parsed_database_resumes_with_options_and_collations() {
+    use sql_traits::{
+        structs::{
+            AccessResolution, ParseOptions, PostgresCatalog, PostgresCatalogCollation,
+            PostgresCatalogType,
+        },
+        traits::ColumnCollation,
+    };
+
+    let catalog = PostgresCatalog::empty()
+        .with_collation(PostgresCatalogCollation::new("base", false).with_deterministic(false))
+        .with_collatable_type(PostgresCatalogType::new("text", false));
+    let database = ParseOptions::default()
+        .with_access_resolution(AccessResolution::OpenWorld)
+        .with_postgres_catalog(catalog)
+        .parse::<PostgreSqlDialect>("CREATE COLLATION ci FROM base;")
+        .expect("schema builds");
+
+    let input = statements("GRANT SELECT ON missing_table TO missing_role;")
+        .into_iter()
+        .try_fold(database.into_ingestor(), ParserDBIngestor::apply_statement)
+        .expect("open world grant applies after resumption");
+    let input = statements("CREATE TABLE u (name TEXT COLLATE ci);")
+        .into_iter()
+        .try_fold(input, ParserDBIngestor::apply_statement)
+        .expect("table applies after resumption");
+
+    let database = input.finish();
+    assert_eq!(database.table_grants().count(), 1);
+    let table = database.table(None, "u").expect("table exists");
+    let column =
+        table.column("name", &database).expect("column lookup runs").expect("column exists");
+    let ColumnCollation::Named(collation) =
+        column.collation(&database).expect("collation metadata resolves")
+    else {
+        panic!("expected a named collation")
+    };
+    assert_eq!(collation.name().name(), "ci");
+    assert_eq!(collation.postgres_deterministic(), Some(false));
+}
+
+#[test]
+fn snapshot_resumes_ingestion_independently() {
+    let mut input = ParserDBIngestor::new::<PostgreSqlDialect>("test".to_owned());
+    for statement in statements("CREATE TABLE t (id INT PRIMARY KEY);") {
+        input = input.apply_statement(statement).expect("table applies");
+    }
+
+    let resumed = statements("ALTER TABLE t ADD COLUMN label TEXT;")
+        .into_iter()
+        .try_fold(input.snapshot().into_ingestor(), ParserDBIngestor::apply_statement)
+        .expect("alter applies on the snapshot");
+    let database = resumed.finish();
+    let table = database.table(None, "t").expect("table exists");
+    assert!(table.column("label", &database).expect("column lookup runs").is_some());
+
+    let original = input.finish();
+    let table = original.table(None, "t").expect("table exists");
+    assert!(table.column("label", &original).expect("column lookup runs").is_none());
+}
