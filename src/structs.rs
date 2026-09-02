@@ -5,7 +5,7 @@ pub(crate) mod fingerprint;
 pub mod generic_db;
 pub use generic_db::{
     AccessResolution, GenericDB, Meta, ParseOptions, ParserDB, ParserDBBuilder, ParserDBIngestor,
-    PostgresCatalog, PostgresCatalogCollation, PostgresCatalogType, SchemaProfile,
+    ParserIngestion, PostgresCatalog, PostgresCatalogCollation, PostgresCatalogType, SchemaProfile,
     SqlparserProfile, UnresolvedAccessReference,
 };
 pub mod metadata;

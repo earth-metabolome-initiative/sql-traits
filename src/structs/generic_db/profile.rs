@@ -72,4 +72,20 @@ pub trait SchemaProfile: Sized {
     type ColumnGrant: ColumnGrantLike<DB = GenericDB<Self>>;
     /// The SQL dialect the schema is expressed in.
     type Dialect: DialectLike<DB = GenericDB<Self>>;
+    /// The state a statement-by-statement ingestion carries beyond the
+    /// schema objects themselves, preserved inside every built database so
+    /// ingestion can resume from it.
+    ///
+    /// The parser profile stores its access-resolution mode, the active
+    /// PostgreSQL catalog, and metadata for collations the ingested DDL
+    /// created.
+    type Ingestion: Clone + core::fmt::Debug + Send + Sync;
+
+    /// Returns the state a fresh ingestion starts from under the given
+    /// dialect, before any statement applies.
+    ///
+    /// Dialect-aware so a directly built database resumes under its
+    /// dialect's defaults: the parser profile answers PostgreSQL with the
+    /// full default catalog and every other dialect with an empty one.
+    fn default_ingestion(dialect: &Self::Dialect) -> Self::Ingestion;
 }

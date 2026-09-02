@@ -103,8 +103,9 @@ pub struct GenericDBBuilder<P: SchemaProfile> {
 }
 
 impl<P: SchemaProfile> GenericDBBuilder<P> {
-    /// Returns a database without consuming the current builder.
-    pub(crate) fn snapshot(&self) -> GenericDB<P> {
+    /// Returns a database carrying the given ingestion state, without
+    /// consuming the current builder.
+    pub(crate) fn snapshot_with(&self, ingestion: P::Ingestion) -> GenericDB<P> {
         Self {
             dialect: self.dialect.clone(),
             catalog_name: self.catalog_name.clone(),
@@ -126,7 +127,7 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             column_grants: self.column_grants.clone(),
             search_path: self.search_path.clone(),
         }
-        .into()
+        .into_database(ingestion)
     }
 
     /// Returns a mutable reference to the tables list.
@@ -656,35 +657,87 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
         self.materialized_views.extend(views);
         self
     }
-}
 
-impl<P: SchemaProfile> From<GenericDBBuilder<P>> for GenericDB<P> {
-    fn from(mut builder: GenericDBBuilder<P>) -> Self {
-        let catalog_name = builder.catalog_name;
+    /// Reopens a built database for further ingestion, handing its
+    /// continuation state back beside the builder.
+    ///
+    /// The inverse of [`Self::into_database`]: the relation index is dropped
+    /// and rebuilt when the builder finishes again.
+    pub(crate) fn from_database(database: GenericDB<P>) -> (Self, P::Ingestion) {
+        let GenericDB {
+            dialect,
+            catalog_name,
+            timezone,
+            tables,
+            views,
+            materialized_views,
+            relation_index: _,
+            columns,
+            indices,
+            unique_indices,
+            foreign_keys,
+            functions,
+            triggers,
+            policies,
+            check_constraints,
+            roles,
+            table_grants,
+            column_grants,
+            schemas,
+            search_path,
+            ingestion,
+        } = database;
+        let builder = Self {
+            dialect,
+            catalog_name,
+            timezone,
+            tables,
+            views,
+            materialized_views,
+            columns,
+            indices,
+            unique_indices,
+            foreign_keys,
+            functions,
+            triggers,
+            policies,
+            check_constraints,
+            roles,
+            schemas,
+            table_grants,
+            column_grants,
+            search_path,
+        };
+        (builder, ingestion)
+    }
 
-        builder.tables.sort_unstable_by_key(|(table, _)| {
+    /// Sorts, indexes, and seals the built objects into a database carrying
+    /// the given ingestion state.
+    pub(crate) fn into_database(mut self, ingestion: P::Ingestion) -> GenericDB<P> {
+        let catalog_name = self.catalog_name;
+
+        self.tables.sort_unstable_by_key(|(table, _)| {
             (
                 table.table_schema().map(alloc::string::ToString::to_string),
                 table.table_name().to_string(),
             )
         });
 
-        builder.columns.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
-        builder.indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-        builder.unique_indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-        builder.foreign_keys.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-        builder.functions.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
-        builder.triggers.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
-        builder.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
-        builder.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
-        builder
-            .roles
+        self.columns.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+        self.indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        self.unique_indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        self.foreign_keys.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        self.functions.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        self.triggers.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        self.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        self.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+        self.roles
             .sort_unstable_by(|(left, _), (right, _)| left.stored_name().cmp(&right.stored_name()));
-        builder.schemas.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
-        builder.views.sort_unstable_by(|(a, _), (b, _)| {
+        self.schemas.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        self.views.sort_unstable_by(|(a, _), (b, _)| {
             stored_view_key(a.as_ref()).cmp(&stored_view_key(b.as_ref()))
         });
-        builder.materialized_views.sort_unstable_by(|(a, _), (b, _)| {
+        self.materialized_views.sort_unstable_by(|(a, _), (b, _)| {
             stored_view_key(a.as_ref()).cmp(&stored_view_key(b.as_ref()))
         });
         // Grants are not sorted as their order may be significant
@@ -693,19 +746,19 @@ impl<P: SchemaProfile> From<GenericDBBuilder<P>> for GenericDB<P> {
         // index answers all three. Slots of a kind stay ascending because each
         // kind is walked in storage order.
         let mut relation_index: BTreeMap<_, Vec<RelationSlot>> = BTreeMap::new();
-        for (position, (table, _)) in builder.tables.iter().enumerate() {
+        for (position, (table, _)) in self.tables.iter().enumerate() {
             relation_index
                 .entry(stored_table_key(table.as_ref()))
                 .or_default()
                 .push(RelationSlot::Table(position));
         }
-        for (position, (view, _)) in builder.views.iter().enumerate() {
+        for (position, (view, _)) in self.views.iter().enumerate() {
             relation_index
                 .entry(stored_view_key(view.as_ref()))
                 .or_default()
                 .push(RelationSlot::View(position));
         }
-        for (position, (view, _)) in builder.materialized_views.iter().enumerate() {
+        for (position, (view, _)) in self.materialized_views.iter().enumerate() {
             relation_index
                 .entry(stored_view_key(view.as_ref()))
                 .or_default()
@@ -713,27 +766,39 @@ impl<P: SchemaProfile> From<GenericDBBuilder<P>> for GenericDB<P> {
         }
 
         GenericDB {
-            dialect: builder.dialect,
+            dialect: self.dialect,
             catalog_name,
-            timezone: builder.timezone,
-            tables: builder.tables,
-            views: builder.views,
-            materialized_views: builder.materialized_views,
+            timezone: self.timezone,
+            tables: self.tables,
+            views: self.views,
+            materialized_views: self.materialized_views,
             relation_index,
-            columns: builder.columns,
-            indices: builder.indices,
-            unique_indices: builder.unique_indices,
-            foreign_keys: builder.foreign_keys,
-            functions: builder.functions,
-            triggers: builder.triggers,
-            policies: builder.policies,
-            check_constraints: builder.check_constraints,
-            roles: builder.roles,
-            schemas: builder.schemas,
-            table_grants: builder.table_grants,
-            column_grants: builder.column_grants,
-            search_path: builder.search_path,
+            columns: self.columns,
+            indices: self.indices,
+            unique_indices: self.unique_indices,
+            foreign_keys: self.foreign_keys,
+            functions: self.functions,
+            triggers: self.triggers,
+            policies: self.policies,
+            check_constraints: self.check_constraints,
+            roles: self.roles,
+            schemas: self.schemas,
+            table_grants: self.table_grants,
+            column_grants: self.column_grants,
+            search_path: self.search_path,
+            ingestion,
         }
+    }
+}
+
+impl<P: SchemaProfile> From<GenericDBBuilder<P>> for GenericDB<P> {
+    /// Seals the builder under its dialect's default ingestion state, the
+    /// state a database built without [`ParseOptions`] resumes from.
+    ///
+    /// [`ParseOptions`]: crate::structs::ParseOptions
+    fn from(builder: GenericDBBuilder<P>) -> Self {
+        let ingestion = P::default_ingestion(&builder.dialect);
+        builder.into_database(ingestion)
     }
 }
 

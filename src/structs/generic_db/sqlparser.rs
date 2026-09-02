@@ -95,6 +95,19 @@ impl SchemaProfile for SqlparserProfile {
     type TableGrant = Grant;
     type ColumnGrant = Grant;
     type Dialect = SqlparserDialect;
+    type Ingestion = Arc<ParserIngestion>;
+
+    fn default_ingestion(dialect: &SqlparserDialect) -> Arc<ParserIngestion> {
+        Arc::new(ParserIngestion {
+            access_resolution: AccessResolution::default(),
+            active_postgres_catalog: Arc::new(if matches!(dialect, SqlparserDialect::PostgreSql) {
+                PostgresCatalog::default()
+            } else {
+                PostgresCatalog::empty()
+            }),
+            collation_metadata: Vec::new(),
+        })
+    }
 }
 
 /// A type alias for a `GenericDBBuilder` specialized for `sqlparser`'s
@@ -107,12 +120,42 @@ struct CreatedCollationMetadata {
     postgres_deterministic: Option<bool>,
 }
 
+/// The continuation state the parser carries inside every built database so
+/// statement-by-statement ingestion can resume from it: the
+/// access-resolution mode, the active PostgreSQL catalog, and metadata for
+/// collations the ingested DDL created.
+///
+/// The catalog sits behind an [`Arc`], so cloning a database or taking a
+/// snapshot bumps a reference count rather than copying the catalog's
+/// collation list. The rare statement that changes the catalog copies on
+/// write.
+#[derive(Clone)]
+pub struct ParserIngestion {
+    access_resolution: AccessResolution,
+    active_postgres_catalog: Arc<PostgresCatalog>,
+    collation_metadata: Vec<CreatedCollationMetadata>,
+}
+
+impl core::fmt::Debug for ParserIngestion {
+    /// Summarizes the catalog by size: the default one alone holds hundreds
+    /// of collations.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ParserIngestion")
+            .field("access_resolution", &self.access_resolution)
+            .field("catalog_collations", &self.active_postgres_catalog.collations().count())
+            .field(
+                "catalog_collatable_types",
+                &self.active_postgres_catalog.collatable_types().count(),
+            )
+            .field("created_collations", &self.collation_metadata.len())
+            .finish()
+    }
+}
+
 /// A statement-by-statement builder that produces queryable schema snapshots.
 pub struct ParserDBIngestor {
     builder: ParserDBBuilder,
-    active_postgres_catalog: PostgresCatalog,
-    collation_metadata: Vec<CreatedCollationMetadata>,
-    access_resolution: AccessResolution,
+    ingestion: Arc<ParserIngestion>,
 }
 
 #[derive(Clone, Copy)]
@@ -3312,12 +3355,18 @@ impl ParserDBIngestor {
         options: ParseOptions,
     ) -> Self {
         let (access_resolution, postgres_catalog) = options.into_parts();
+        let active_postgres_catalog =
+            Arc::new(if matches!(dialect, SqlparserDialect::PostgreSql) {
+                postgres_catalog
+            } else {
+                PostgresCatalog::empty()
+            });
+        let ingestion = Arc::new(ParserIngestion {
+            access_resolution,
+            active_postgres_catalog,
+            collation_metadata: Vec::new(),
+        });
         let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect);
-        let active_postgres_catalog = if matches!(dialect, SqlparserDialect::PostgreSql) {
-            postgres_catalog
-        } else {
-            PostgresCatalog::empty()
-        };
 
         let any_type = DataType::Custom(
             ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
@@ -3409,15 +3458,16 @@ impl ParserDBIngestor {
             builder = builder.add_function(Arc::new(create_function), FunctionMetadata::default());
         }
 
-        let collation_metadata = Vec::new();
-        Self { builder, active_postgres_catalog, collation_metadata, access_resolution }
+        Self { builder, ingestion }
     }
 
     fn apply_statements(
         self,
         statements: impl IntoIterator<Item = Statement>,
     ) -> Result<Self, crate::errors::Error> {
-        let Self { builder, active_postgres_catalog, collation_metadata, access_resolution } = self;
+        let Self { builder, ingestion } = self;
+        let ParserIngestion { access_resolution, active_postgres_catalog, collation_metadata } =
+            Arc::try_unwrap(ingestion).unwrap_or_else(|shared| (*shared).clone());
         let mut statements = statements.into_iter();
         let (builder, active_postgres_catalog, collation_metadata) = ParserDB::apply_statements(
             builder,
@@ -3426,7 +3476,12 @@ impl ParserDBIngestor {
             access_resolution,
             &mut statements,
         )?;
-        Ok(Self { builder, active_postgres_catalog, collation_metadata, access_resolution })
+        let ingestion = Arc::new(ParserIngestion {
+            access_resolution,
+            active_postgres_catalog,
+            collation_metadata,
+        });
+        Ok(Self { builder, ingestion })
     }
 
     /// Applies one statement to the current schema.
@@ -3441,17 +3496,47 @@ impl ParserDBIngestor {
     /// Returns a queryable snapshot without consuming the builder.
     #[must_use]
     pub fn snapshot(&self) -> ParserDB {
-        self.builder.snapshot()
+        self.builder.snapshot_with(Arc::clone(&self.ingestion))
     }
 
     /// Returns the final queryable schema.
     #[must_use]
     pub fn finish(self) -> ParserDB {
-        self.builder.into()
+        self.builder.into_database(self.ingestion)
     }
 }
 
 impl ParserDB {
+    /// Reopens this database for further statement-by-statement ingestion.
+    ///
+    /// The returned ingestor continues under the [`ParseOptions`] the
+    /// database was built with, and remembers the collations its DDL
+    /// created, so resumed ingestion behaves exactly like an uninterrupted
+    /// one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (id INT PRIMARY KEY);")?;
+    /// let statement =
+    ///     Parser::parse_sql(&PostgreSqlDialect {}, "ALTER TABLE t ADD COLUMN label TEXT;")
+    ///         .expect("SQL parses")
+    ///         .pop()
+    ///         .expect("one statement");
+    /// let db = db.into_ingestor().apply_statement(statement)?.finish();
+    /// let table = db.table(None, "t").expect("table exists");
+    /// assert!(table.column("label", &db).expect("column lookup runs").is_some());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    #[must_use]
+    pub fn into_ingestor(self) -> ParserDBIngestor {
+        let (builder, ingestion) = ParserDBBuilder::from_database(self);
+        ParserDBIngestor { builder, ingestion }
+    }
+
     /// Resolves a schema using a parsed SQL identifier.
     ///
     /// Resolution follows PostgreSQL identifier rules:
@@ -5476,12 +5561,12 @@ impl ParserDB {
     #[allow(clippy::too_many_lines)]
     fn apply_statements(
         mut builder: ParserDBBuilder,
-        mut active_postgres_catalog: PostgresCatalog,
+        mut active_postgres_catalog: Arc<PostgresCatalog>,
         mut collation_metadata: Vec<CreatedCollationMetadata>,
         access_resolution: AccessResolution,
         statements: &mut dyn Iterator<Item = Statement>,
     ) -> Result<
-        (ParserDBBuilder, PostgresCatalog, Vec<CreatedCollationMetadata>),
+        (ParserDBBuilder, Arc<PostgresCatalog>, Vec<CreatedCollationMetadata>),
         crate::errors::Error,
     > {
         let dialect = *builder.dialect();
@@ -7027,7 +7112,7 @@ impl ParserDB {
                                     &new_schema_name,
                                     new_schema_quoted,
                                 );
-                                active_postgres_catalog.rename_schema(
+                                Arc::make_mut(&mut active_postgres_catalog).rename_schema(
                                     &current_schema_name,
                                     current_schema_quoted,
                                     &new_schema_name,
@@ -7341,6 +7426,65 @@ mod tests {
         errors::{Error, LookupError},
         traits::{DatabaseLike, TableLike},
     };
+
+    mod ingestion_resumption {
+        use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+
+        use super::*;
+        use crate::traits::{ColumnCollation, ColumnLike};
+
+        /// A builder-constructed PostgreSQL database resumes under the
+        /// profile's PostgreSQL defaults, so an ICU collation the server
+        /// ships resolves after resumption.
+        #[test]
+        fn builder_constructed_postgres_database_resumes_with_default_catalog() {
+            let database: ParserDB =
+                ParserDB::new("test".to_owned(), SqlparserDialect::PostgreSql).into();
+
+            let statements = Parser::parse_sql(
+                &PostgreSqlDialect {},
+                "CREATE TABLE t (name TEXT COLLATE \"en-US-x-icu\");",
+            )
+            .expect("SQL parses");
+            let input = statements
+                .into_iter()
+                .try_fold(database.into_ingestor(), ParserDBIngestor::apply_statement)
+                .expect("PostgreSQL default catalog resolves an ICU collation after resumption");
+
+            let database = input.finish();
+            let table = database.table(None, "t").expect("table exists");
+            let column = table
+                .column("name", &database)
+                .expect("column lookup runs")
+                .expect("column exists");
+            let ColumnCollation::Named(collation) =
+                column.collation(&database).expect("collation metadata resolves")
+            else {
+                panic!("expected a named collation")
+            };
+            assert_eq!(collation.name().name(), "en-US-x-icu");
+        }
+
+        /// The debug view names the catalog's size rather than dumping its
+        /// hundreds of collations, and a non-PostgreSQL dialect starts from
+        /// an empty one.
+        #[test]
+        fn database_debug_summarizes_ingestion_state() {
+            let database: ParserDB =
+                ParserDB::new("test".to_owned(), SqlparserDialect::PostgreSql).into();
+            let debug = alloc::format!("{database:?}");
+            assert!(debug.contains("access_resolution"));
+            assert!(
+                !debug.contains("en-US-x-icu"),
+                "debug output must summarize the catalog, not dump it"
+            );
+
+            let database: ParserDB =
+                ParserDB::new("test".to_owned(), SqlparserDialect::Generic).into();
+            let debug = alloc::format!("{database:?}");
+            assert!(debug.contains("catalog_collations: 0"));
+        }
+    }
 
     mod identifier_aware_lookup {
         use sqlparser::{
