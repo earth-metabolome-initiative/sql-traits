@@ -285,7 +285,11 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> Cow<'_, str> {
                 // point of the totality.
                 [] => "UNSPECIFIED".into(),
                 [only] => {
-                    let name = object_name_part_value(only);
+                    // A part built at run time names no type here, which is
+                    // the same position an empty name leaves the reader in.
+                    let Some(name) = object_name_part_value(only) else {
+                        return "UNSPECIFIED".into();
+                    };
                     if segments == &["Point", "4326"] {
                         if name == "GEOGRAPHY" {
                             return "GEOGRAPHY(Point, 4326)".into();
@@ -299,10 +303,13 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> Cow<'_, str> {
                 qualified => {
                     let mut joined = String::new();
                     for (index, part) in qualified.iter().enumerate() {
+                        let Some(value) = object_name_part_value(part) else {
+                            return "UNSPECIFIED".into();
+                        };
                         if index > 0 {
                             joined.push('.');
                         }
-                        joined.push_str(object_name_part_value(part));
+                        joined.push_str(value);
                     }
                     joined.into()
                 }
@@ -454,8 +461,9 @@ mod tests {
         assert_eq!(normalize_sqlparser_type(&custom(&[])), "UNSPECIFIED");
     }
 
-    /// sqlparser models a name part that is a call as its own variant, and it
-    /// contributes the called name.
+    /// sqlparser models a name part that is a call as its own variant, and
+    /// what it will name is unknown until the statement runs, which leaves the
+    /// reader where an empty name does.
     #[test]
     fn test_normalize_sqlparser_type_function_name_part() {
         use sqlparser::ast::ObjectNamePartFunction;
@@ -469,20 +477,20 @@ mod tests {
 
         assert_eq!(
             normalize_sqlparser_type(&DataType::Custom(
-                ObjectName(vec![function_part("my_type")]),
+                ObjectName(vec![function_part("IDENTIFIER")]),
                 vec![]
             )),
-            "my_type"
+            "UNSPECIFIED"
         );
         assert_eq!(
             normalize_sqlparser_type(&DataType::Custom(
                 ObjectName(vec![
                     ObjectNamePart::Identifier(Ident::new("app")),
-                    function_part("my_type"),
+                    function_part("IDENTIFIER"),
                 ]),
                 vec![]
             )),
-            "app.my_type"
+            "UNSPECIFIED"
         );
     }
 

@@ -53,10 +53,10 @@ use crate::{
         identifier_resolution::{identifiers_match, is_public_pseudo_role, normalize_identifier},
         last_str, normalize_postgres_type_cow, normalize_sqlparser_type,
         object_name::{
-            object_name_identifiers, object_name_last_part, resolve_table_object_name_in_iter,
+            Qualifier, object_name_identifiers, object_name_last_part, qualifier_of,
+            require_static_object_name, resolve_table_object_name_in_iter,
             resolve_table_object_name_on_search_path_in_iter, resolve_view_on_search_path_in_iter,
-            schema_from_object_name, stored_table_key, table_matches_object_name,
-            target_name_of_idents,
+            stored_table_key, table_matches_object_name, target_name_of_idents,
         },
     },
 };
@@ -411,11 +411,13 @@ fn collation_names_match_parts(
 }
 
 fn collation_schema_matches(stored: &ObjectName, lookup_schema: &str, lookup_quoted: bool) -> bool {
-    match schema_from_object_name(stored) {
-        Some((stored_schema, stored_quoted)) => {
+    match qualifier_of(stored) {
+        Qualifier::Named(stored_schema, stored_quoted) => {
             identifiers_match(stored_schema, stored_quoted, lookup_schema, lookup_quoted)
         }
-        None => identifiers_match("public", false, lookup_schema, lookup_quoted),
+        Qualifier::Absent => identifiers_match("public", false, lookup_schema, lookup_quoted),
+        // A qualifier built at run time names no schema to compare against.
+        Qualifier::RunTime => false,
     }
 }
 
@@ -439,7 +441,7 @@ fn rename_created_collation_schemas(
     to_quoted: bool,
 ) {
     for metadata in collations {
-        if let Some((schema, schema_quoted)) = schema_from_object_name(&metadata.name) {
+        if let Some((schema, schema_quoted)) = qualifier_of(&metadata.name).named() {
             if identifiers_match(schema, schema_quoted, from, from_quoted) {
                 let ident = if to_quoted { Ident::with_quote('"', to) } else { Ident::new(to) };
                 metadata.name.0[0] = ObjectNamePart::Identifier(ident);
@@ -452,7 +454,9 @@ fn rename_created_collation_schemas(
 }
 
 fn collation_effective_schema(name: &ObjectName) -> (&str, bool) {
-    schema_from_object_name(name).unwrap_or(("public", false))
+    // A creation refuses a run-time qualifier before reaching here, so an
+    // unreadable one and an absent one both mean the default schema.
+    qualifier_of(name).named().unwrap_or(("public", false))
 }
 
 fn collation_already_exists(
@@ -550,7 +554,7 @@ fn column_metadata_from_created_collation(metadata: &CreatedCollationMetadata) -
     };
     ColumnMetadata::default()
         .with_postgres_deterministic(metadata.postgres_deterministic)
-        .with_postgres_collation(schema_from_object_name(&metadata.name), name)
+        .with_postgres_collation(qualifier_of(&metadata.name).named(), name)
 }
 
 fn column_metadata_from_catalog_collation(metadata: &PostgresCatalogCollation) -> ColumnMetadata {
@@ -610,8 +614,20 @@ fn collation_resolution_for_name<'a>(
     catalog: &'a PostgresCatalog,
     search_path: &[(String, bool)],
 ) -> Option<CollationResolution<'a>> {
-    if let Some((schema, schema_quoted)) = schema_from_object_name(name) {
-        return collation_resolution_for_schema(name, collations, catalog, schema, schema_quoted);
+    match qualifier_of(name) {
+        Qualifier::Named(schema, schema_quoted) => {
+            return collation_resolution_for_schema(
+                name,
+                collations,
+                catalog,
+                schema,
+                schema_quoted,
+            );
+        }
+        // A name built at run time resolves to nothing rather than being
+        // walked along the search path as though it were unqualified.
+        Qualifier::RunTime => return None,
+        Qualifier::Absent => {}
     }
 
     if !search_path_names_pg_catalog(search_path)
@@ -656,8 +672,12 @@ fn catalog_type_for_name<'a>(
     catalog: &'a PostgresCatalog,
     search_path: &[(String, bool)],
 ) -> Option<&'a PostgresCatalogType> {
-    if let Some((schema, schema_quoted)) = schema_from_object_name(name) {
-        return catalog_type_for_schema(name, catalog, schema, schema_quoted);
+    match qualifier_of(name) {
+        Qualifier::Named(schema, schema_quoted) => {
+            return catalog_type_for_schema(name, catalog, schema, schema_quoted);
+        }
+        Qualifier::RunTime => return None,
+        Qualifier::Absent => {}
     }
     if !search_path_names_pg_catalog(search_path)
         && let Some(metadata) = catalog_type_for_schema(name, catalog, "pg_catalog", false)
@@ -1380,10 +1400,13 @@ fn object_name_last_identifier(object_name: &ObjectName) -> Option<&Ident> {
     }
 }
 
-/// Returns an error when an object name carries no parts.
+/// Returns an error when an object name carries no parts, or a part built
+/// while the statement runs.
 ///
-/// The parser never produces an empty `ObjectName`, so a caller reaching this
-/// branch built the name by hand.
+/// The parser never produces an empty `ObjectName`, so a caller reaching that
+/// branch built the name by hand. A part some dialects spell as a call,
+/// `IDENTIFIER('docs')`, names whatever the call returns when the statement
+/// runs, so a schema cannot record the object under any spelling.
 fn require_named(
     object_name: &ObjectName,
     kind: crate::errors::ObjectKind,
@@ -1391,6 +1414,7 @@ fn require_named(
     if object_name.0.is_empty() {
         return Err(crate::errors::Error::UnnamedObject { object_kind: kind });
     }
+    require_static_object_name(object_name)?;
     Ok(())
 }
 
@@ -2186,7 +2210,9 @@ fn function_signatures_match(
     right_args: Option<&[OperateFunctionArg]>,
 ) -> bool {
     if !object_names_match(left, right)
-        || !schema_qualifiers_match(schema_from_object_name(left), schema_from_object_name(right))
+        || matches!(qualifier_of(left), Qualifier::RunTime)
+        || matches!(qualifier_of(right), Qualifier::RunTime)
+        || !schema_qualifiers_match(qualifier_of(left).named(), qualifier_of(right).named())
     {
         return false;
     }
@@ -2449,7 +2475,7 @@ fn validate_created_collation_schema(
     builder: &ParserDBBuilder,
     name: &ObjectName,
 ) -> Result<(), crate::errors::Error> {
-    let Some((schema_name, schema_quoted)) = schema_from_object_name(name) else {
+    let Some((schema_name, schema_quoted)) = qualifier_of(name).named() else {
         return Ok(());
     };
     if collation_schema_is_declared(builder, schema_name, schema_quoted) {
@@ -7426,6 +7452,72 @@ mod tests {
         errors::{Error, LookupError},
         traits::{DatabaseLike, TableLike},
     };
+
+    /// A collation or type name built while the statement runs resolves to
+    /// nothing, and is not walked along the search path as though it were
+    /// unqualified.
+    mod run_time_names {
+        use sqlparser::ast::{Ident, ObjectName, ObjectNamePart, ObjectNamePartFunction};
+
+        use super::*;
+
+        fn run_time_qualified(name: &str) -> ObjectName {
+            ObjectName(vec![
+                ObjectNamePart::Function(ObjectNamePartFunction {
+                    name: Ident::new("IDENTIFIER"),
+                    args: Vec::new(),
+                }),
+                ObjectNamePart::Identifier(Ident::new(name)),
+            ])
+        }
+
+        fn qualified(schema: &str, name: &str) -> ObjectName {
+            ObjectName(vec![
+                ObjectNamePart::Identifier(Ident::new(schema)),
+                ObjectNamePart::Identifier(Ident::new(name)),
+            ])
+        }
+
+        #[test]
+        fn a_run_time_qualifier_matches_no_collation_schema() {
+            assert!(collation_schema_matches(&qualified("app", "c"), "app", false));
+            assert!(!collation_schema_matches(&run_time_qualified("c"), "app", false));
+            assert!(!collation_schema_matches(&run_time_qualified("c"), "public", false));
+        }
+
+        #[test]
+        fn a_run_time_qualifier_resolves_to_no_collation() {
+            let catalog = PostgresCatalog::default();
+            let path = [("public".to_string(), false)];
+
+            assert!(
+                collation_resolution_for_name(
+                    &qualified("pg_catalog", "\"en-US-x-icu\""),
+                    &[],
+                    &catalog,
+                    &path,
+                )
+                .is_none(),
+                "the quoted spelling is part of the stored name, so this one misses"
+            );
+            assert!(
+                collation_resolution_for_name(&run_time_qualified("c"), &[], &catalog, &path)
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn a_run_time_qualifier_resolves_to_no_catalog_type() {
+            let catalog = PostgresCatalog::default();
+            let path = [("public".to_string(), false)];
+
+            assert!(
+                catalog_type_for_name(&qualified("pg_catalog", "text"), &catalog, &path).is_some()
+            );
+            assert!(catalog_type_for_name(&qualified("app", "text"), &catalog, &path).is_none());
+            assert!(catalog_type_for_name(&run_time_qualified("text"), &catalog, &path).is_none());
+        }
+    }
 
     mod ingestion_resumption {
         use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};

@@ -33,8 +33,8 @@ use crate::{
     structs::{MaterializedView, View, metadata::ViewMetadata},
     traits::ViewLike,
     utils::object_name::{
-        RelationKey, object_name_last_part, schema_from_object_name, stored_table_key,
-        stored_view_key, target_key, target_name_from_object_name,
+        RelationKey, object_name_last_part, qualifier_of, stored_table_key, stored_view_key,
+        target_key, target_name_from_object_name,
     },
 };
 
@@ -45,7 +45,7 @@ fn declared_kind(node: &CreateView) -> ObjectKind {
 
 /// The schema qualifier a view name carries, if it carries one.
 fn view_schema_qualifier(name: &ObjectName) -> SchemaQualifier<'_> {
-    schema_from_object_name(name)
+    qualifier_of(name).named()
 }
 
 /// Records a `CREATE VIEW` or `CREATE MATERIALIZED VIEW`.

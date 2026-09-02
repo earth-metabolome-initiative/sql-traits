@@ -40,8 +40,8 @@ use crate::{
     utils::{
         identifier_resolution::identifiers_match,
         object_name::{
-            object_name_last_part, render_table_candidate, resolve_object_name,
-            schema_from_object_name, target_name_from_object_name,
+            object_name_last_part, qualifier_of, render_table_candidate, resolve_object_name,
+            target_name_from_object_name,
         },
     },
 };
@@ -2937,7 +2937,7 @@ fn resolve_wildcard_target<'scope, 'query, 'db, DB: DatabaseLike, D: Copy>(
                 })
         }
         2 => {
-            let (schema, schema_quoted) = schema_from_object_name(qualifier)?;
+            let (schema, schema_quoted) = qualifier_of(qualifier).named()?;
             base_for_qualified_name(
                 bases,
                 schema,
