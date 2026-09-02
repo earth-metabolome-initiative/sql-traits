@@ -236,7 +236,7 @@ pub fn builtin_function_name(function: &Function) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use sqlparser::{
-        ast::{Expr, Function, Ident},
+        ast::{Expr, Function, Ident, ObjectNamePart, ObjectNamePartFunction},
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
@@ -281,6 +281,35 @@ mod tests {
         assert_eq!(builtin_function_name(&call("\"now\"()")), None);
         assert_eq!(builtin_function_name(&call("a.b.now()")), None);
         assert_eq!(builtin_function_name(&call("\"PG_CATALOG\".now()")), None);
+    }
+
+    /// A name part spelled as a call, which Snowflake's `IDENTIFIER(...)`
+    /// produces, is read by the identifier it carries.
+    #[test]
+    fn a_dynamic_name_part_is_read_by_its_identifier() {
+        let dynamic = |value: &str| {
+            ObjectNamePart::Function(ObjectNamePartFunction {
+                name: Ident::new(value),
+                args: Vec::new(),
+            })
+        };
+
+        let mut unqualified = call("now()");
+        unqualified.name.0 = alloc::vec![dynamic("NOW")];
+        assert_eq!(folded_function_name(&unqualified).as_deref(), Some("now"));
+        assert_eq!(builtin_function_name(&unqualified).as_deref(), Some("now"));
+
+        let mut qualified = call("app.now()");
+        qualified.name.0 = alloc::vec![dynamic("pg_catalog"), dynamic("now")];
+        assert_eq!(builtin_function_name(&qualified).as_deref(), Some("now"));
+
+        qualified.name.0 = alloc::vec![dynamic("app"), dynamic("now")];
+        assert_eq!(builtin_function_name(&qualified), None);
+
+        // An empty name has no terminal identifier to read.
+        unqualified.name.0.clear();
+        assert_eq!(folded_function_name(&unqualified), None);
+        assert_eq!(builtin_function_name(&unqualified), None);
     }
 
     // ---------------------------------------------------------------
