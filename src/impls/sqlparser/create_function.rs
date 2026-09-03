@@ -173,7 +173,10 @@ mod tests {
         dialect::PostgreSqlDialect,
     };
 
-    use crate::{prelude::ParserDB, traits::FunctionLike};
+    use crate::{
+        prelude::ParserDB,
+        traits::{DatabaseLike, FunctionLike},
+    };
 
     #[test]
     fn dynamic_and_empty_function_names_report_their_quote_state() {
@@ -181,7 +184,7 @@ mod tests {
             "CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';",
         )
         .expect("schema parses");
-        let mut function = database.function("ping").expect("function exists").clone();
+        let mut function = database.function(None, "ping").expect("function exists").clone();
         function.name.0 = vec![ObjectNamePart::Function(ObjectNamePartFunction {
             name: Ident::with_quote('"', "ping"),
             args: Vec::new(),

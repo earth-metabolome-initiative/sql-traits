@@ -8012,7 +8012,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql)
                 .expect("Quoted DROP FUNCTION should match quoted CREATE FUNCTION");
 
-            assert!(db.function("\"FooBar\"").is_none());
+            assert!(db.function(None, "\"FooBar\"").is_none());
         }
 
         #[test]
@@ -8186,7 +8186,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // The function exists but isn't used by any schema object
-            assert!(db.function("my_func").is_some());
+            assert!(db.function(None, "my_func").is_some());
         }
 
         #[test]
@@ -8198,7 +8198,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist and be used
-            assert!(db.function("is_positive").is_some());
+            assert!(db.function(None, "is_positive").is_some());
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION is_positive;");
@@ -8216,7 +8216,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist
-            assert!(db.function("check_access").is_some());
+            assert!(db.function(None, "check_access").is_some());
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION check_access;");
@@ -8234,7 +8234,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist
-            assert!(db.function("validate").is_some());
+            assert!(db.function(None, "validate").is_some());
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION validate;");
@@ -8252,7 +8252,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist
-            assert!(db.function("trigger_fn").is_some());
+            assert!(db.function(None, "trigger_fn").is_some());
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION trigger_fn;");
@@ -8269,7 +8269,7 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.function("check_access").is_some());
+            assert!(db.function(None, "check_access").is_some());
 
             let drop_sql = format!("{sql}\nDROP FUNCTION check_access;");
             let result = ParserDB::parse::<GenericDialect>(&drop_sql);
@@ -8335,9 +8335,9 @@ mod tests {
             "#;
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.function("\"FooBar\"").is_some());
-            assert!(db.function("foobar").is_none());
-            assert!(db.function("\"foobar\"").is_none());
+            assert!(db.function(None, "\"FooBar\"").is_some());
+            assert!(db.function(None, "foobar").is_none());
+            assert!(db.function(None, "\"foobar\"").is_none());
         }
 
         #[test]
@@ -8347,9 +8347,9 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.function("foobar").is_some());
-            assert!(db.function("FOOBAR").is_some());
-            assert!(db.function("\"FOOBAR\"").is_none());
+            assert!(db.function(None, "foobar").is_some());
+            assert!(db.function(None, "FOOBAR").is_some());
+            assert!(db.function(None, "\"FOOBAR\"").is_none());
         }
 
         #[test]
@@ -8359,9 +8359,9 @@ mod tests {
             "#;
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(<ParserDB as DatabaseLike>::function(&db, "\"FooBar\"").is_some());
-            assert!(<ParserDB as DatabaseLike>::function(&db, "foobar").is_none());
-            assert!(<ParserDB as DatabaseLike>::function(&db, "\"foobar\"").is_none());
+            assert!(<ParserDB as DatabaseLike>::function(&db, None, "\"FooBar\"").is_some());
+            assert!(<ParserDB as DatabaseLike>::function(&db, None, "foobar").is_none());
+            assert!(<ParserDB as DatabaseLike>::function(&db, None, "\"foobar\"").is_none());
         }
     }
 
@@ -8874,7 +8874,7 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Function should still exist after dropping trigger
-            assert!(db.function("trigger_fn").is_some());
+            assert!(db.function(None, "trigger_fn").is_some());
         }
     }
 

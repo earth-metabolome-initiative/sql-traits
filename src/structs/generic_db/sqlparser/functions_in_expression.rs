@@ -252,7 +252,7 @@ mod tests {
             "CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';",
         )
         .expect("schema parses");
-        let function = db.function("ping").expect("function exists");
+        let function = db.function(None, "ping").expect("function exists");
         let dynamic_name = ObjectName(vec![ObjectNamePart::Function(ObjectNamePartFunction {
             name: Ident::new("ping"),
             args: Vec::new(),

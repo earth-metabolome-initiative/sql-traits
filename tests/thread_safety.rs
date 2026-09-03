@@ -41,7 +41,7 @@ fn parser_db_can_be_shared_across_threads() {
             let posts = db.table(None, "posts").expect("posts table should exist");
             assert_eq!(posts.table_name(), "posts");
 
-            let function = db.function("user_count").expect("function should exist");
+            let function = db.function(None, "user_count").expect("function should exist");
             assert_eq!(function.name(), "user_count");
 
             let table_count = db.tables().count();

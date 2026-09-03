@@ -19,7 +19,7 @@ use sqlparser::ast::{Ident, ObjectName, ObjectNamePart};
 use crate::{
     errors::LookupError,
     structs::TargetName,
-    traits::{DatabaseLike, TableLike, ViewLike},
+    traits::{DatabaseLike, FunctionLike, TableLike, ViewLike},
     utils::identifier_resolution::{
         identifiers_match, normalize_identifier, parse_lookup_identifier,
     },
@@ -254,6 +254,105 @@ pub(crate) fn stored_table_key<T: TableLike>(table: &T) -> RelationKey {
         schema: stored_schema_key(table).into_owned(),
         name: stored_name_key(table).into_owned(),
     }
+}
+
+/// Key a stored identity is found under, taking each part exactly as stored.
+///
+/// The index folds a schema-less relation into `public`, so this key reaches
+/// the bucket holding both spellings and the caller separates them by
+/// comparing the stored parts.
+pub(crate) fn stored_identity_key(schema: Option<&str>, name: &str) -> RelationKey {
+    RelationKey {
+        schema: schema.map_or_else(|| String::from("public"), String::from),
+        name: String::from(name),
+    }
+}
+
+/// Key a stored function is found under, folding a function declared without a
+/// schema into `public` exactly as a relation is folded.
+///
+/// Functions have their own pool of names, so this key indexes them apart
+/// from relations, and a name carrying several argument lists holds several
+/// functions.
+pub(crate) fn stored_function_key<F: FunctionLike>(function: &F) -> RelationKey {
+    target_key(&function.target_name())
+}
+
+/// Whether a function is stored under exactly this identity, with both parts
+/// read as the catalog holds them.
+pub(crate) fn function_has_stored_identity<F: FunctionLike>(
+    function: &F,
+    schema: Option<&str>,
+    name: &str,
+) -> bool {
+    let target = function.target_name();
+    let stored_schema =
+        target.schema().map(|schema| normalize_identifier(schema, target.schema_is_quoted()));
+    stored_schema.as_deref() == schema && function.stored_name() == name
+}
+
+/// Resolves a single function from the declarations a name matched.
+///
+/// # Errors
+///
+/// Returns [`LookupError::AmbiguousFunctionLookup`] when the name carries more
+/// than one declaration, since resolution here is by name alone and cannot
+/// choose between argument lists.
+pub(crate) fn resolve_one_function<'a, F: FunctionLike>(
+    name: &str,
+    candidates: &[&'a F],
+) -> Result<Option<&'a F>, LookupError> {
+    match candidates {
+        [] => Ok(None),
+        [only] => Ok(Some(only)),
+        many => {
+            Err(LookupError::AmbiguousFunctionLookup {
+                object_name: name.to_string(),
+                candidates: many.iter().map(|f| f.target_name().to_string()).collect(),
+            })
+        }
+    }
+}
+
+/// Resolves a written function reference against an iterator of declarations,
+/// trying each schema on `search_path` in turn for an unqualified name.
+///
+/// # Errors
+///
+/// Returns [`LookupError::AmbiguousFunctionLookup`] when the name carries more
+/// than one declaration in the schema that wins.
+pub(crate) fn resolve_function_on_search_path_in_iter<'a, 'path, F: FunctionLike>(
+    functions: impl Iterator<Item = &'a F>,
+    target: &TargetName<'_>,
+    search_path: impl Iterator<Item = (&'path str, bool)>,
+) -> Result<Option<&'a F>, LookupError> {
+    let indexed: Vec<(RelationKey, &'a F)> =
+        functions.map(|function| (stored_function_key(function), function)).collect();
+    let written = target.to_string();
+    let matching = |key: &RelationKey| -> Vec<&'a F> {
+        indexed
+            .iter()
+            .filter_map(|(stored, function)| (stored == key).then_some(*function))
+            .collect()
+    };
+
+    if target.schema().is_some() {
+        return resolve_one_function(&written, &matching(&target_key(target)));
+    }
+
+    let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
+    for (entry_schema, entry_quoted) in search_path {
+        let key = RelationKey {
+            schema: normalize_identifier(entry_schema, entry_quoted).into_owned(),
+            name: name.clone(),
+        };
+        let candidates = matching(&key);
+        if !candidates.is_empty() {
+            return resolve_one_function(&written, &candidates);
+        }
+    }
+
+    Ok(None)
 }
 
 /// Key a stored view is indexed under, folding a schema-less view into

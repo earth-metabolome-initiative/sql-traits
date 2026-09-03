@@ -32,7 +32,7 @@ fn function_types(ddl: &str) -> (Vec<String>, Option<String>) {
     let statements = Parser::parse_sql(&GenericDialect {}, ddl).expect("SQL parses");
     let database =
         ParserDB::from_statements(statements, "test".to_string()).expect("schema builds");
-    let function = database.function("probe_fn").expect("input declares probe_fn");
+    let function = database.function(None, "probe_fn").expect("input declares probe_fn");
 
     (
         function.argument_type_names(&database).map(std::borrow::Cow::into_owned).collect(),

@@ -16,7 +16,9 @@ use crate::{
     traits::{FunctionLike, PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
     utils::{
         identifier_resolution::identifiers_match,
-        object_name::{render_table_candidate, stored_table_key, stored_view_key},
+        object_name::{
+            render_table_candidate, stored_function_key, stored_table_key, stored_view_key,
+        },
     },
 };
 
@@ -677,6 +679,7 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             unique_indices,
             foreign_keys,
             functions,
+            function_index: _,
             triggers,
             policies,
             check_constraints,
@@ -727,7 +730,11 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
         self.indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         self.unique_indices.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         self.foreign_keys.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-        self.functions.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
+        // Same-named declarations differ only in their arguments, so the node
+        // itself breaks the tie and a lookup answers the same one every time.
+        self.functions.sort_unstable_by(|(a, _), (b, _)| {
+            a.name().cmp(b.name()).then_with(|| a.as_ref().cmp(b.as_ref()))
+        });
         self.triggers.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         self.policies.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         self.check_constraints.sort_unstable_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
@@ -765,6 +772,16 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
                 .push(RelationSlot::MaterializedView(position));
         }
 
+        // Functions keep their own pool of names, and a name carrying several
+        // argument lists holds several slots, ascending in storage order.
+        let mut function_index: BTreeMap<_, Vec<usize>> = BTreeMap::new();
+        for (position, (function, _)) in self.functions.iter().enumerate() {
+            function_index
+                .entry(stored_function_key(function.as_ref()))
+                .or_default()
+                .push(position);
+        }
+
         GenericDB {
             dialect: self.dialect,
             catalog_name,
@@ -778,6 +795,7 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             unique_indices: self.unique_indices,
             foreign_keys: self.foreign_keys,
             functions: self.functions,
+            function_index,
             triggers: self.triggers,
             policies: self.policies,
             check_constraints: self.check_constraints,

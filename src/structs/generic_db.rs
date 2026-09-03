@@ -22,7 +22,7 @@ pub use sqlparser::{
 };
 
 use crate::{
-    traits::{FunctionLike, PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
+    traits::{PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
     utils::{
         identifier_resolution::stored_identifier_matches_lookup,
         object_name::{RelationKey, stored_view_key},
@@ -78,6 +78,13 @@ pub struct GenericDB<P: SchemaProfile> {
     foreign_keys: Vec<Stored<P::ForeignKey>>,
     /// List of functions created in the database.
     functions: Vec<Stored<P::Function>>,
+    /// Functions by normalized `(schema, name)`, values their storage slots.
+    ///
+    /// Functions have their own pool of names, apart from relations, and a
+    /// name carrying several argument lists holds several functions, so the
+    /// slots of one key stay ascending and lookup answers agree with scanning
+    /// the list.
+    function_index: BTreeMap<RelationKey, Vec<usize>>,
     /// List of triggers created in the database.
     triggers: Vec<Stored<P::Trigger>>,
     /// List of policies created in the database.
@@ -122,6 +129,7 @@ impl<P: SchemaProfile> Debug for GenericDB<P> {
             .field("search_path", &self.search_path)
             .field("ingestion", &self.ingestion)
             .field("relation_index", &self.relation_index.len())
+            .field("function_index", &self.function_index.len())
             .finish()
     }
 }
@@ -150,6 +158,7 @@ impl<P: SchemaProfile> Clone for GenericDB<P> {
             search_path: self.search_path.clone(),
             ingestion: self.ingestion.clone(),
             relation_index: self.relation_index.clone(),
+            function_index: self.function_index.clone(),
         }
     }
 }
@@ -384,34 +393,6 @@ impl<P: SchemaProfile> GenericDB<P> {
             .map(|index| &self.indices[index].1)
     }
 
-    /// Returns a reference of the function by name.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the function to retrieve.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use sql_traits::prelude::*;
-    ///
-    /// let db =
-    ///     ParserDB::parse::<GenericDialect>("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
-    /// let func = db.function("my_func").unwrap();
-    /// assert_eq!(func.name(), "my_func");
-    /// assert!(db.function("non_existent").is_none());
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[must_use]
-    pub fn function(&self, name: &str) -> Option<&P::Function> {
-        self.functions.iter().find_map(|(function, _)| {
-            stored_identifier_matches_lookup(function.name(), function.name_is_quoted(), name)
-                .then_some(function.as_ref())
-        })
-    }
-
     /// Returns a reference to the metadata of the specified function, if it
     /// exists in the database.
     ///
@@ -427,7 +408,7 @@ impl<P: SchemaProfile> GenericDB<P> {
     ///
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
-    /// let func = db.function("my_func").unwrap();
+    /// let func = db.function(None, "my_func").unwrap();
     /// assert!(db.function_metadata(func).is_some());
     /// # Ok(())
     /// # }

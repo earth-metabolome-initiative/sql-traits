@@ -19,7 +19,11 @@ use crate::{
     },
     utils::{
         identifier_resolution::stored_identifier_matches_lookup,
-        object_name::{resolve_target_on_search_path_in_iter, resolve_view_on_search_path_in_iter},
+        object_name::{
+            function_has_stored_identity, resolve_function_on_search_path_in_iter,
+            resolve_one_function, resolve_target_on_search_path_in_iter,
+            resolve_view_on_search_path_in_iter,
+        },
     },
 };
 
@@ -480,7 +484,57 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// reporting ambiguity, use [`Self::resolve_target_table`]. To resolve a
     /// parser node, use
     /// [`ParserDB::resolve_table_object_name_on_search_path`](crate::structs::ParserDB::resolve_table_object_name_on_search_path).
+    /// To ask for the table stored under an exact identity rather than for
+    /// what a reference denotes, use [`Self::table_by_stored_identity`].
     fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
+
+    /// Returns the table stored under exactly this identity.
+    ///
+    /// Both parts are read as the catalog holds them, the form
+    /// [`TableLike::stored_table_schema`] and [`TableLike::stored_table_name`]
+    /// report: nothing folds, no quoting is interpreted, so a quote character
+    /// stands for itself and matches only a stored name carrying one, and a
+    /// table stored without a schema is not reached by a `public` qualifier.
+    /// A caller that normalized a name once asks for that name back this way.
+    ///
+    /// [`Self::table`] answers the other question, what a written reference
+    /// denotes, so it folds an unquoted name and reads no schema and `public`
+    /// as one place.
+    ///
+    /// The body here scans [`Self::tables`], which an implementation holding
+    /// an index of its own overrides, as [`GenericDB`] does.
+    ///
+    /// [`GenericDB`]: crate::structs::GenericDB
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///     "CREATE TABLE \"Docs\" (id INT); CREATE TABLE plain (id INT);",
+    /// )?;
+    ///
+    /// assert!(db.table_by_stored_identity(None, "Docs").is_some());
+    /// assert!(db.table_by_stored_identity(None, "docs").is_none());
+    /// assert!(db.table_by_stored_identity(Some("public"), "plain").is_none());
+    /// assert!(db.table_by_stored_identity(None, "plain").is_some());
+    ///
+    /// // A written reference folds an unquoted name, and either spelling of
+    /// // the default schema reaches a table stored in it.
+    /// assert!(db.table(None, "PLAIN").is_some());
+    /// assert!(db.table(Some("public"), "plain").is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn table_by_stored_identity(&self, schema: Option<&str>, name: &str) -> Option<&Self::Table> {
+        self.tables().find(|table| {
+            table.stored_table_schema().as_deref() == schema && table.stored_table_name() == name
+        })
+    }
 
     /// Iterates over the plain views defined in the schema.
     ///
@@ -702,31 +756,128 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
         self.tables().nth(table_id)
     }
 
-    /// Returns the function with the given name.
+    /// Returns the function a written reference denotes, taking the qualifier
+    /// apart from the name.
     ///
-    /// # Arguments
+    /// Both parts are read as a statement would write them, so an unquoted
+    /// name folds, a quoted one is exact, and a function declared without a
+    /// schema resides in the default schema `public`. A registered builtin
+    /// lives in `pg_catalog`, so it is asked for by that schema.
     ///
-    /// * `name` - Name of the function.
+    /// A name can carry several declarations differing in their arguments.
+    /// This answers the first of them in storage order, as
+    /// [`Self::table`] answers the first table a name matched. Use
+    /// [`Self::resolve_target_function`] to be told about the ambiguity
+    /// instead, and to have the search path applied.
     ///
     /// # Example
     ///
     /// ```rust
-    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "
-    /// CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
-    /// ",
+    ///     "CREATE SCHEMA app;
+    ///      CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
+    ///      CREATE FUNCTION app.touch() RETURNS INT AS 'SELECT 1;';",
     /// )?;
-    /// let add_one = db.function("add_one").expect("Function 'add_one' should exist");
-    /// assert_eq!(add_one.name(), "add_one");
-    /// let non_existent = db.function("non_existent");
-    /// assert!(non_existent.is_none());
+    ///
+    /// assert_eq!(db.function(None, "add_one").map(FunctionLike::name), Some("add_one"));
+    /// assert!(db.function(Some("public"), "ADD_ONE").is_some());
+    /// assert!(db.function(Some("app"), "touch").is_some());
+    /// assert!(db.function(None, "touch").is_none());
+    /// assert!(db.function(None, "absent").is_none());
     /// # Ok(())
     /// # }
     /// ```
-    fn function(&self, name: &str) -> Option<&Self::Function>;
+    fn function(&self, schema: Option<&str>, name: &str) -> Option<&Self::Function>;
+
+    /// Returns the function stored under exactly this identity.
+    ///
+    /// Both parts are read as the catalog holds them, so nothing folds and a
+    /// function stored without a schema is not reached by a `public`
+    /// qualifier. This is the counterpart of
+    /// [`Self::table_by_stored_identity`] for functions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousFunctionLookup`] when the identity
+    /// carries several declarations differing in their arguments, which this
+    /// surface cannot choose between.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE SCHEMA app; CREATE FUNCTION app.Touch() RETURNS INT AS 'SELECT 1;';",
+    /// )?;
+    ///
+    /// assert!(db.function_by_stored_identity(Some("app"), "touch")?.is_some());
+    /// assert!(db.function_by_stored_identity(Some("app"), "Touch")?.is_none());
+    /// assert!(db.function_by_stored_identity(None, "touch")?.is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn function_by_stored_identity(
+        &self,
+        schema: Option<&str>,
+        name: &str,
+    ) -> Result<Option<&Self::Function>, LookupError> {
+        let candidates: Vec<&Self::Function> = self
+            .functions()
+            .filter(|function| function_has_stored_identity(*function, schema, name))
+            .collect();
+        resolve_one_function(name, &candidates)
+    }
+
+    /// Resolves a name a statement wrote into the function it denotes,
+    /// applying the same rules as [`Self::resolve_target_table`]: a qualified
+    /// name matches in its own schema, an unqualified one resolves through the
+    /// first schema on [`Self::search_path`] holding it, and quoting decides
+    /// case sensitivity on both parts.
+    ///
+    /// Resolution is by name only. PostgreSQL also weighs the argument list,
+    /// so a name carrying several declarations is reported as ambiguous here
+    /// rather than resolved. A registered builtin lives in `pg_catalog`, which
+    /// the recorded search path does not carry, so an unqualified reference to
+    /// one stays unresolved and the schema has to be written.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousFunctionLookup`] when the name carries
+    /// several declarations in the schema that wins.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::{prelude::*, structs::TargetName};
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE SCHEMA app;
+    ///      CREATE FUNCTION app.touch() RETURNS INT AS 'SELECT 1;';
+    ///      SET search_path TO app;",
+    /// )?;
+    ///
+    /// let touch = db
+    ///     .resolve_target_function(TargetName::new("touch", false))?
+    ///     .expect("the path carries `app`");
+    /// assert_eq!(touch.name(), "touch");
+    /// let qualified = TargetName::new("touch", false).with_schema("app", false);
+    /// assert!(db.resolve_target_function(qualified)?.is_some());
+    /// assert!(db.resolve_target_function(TargetName::new("absent", false))?.is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn resolve_target_function(
+        &self,
+        target: TargetName<'_>,
+    ) -> Result<Option<&Self::Function>, LookupError> {
+        resolve_function_on_search_path_in_iter(self.functions(), &target, self.search_path())
+    }
 
     /// Iterates over the policies defined in the schema.
     ///
