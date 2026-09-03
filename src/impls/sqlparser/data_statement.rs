@@ -247,7 +247,7 @@ mod tests {
     fn unknown_relation_is_skipped() {
         let db = schema_db();
         let statement = parse_one("SELECT * FROM nonexistent_table");
-        assert!(referenced_names(as_query(&statement), &db).is_empty());
+        assert_eq!(referenced_names(as_query(&statement), &db), Vec::<String>::new());
     }
 
     #[test]

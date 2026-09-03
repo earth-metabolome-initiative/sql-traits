@@ -83,6 +83,9 @@ impl PostgresCatalog {
     }
 
     /// Returns the collation facts in insertion order.
+    // Clippy versions disagree on whether an opaque iterator return needs an
+    // explicit `must_use`, so carry the attribute and silence the redundancy.
+    #[allow(clippy::double_must_use)]
     #[must_use]
     pub fn collations(&self) -> impl DoubleEndedIterator<Item = &PostgresCatalogCollation> {
         self.collations.iter()

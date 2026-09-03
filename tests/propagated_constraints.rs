@@ -122,9 +122,9 @@ fn a_key_added_to_a_parent_stays_with_it() {
     );
 
     assert_eq!(constraint_names(&database, "par"), ["p1", "u1", "f1"]);
-    assert!(constraint_names(&database, "chi").is_empty());
+    assert_eq!(constraint_names(&database, "chi"), Vec::<String>::new());
     assert_eq!(primary_key_width(&database, "chi"), 0);
-    assert!(unique_index_names(&database, "chi").is_empty());
+    assert_eq!(unique_index_names(&database, "chi"), Vec::<String>::new());
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn a_constraint_dropped_from_a_parent_leaves_every_descendant() {
     );
 
     for table_name in ["par", "chi", "gch"] {
-        assert!(constraint_names(&database, table_name).is_empty());
+        assert_eq!(constraint_names(&database, table_name), Vec::<String>::new());
     }
 }
 
@@ -263,7 +263,7 @@ fn a_table_that_declared_the_constraint_itself_keeps_it() {
     );
 
     assert_eq!(constraint_names(&database, "chi"), ["same"]);
-    assert!(constraint_names(&database, "par").is_empty());
+    assert_eq!(constraint_names(&database, "par"), Vec::<String>::new());
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn a_constraint_two_parents_pass_down_survives_one_of_them_dropping_it() {
          ALTER TABLE left_par DROP CONSTRAINT dual;
          ALTER TABLE right_par DROP CONSTRAINT dual;"
     ));
-    assert!(constraint_names(&both_dropped, "chi").is_empty());
+    assert_eq!(constraint_names(&both_dropped, "chi"), Vec::<String>::new());
 }
 
 #[test]
@@ -322,7 +322,7 @@ fn a_table_may_drop_a_constraint_of_its_own() {
          ALTER TABLE chi DROP CONSTRAINT own;",
     );
 
-    assert!(constraint_names(&database, "chi").is_empty());
+    assert_eq!(constraint_names(&database, "chi"), Vec::<String>::new());
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn only_drops_a_constraint_from_the_named_table_and_leaves_the_copies() {
          ALTER TABLE ONLY par DROP CONSTRAINT c1;",
     );
 
-    assert!(constraint_names(&detached, "par").is_empty());
+    assert_eq!(constraint_names(&detached, "par"), Vec::<String>::new());
     assert_eq!(constraint_names(&detached, "chi"), ["c1"]);
     // The grandchild still receives its copy from the child, so it keeps it
     // as one it received rather than one of its own.
@@ -387,8 +387,8 @@ fn only_drops_a_constraint_from_the_named_table_and_leaves_the_copies() {
          ALTER TABLE ONLY par DROP CONSTRAINT c1;
          ALTER TABLE chi DROP CONSTRAINT c1;",
     );
-    assert!(constraint_names(&dropped, "chi").is_empty());
-    assert!(constraint_names(&dropped, "gch").is_empty());
+    assert_eq!(constraint_names(&dropped, "chi"), Vec::<String>::new());
+    assert_eq!(constraint_names(&dropped, "gch"), Vec::<String>::new());
 }
 
 #[test]
@@ -479,7 +479,7 @@ fn a_renamed_column_carries_the_check_and_a_later_drop_still_reaches_it() {
          ALTER TABLE par RENAME COLUMN code TO label;
          ALTER TABLE par DROP CONSTRAINT c1;",
     );
-    assert!(constraint_names(&dropped, "chi").is_empty());
+    assert_eq!(constraint_names(&dropped, "chi"), Vec::<String>::new());
 }
 
 #[test]
@@ -512,7 +512,7 @@ fn a_constraint_the_table_does_not_hold_is_reported_unless_excused() {
         "CREATE TABLE par (id INT);
          ALTER TABLE par DROP CONSTRAINT IF EXISTS absent;",
     );
-    assert!(constraint_names(&database, "par").is_empty());
+    assert_eq!(constraint_names(&database, "par"), Vec::<String>::new());
 }
 
 /// The number of check constraints the table answers, counting the ones
@@ -537,7 +537,7 @@ fn a_no_inherit_check_stays_with_the_table_declaring_it() {
          CREATE TABLE chi () INHERITS (par);",
     );
     assert_eq!(constraint_names(&after, "par"), ["c1"]);
-    assert!(constraint_names(&after, "chi").is_empty());
+    assert_eq!(constraint_names(&after, "chi"), Vec::<String>::new());
 
     let before = database(
         "CREATE TABLE par (id INT);
@@ -546,15 +546,15 @@ fn a_no_inherit_check_stays_with_the_table_declaring_it() {
          ALTER TABLE par ADD CONSTRAINT c1 CHECK (id > 0) NO INHERIT;",
     );
     assert_eq!(constraint_names(&before, "par"), ["c1"]);
-    assert!(constraint_names(&before, "chi").is_empty());
-    assert!(constraint_names(&before, "gch").is_empty());
+    assert_eq!(constraint_names(&before, "chi"), Vec::<String>::new());
+    assert_eq!(constraint_names(&before, "gch"), Vec::<String>::new());
 
     let declared = database(
         "CREATE TABLE par (id INT, CONSTRAINT c1 CHECK (id > 0) NO INHERIT);
          CREATE TABLE chi () INHERITS (par);",
     );
     assert_eq!(constraint_names(&declared, "par"), ["c1"]);
-    assert!(constraint_names(&declared, "chi").is_empty());
+    assert_eq!(constraint_names(&declared, "chi"), Vec::<String>::new());
 }
 
 #[test]
@@ -589,7 +589,7 @@ fn only_is_granted_for_a_no_inherit_check() {
          ALTER TABLE ONLY par ADD CONSTRAINT c1 CHECK (id > 0) NO INHERIT;",
     );
     assert_eq!(constraint_names(&database, "par"), ["c1"]);
-    assert!(constraint_names(&database, "chi").is_empty());
+    assert_eq!(constraint_names(&database, "chi"), Vec::<String>::new());
 }
 
 #[test]
@@ -720,7 +720,7 @@ fn only_is_granted_for_a_unique_or_foreign_key_where_tables_inherit() {
          ALTER TABLE ONLY par ADD CONSTRAINT f1 FOREIGN KEY (id) REFERENCES tgt (id);",
     );
     assert_eq!(constraint_names(&database, "par"), ["u1", "f1"]);
-    assert!(constraint_names(&database, "chi").is_empty());
+    assert_eq!(constraint_names(&database, "chi"), Vec::<String>::new());
 }
 
 #[test]
@@ -735,7 +735,7 @@ fn only_leaves_a_unique_constraint_off_existing_partitions() {
          CREATE TABLE after_it PARTITION OF root FOR VALUES FROM (9) TO (99);",
     );
     assert_eq!(constraint_names(&database, "root"), ["u1"]);
-    assert!(constraint_names(&database, "before_it").is_empty());
+    assert_eq!(constraint_names(&database, "before_it"), Vec::<String>::new());
     assert_eq!(constraint_names(&database, "after_it"), ["after_it_id_key"]);
 }
 
@@ -763,7 +763,7 @@ fn only_grants_a_primary_key_where_every_table_below_requires_the_columns() {
          ALTER TABLE ONLY par ADD CONSTRAINT p1 PRIMARY KEY (id);",
     );
     assert_eq!(constraint_names(&inherits, "par"), ["p1"]);
-    assert!(constraint_names(&inherits, "chi").is_empty());
+    assert_eq!(constraint_names(&inherits, "chi"), Vec::<String>::new());
     assert_eq!(primary_key_width(&inherits, "chi"), 0);
 
     let partitioned = database(
@@ -772,7 +772,7 @@ fn only_grants_a_primary_key_where_every_table_below_requires_the_columns() {
          ALTER TABLE ONLY root ADD CONSTRAINT p1 PRIMARY KEY (id);",
     );
     assert_eq!(constraint_names(&partitioned, "root"), ["p1"]);
-    assert!(constraint_names(&partitioned, "part").is_empty());
+    assert_eq!(constraint_names(&partitioned, "part"), Vec::<String>::new());
     assert_eq!(primary_key_width(&partitioned, "part"), 0);
 
     // A grandchild redeclaring the column keeps the requirement the union
