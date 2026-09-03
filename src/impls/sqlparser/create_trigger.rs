@@ -1,7 +1,7 @@
 //! Implementation of the `TriggerLike` trait for sqlparser's `CreateTrigger`
 //! type.
 
-use sqlparser::ast::{CreateTrigger, ObjectNamePart};
+use sqlparser::ast::CreateTrigger;
 
 use crate::{
     errors::LookupError,
@@ -10,7 +10,7 @@ use crate::{
     utils::{
         identifier_resolution::identifiers_match,
         last_str,
-        object_name::{resolve_required_table, target_name_of_object_name},
+        object_name::{object_name_last_part, resolve_required_table, target_name_of_object_name},
     },
 };
 
@@ -84,15 +84,7 @@ impl TriggerLike for CreateTrigger {
     #[inline]
     fn function_name_ident(&self) -> Option<(&str, bool)> {
         let body = self.exec_body.as_ref()?;
-        match body.func_desc.name.0.last() {
-            Some(ObjectNamePart::Identifier(ident)) => {
-                Some((ident.value.as_str(), ident.quote_style.is_some()))
-            }
-            Some(ObjectNamePart::Function(function_part)) => {
-                Some((function_part.name.value.as_str(), function_part.name.quote_style.is_some()))
-            }
-            None => None,
-        }
+        object_name_last_part(&body.func_desc.name)
     }
 }
 
@@ -120,11 +112,13 @@ mod tests {
         let mut trigger = database.triggers().next().expect("trigger exists").clone();
         let function_name = &mut trigger.exec_body.as_mut().expect("execution body").func_desc.name;
         function_name.0 = vec![ObjectNamePart::Function(ObjectNamePartFunction {
-            name: Ident::with_quote('"', "touch"),
+            name: Ident::with_quote('"', "IDENTIFIER"),
             args: Vec::new(),
         })];
-        assert_eq!(trigger.function_name(), Some("touch"));
-        assert_eq!(trigger.function(&database).map(FunctionLike::name), Some("touch"));
+        // Which function the trigger will call is decided when it fires, so
+        // the trigger names none and reaches none.
+        assert_eq!(trigger.function_name(), None);
+        assert_eq!(trigger.function(&database).map(FunctionLike::name), None);
         trigger.exec_body.as_mut().expect("execution body").func_desc.name.0.clear();
         assert_eq!(trigger.function_name(), None);
     }

@@ -15,7 +15,7 @@ use alloc::{
 
 use sqlparser::ast::{CreateView, Query};
 
-use crate::utils::object_name::{object_name_last_part, schema_from_object_name};
+use crate::utils::object_name::{Qualifier, object_name_last_part, qualifier_of};
 
 /// The parts of a `CREATE VIEW` a schema records, shared by both view kinds.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -42,7 +42,13 @@ impl ViewDeclaration {
     #[must_use]
     pub fn from_node(node: &CreateView) -> Option<Self> {
         let (name, name_is_quoted) = object_name_last_part(&node.name)?;
-        let schema = schema_from_object_name(&node.name);
+        // A qualifier built at run time names no schema, so the view cannot be
+        // recorded at all rather than being recorded unqualified.
+        let schema = match qualifier_of(&node.name) {
+            Qualifier::Named(schema, quoted) => Some((schema, quoted)),
+            Qualifier::Absent => None,
+            Qualifier::RunTime => return None,
+        };
         Some(Self {
             name: name.to_string(),
             name_is_quoted,
@@ -172,5 +178,39 @@ impl MaterializedView {
     /// Crate-private, for the same reason [`ViewDeclaration::set_name`] is.
     pub(crate) fn declaration_mut(&mut self) -> &mut ViewDeclaration {
         &mut self.declaration
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlparser::{
+        ast::{Ident, ObjectNamePart, ObjectNamePartFunction, Statement},
+        dialect::PostgreSqlDialect,
+        parser::Parser,
+    };
+
+    use super::ViewDeclaration;
+
+    /// A qualifier built while the statement runs names no schema, so the
+    /// declaration reads as unusable rather than as an unqualified view.
+    #[test]
+    fn a_run_time_qualifier_leaves_no_declaration() {
+        let mut statements =
+            Parser::parse_sql(&PostgreSqlDialect {}, "CREATE VIEW app.v AS SELECT 1 AS one")
+                .expect("the view parses");
+        let Some(Statement::CreateView(mut node)) = statements.pop() else {
+            panic!("expected CREATE VIEW");
+        };
+
+        assert_eq!(
+            ViewDeclaration::from_node(&node).map(|declaration| declaration.schema().is_some()),
+            Some(true)
+        );
+
+        node.name.0[0] = ObjectNamePart::Function(ObjectNamePartFunction {
+            name: Ident::new("IDENTIFIER"),
+            args: Vec::new(),
+        });
+        assert!(ViewDeclaration::from_node(&node).is_none());
     }
 }

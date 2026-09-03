@@ -25,50 +25,93 @@ use crate::{
     },
 };
 
-/// Returns the written identifier of a single object name part.
+/// Reports a name a statement builds while it runs, which no static reader can
+/// resolve.
+pub(crate) fn run_time_object_name(object_name: &ObjectName) -> LookupError {
+    LookupError::InvalidObjectName {
+        object_name: object_name.to_string(),
+        reason: "a part of this name is built when the statement runs, so the object it \
+                 denotes is not known here"
+            .to_string(),
+    }
+}
+
+/// Refuses a name carrying a part built while the statement runs.
 ///
-/// Both [`ObjectNamePart::Identifier`] and [`ObjectNamePart::Function`] names
-/// are accepted, mirroring how sqlparser models qualified names.
-pub(crate) fn object_name_part_value(part: &ObjectNamePart) -> &str {
+/// Every path that records an object calls this first, since a name that only
+/// exists at run time cannot be stored under any spelling.
+///
+/// # Errors
+///
+/// Returns [`LookupError::InvalidObjectName`] when a part is built at run
+/// time.
+pub(crate) fn require_static_object_name(object_name: &ObjectName) -> Result<(), LookupError> {
+    if object_name.0.iter().any(|part| matches!(part, ObjectNamePart::Function(_))) {
+        return Err(run_time_object_name(object_name));
+    }
+    Ok(())
+}
+
+/// Returns the written identifier of a single object name part, and [`None`]
+/// when the part is a call producing the name at run time.
+pub(crate) fn object_name_part_value(part: &ObjectNamePart) -> Option<&str> {
     match part {
-        ObjectNamePart::Identifier(ident) => ident.value.as_str(),
-        ObjectNamePart::Function(function_part) => function_part.name.value.as_str(),
+        ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
+        ObjectNamePart::Function(_) => None,
     }
 }
 
 /// Returns the last identifier part of an object name as `(value, quoted)`.
 ///
-/// Both [`ObjectNamePart::Identifier`] and [`ObjectNamePart::Function`] names
-/// are accepted, mirroring how sqlparser models qualified names.
+/// A part built at run time yields [`None`], the same answer as an empty name:
+/// there is no identifier to read either way.
 pub(crate) fn object_name_last_part(object_name: &ObjectName) -> Option<(&str, bool)> {
     match object_name.0.last() {
         Some(ObjectNamePart::Identifier(ident)) => {
             Some((ident.value.as_str(), ident.quote_style.is_some()))
         }
-        Some(ObjectNamePart::Function(function_part)) => {
-            Some((function_part.name.value.as_str(), function_part.name.quote_style.is_some()))
-        }
-        None => None,
+        Some(ObjectNamePart::Function(_)) | None => None,
     }
 }
 
-/// Extracts the schema component (the second-to-last part) of an object name as
-/// `(value, quoted)`, when the name has more than one part.
-///
-/// For `schema.table` this returns the `schema` part; for a bare `table` it
-/// returns `None`.
-pub(crate) fn schema_from_object_name(object_name: &ObjectName) -> Option<(&str, bool)> {
-    if object_name.0.len() > 1 {
-        match &object_name.0[object_name.0.len() - 2] {
-            ObjectNamePart::Identifier(ident) => {
-                Some((ident.value.as_str(), ident.quote_style.is_some()))
-            }
-            ObjectNamePart::Function(function_part) => {
-                Some((function_part.name.value.as_str(), function_part.name.quote_style.is_some()))
-            }
+/// What an object name says about the schema it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Qualifier<'a> {
+    /// A one-part name, so resolution supplies the schema.
+    Absent,
+    /// Qualified by this identifier, with whether it was quoted.
+    Named(&'a str, bool),
+    /// Qualified by a call producing the schema name at run time, so which
+    /// schema it is cannot be known here.
+    RunTime,
+}
+
+impl<'a> Qualifier<'a> {
+    /// The qualifier a static reader can use, and [`None`] when there is none
+    /// to read.
+    pub(crate) fn named(self) -> Option<(&'a str, bool)> {
+        match self {
+            Self::Named(value, quoted) => Some((value, quoted)),
+            Self::Absent | Self::RunTime => None,
         }
-    } else {
-        None
+    }
+}
+
+/// Reads the schema component (the second-to-last part) of an object name.
+///
+/// For `schema.table` this reports the `schema` part, for a bare `table` it
+/// reports [`Qualifier::Absent`], and for a qualifier built at run time it
+/// reports [`Qualifier::RunTime`] rather than claiming the name is
+/// unqualified.
+pub(crate) fn qualifier_of(object_name: &ObjectName) -> Qualifier<'_> {
+    if object_name.0.len() < 2 {
+        return Qualifier::Absent;
+    }
+    match &object_name.0[object_name.0.len() - 2] {
+        ObjectNamePart::Identifier(ident) => {
+            Qualifier::Named(ident.value.as_str(), ident.quote_style.is_some())
+        }
+        ObjectNamePart::Function(_) => Qualifier::RunTime,
     }
 }
 
@@ -80,9 +123,12 @@ pub(crate) fn schema_from_object_name(object_name: &ObjectName) -> Option<(&str,
 pub(crate) fn target_name_from_object_name(object_name: &ObjectName) -> Option<TargetName<'_>> {
     let (name, quoted) = object_name_last_part(object_name)?;
     let target = TargetName::new(name, quoted);
-    Some(match schema_from_object_name(object_name) {
-        Some((schema, schema_quoted)) => target.with_schema(schema, schema_quoted),
-        None => target,
+    Some(match qualifier_of(object_name) {
+        Qualifier::Named(schema, schema_quoted) => target.with_schema(schema, schema_quoted),
+        Qualifier::Absent => target,
+        // A schema nothing can read is not the same as no schema, so the name
+        // denotes nothing a reader may act on.
+        Qualifier::RunTime => return None,
     })
 }
 
@@ -108,9 +154,9 @@ pub(crate) fn table_matches_object_name<T: TableLike>(table: &T, object_name: &O
         return false;
     }
 
-    match (schema_from_object_name(object_name), table.table_schema()) {
-        (None, None) => true,
-        (Some((schema_lookup, schema_lookup_quoted)), Some(table_schema)) => {
+    match (qualifier_of(object_name), table.table_schema()) {
+        (Qualifier::Absent, None) => true,
+        (Qualifier::Named(schema_lookup, schema_lookup_quoted), Some(table_schema)) => {
             identifiers_match(
                 table_schema,
                 table.table_schema_is_quoted(),
@@ -118,12 +164,14 @@ pub(crate) fn table_matches_object_name<T: TableLike>(table: &T, object_name: &O
                 schema_lookup_quoted,
             )
         }
-        (Some((schema_lookup, schema_lookup_quoted)), None) => {
+        (Qualifier::Named(schema_lookup, schema_lookup_quoted), None) => {
             identifiers_match("public", false, schema_lookup, schema_lookup_quoted)
         }
-        (None, Some(table_schema)) => {
+        (Qualifier::Absent, Some(table_schema)) => {
             identifiers_match(table_schema, table.table_schema_is_quoted(), "public", false)
         }
+        // A qualifier built at run time names no schema a comparison can use.
+        (Qualifier::RunTime, _) => false,
     }
 }
 
@@ -154,12 +202,7 @@ pub(crate) fn object_name_identifiers(
     for part in &object_name.0 {
         match part {
             ObjectNamePart::Identifier(ident) => idents.push(ident),
-            ObjectNamePart::Function(_) => {
-                return Err(LookupError::InvalidObjectName {
-                    object_name: object_name.to_string(),
-                    reason: "all object name parts must be identifiers".to_string(),
-                });
-            }
+            ObjectNamePart::Function(_) => return Err(run_time_object_name(object_name)),
         }
     }
 
@@ -634,11 +677,12 @@ mod tests {
     };
 
     use super::{
-        object_name_identifiers, object_name_last_part, render_table_candidate,
-        render_view_candidate, resolve_object_name, resolve_table_object_name_in_iter,
+        Qualifier, object_name_identifiers, object_name_last_part, qualifier_of,
+        render_table_candidate, render_view_candidate, require_static_object_name,
+        resolve_object_name, resolve_table_object_name_in_iter,
         resolve_table_object_name_on_search_path_in_iter, resolve_target_from_candidates,
-        resolve_view_on_search_path_in_iter, schema_from_object_name, table_matches_object_name,
-        table_matches_target, target_name_of_object_name,
+        resolve_view_on_search_path_in_iter, table_matches_object_name, table_matches_target,
+        target_name_from_object_name, target_name_of_object_name,
     };
     use crate::{
         errors::LookupError,
@@ -704,23 +748,48 @@ mod tests {
     fn object_name_last_part_variants() {
         assert_eq!(object_name_last_part(&obj(&[("t", false)])), Some(("t", false)));
         assert_eq!(object_name_last_part(&obj(&[("T", true)])), Some(("T", true)));
-        assert_eq!(
-            object_name_last_part(&ObjectName(vec![function_part("f")])),
-            Some(("f", false))
-        );
+        // A name built when the statement runs carries no identifier to read.
+        assert_eq!(object_name_last_part(&ObjectName(vec![function_part("IDENTIFIER")])), None);
         assert_eq!(object_name_last_part(&ObjectName(Vec::new())), None);
     }
 
     #[test]
-    fn schema_from_object_name_variants() {
-        assert_eq!(schema_from_object_name(&obj(&[("t", false)])), None);
-        assert_eq!(
-            schema_from_object_name(&obj(&[("s", false), ("t", false)])),
-            Some(("s", false))
-        );
-        let name =
-            ObjectName(vec![function_part("f"), ObjectNamePart::Identifier(ident("t", false))]);
-        assert_eq!(schema_from_object_name(&name), Some(("f", false)));
+    fn qualifier_of_variants() {
+        assert_eq!(qualifier_of(&obj(&[("t", false)])), Qualifier::Absent);
+        assert_eq!(qualifier_of(&obj(&[("s", false), ("t", false)])), Qualifier::Named("s", false));
+        let run_time = ObjectName(vec![
+            function_part("IDENTIFIER"),
+            ObjectNamePart::Identifier(ident("t", false)),
+        ]);
+        // An unreadable qualifier is not an absent one, so nothing may read
+        // the name as unqualified.
+        assert_eq!(qualifier_of(&run_time), Qualifier::RunTime);
+        assert_eq!(qualifier_of(&run_time).named(), None);
+        assert_eq!(target_name_from_object_name(&run_time), None);
+    }
+
+    #[test]
+    fn a_run_time_part_is_refused_and_matches_nothing() {
+        let tables = fixtures();
+        let users = find(&tables, "users");
+        let terminal = ObjectName(vec![function_part("IDENTIFIER")]);
+        let qualifier = ObjectName(vec![
+            function_part("IDENTIFIER"),
+            ObjectNamePart::Identifier(ident("users", false)),
+        ]);
+
+        assert!(require_static_object_name(&obj(&[("users", false)])).is_ok());
+        for name in [&terminal, &qualifier] {
+            assert!(matches!(
+                require_static_object_name(name),
+                Err(LookupError::InvalidObjectName { .. })
+            ));
+            assert!(matches!(
+                object_name_identifiers(name),
+                Err(LookupError::InvalidObjectName { .. })
+            ));
+            assert!(!table_matches_object_name(users, name));
+        }
     }
 
     #[test]

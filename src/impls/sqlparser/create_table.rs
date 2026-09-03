@@ -3,14 +3,14 @@
 
 use alloc::{string::ToString, vec::Vec};
 
-use ::sqlparser::ast::{CreateTable, Expr, Ident, ObjectNamePart};
+use ::sqlparser::ast::{CreateTable, Expr, ObjectNamePart};
 use sql_docs::docs::TableDoc;
 
 use crate::{
     errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableMetadata},
     traits::{DatabaseLike, DocumentationMetadata, Metadata, PartitionStrategy, TableLike},
-    utils::last_str,
+    utils::{last_str, object_name::qualifier_of},
 };
 
 impl Metadata for CreateTable {
@@ -87,20 +87,7 @@ impl TableLike for CreateTable {
 
     #[inline]
     fn table_schema(&self) -> Option<&str> {
-        let object_name_parts = &self.name.0;
-        if object_name_parts.len() > 1 {
-            let schema_part = &object_name_parts[0];
-            match schema_part {
-                sqlparser::ast::ObjectNamePart::Identifier(Ident { value, .. }) => {
-                    Some(value.as_str())
-                }
-                sqlparser::ast::ObjectNamePart::Function(function) => {
-                    Some(function.name.value.as_str())
-                }
-            }
-        } else {
-            None
-        }
+        qualifier_of(&self.name).named().map(|(schema, _)| schema)
     }
 
     #[inline]
@@ -246,21 +233,21 @@ mod tests {
 
     use super::*;
 
+    /// A qualifier some dialects spell as a call, `IDENTIFIER('app')`, names
+    /// whatever the call returns when the statement runs, so no schema can be
+    /// read from it. Reporting the producing call's own name recorded a table
+    /// in a schema nobody wrote.
     #[test]
-    fn table_schema_reads_a_function_name_part() {
-        // sqlparser never emits a `Function` part in a table name from a
-        // `CREATE TABLE` parse, but the accessor must stay total rather than
-        // panic if one is ever constructed. The schema part falls back to the
-        // function's name, mirroring `last_str`.
+    fn a_run_time_qualifier_names_no_schema() {
         let name = ObjectName(vec![
             ObjectNamePart::Function(ObjectNamePartFunction {
-                name: Ident::new("schema_fn"),
+                name: Ident::new("IDENTIFIER"),
                 args: alloc::vec::Vec::new(),
             }),
             ObjectNamePart::Identifier(Ident::new("t")),
         ]);
         let create_table = CreateTableBuilder::new(name).build();
-        assert_eq!(create_table.table_schema(), Some("schema_fn"));
+        assert_eq!(create_table.table_schema(), None);
         assert_eq!(create_table.table_name(), "t");
     }
 }

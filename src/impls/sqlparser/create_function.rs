@@ -5,15 +5,17 @@ use alloc::{borrow::Cow, format, string::ToString};
 
 use sqlparser::ast::{
     CreateFunction, CreateFunctionBody, DataType, Expr, FunctionCalledOnNull,
-    FunctionDefinitionSetParam, FunctionReturnType, FunctionSecurity, ObjectNamePart, Value,
-    ValueWithSpan,
+    FunctionDefinitionSetParam, FunctionReturnType, FunctionSecurity, Value, ValueWithSpan,
 };
 
 use crate::{
     errors::{LookupError, ObjectKind},
     structs::{FunctionMetadata, ParserDB, TargetName},
     traits::{FunctionLike, Metadata},
-    utils::{last_str, normalize_sqlparser_type, object_name::target_name_of_object_name},
+    utils::{
+        last_str, normalize_sqlparser_type,
+        object_name::{object_name_last_part, target_name_of_object_name},
+    },
 };
 
 impl Metadata for CreateFunction {
@@ -49,13 +51,7 @@ impl FunctionLike for CreateFunction {
 
     #[inline]
     fn name_is_quoted(&self) -> bool {
-        match self.name.0.last() {
-            Some(ObjectNamePart::Identifier(ident)) => ident.quote_style.is_some(),
-            Some(ObjectNamePart::Function(function_part)) => {
-                function_part.name.quote_style.is_some()
-            }
-            None => false,
-        }
+        object_name_last_part(&self.name).is_some_and(|(_, quoted)| quoted)
     }
 
     #[inline]
@@ -186,10 +182,13 @@ mod tests {
         .expect("schema parses");
         let mut function = database.function(None, "ping").expect("function exists").clone();
         function.name.0 = vec![ObjectNamePart::Function(ObjectNamePartFunction {
-            name: Ident::with_quote('"', "ping"),
+            name: Ident::with_quote('"', "IDENTIFIER"),
             args: Vec::new(),
         })];
-        assert!(function.name_is_quoted());
+        // The name arrives only when the statement runs, so there is no
+        // identifier here to call quoted, and none to display either.
+        assert!(!function.name_is_quoted());
+        assert_eq!(function.name(), "");
         function.name.0.clear();
         assert!(!function.name_is_quoted());
     }

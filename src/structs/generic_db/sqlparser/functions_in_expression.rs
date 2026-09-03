@@ -2,36 +2,20 @@
 
 use alloc::{sync::Arc, vec::Vec};
 
-use sqlparser::ast::{Expr, ObjectName, ObjectNamePart};
+use sqlparser::ast::{Expr, ObjectName};
 
 use crate::{
     traits::{DatabaseLike, function_like::FunctionLike},
-    utils::identifier_resolution::identifiers_match,
+    utils::{identifier_resolution::identifiers_match, object_name::object_name_last_part},
 };
 
 fn function_matches_object_name<DB: DatabaseLike>(
     function: &DB::Function,
     object_name: &ObjectName,
 ) -> bool {
-    match object_name.0.last() {
-        Some(ObjectNamePart::Identifier(ident)) => {
-            identifiers_match(
-                function.name(),
-                function.name_is_quoted(),
-                ident.value.as_str(),
-                ident.quote_style.is_some(),
-            )
-        }
-        Some(ObjectNamePart::Function(function_part)) => {
-            identifiers_match(
-                function.name(),
-                function.name_is_quoted(),
-                function_part.name.value.as_str(),
-                function_part.name.quote_style.is_some(),
-            )
-        }
-        None => false,
-    }
+    object_name_last_part(object_name).is_some_and(|(called, called_quoted)| {
+        identifiers_match(function.name(), function.name_is_quoted(), called, called_quoted)
+    })
 }
 
 pub(super) fn functions_in_expression<DB: DatabaseLike>(
@@ -246,8 +230,10 @@ mod tests {
         assert_eq!(names, vec!["outside_fn"]);
     }
 
+    /// A call whose name is built at run time matches no declaration, since
+    /// which one it will reach is unknown until it runs.
     #[test]
-    fn dynamic_object_name_parts_match_their_function_name() {
+    fn a_run_time_call_name_matches_no_declaration() {
         let db = ParserDB::parse::<GenericDialect>(
             "CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';",
         )
@@ -257,7 +243,7 @@ mod tests {
             name: Ident::new("ping"),
             args: Vec::new(),
         })]);
-        assert!(super::function_matches_object_name::<ParserDB>(function, &dynamic_name));
+        assert!(!super::function_matches_object_name::<ParserDB>(function, &dynamic_name));
         assert!(!super::function_matches_object_name::<ParserDB>(
             function,
             &ObjectName(Vec::new()),

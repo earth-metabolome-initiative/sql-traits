@@ -8,11 +8,19 @@ use crate::{
     errors::{LookupError, ObjectKind},
     structs::{ParserDB, TableAttribute, metadata::IndexMetadata},
     traits::{DatabaseLike, IndexLike, Metadata, TableLike},
-    utils::object_name::{object_name_last_part, schema_from_object_name},
+    utils::object_name::{Qualifier, object_name_last_part, qualifier_of},
 };
 
 impl Metadata for TableAttribute<CreateTable, CreateIndex> {
     type Meta = IndexMetadata<Self>;
+}
+
+impl TableAttribute<CreateTable, CreateIndex> {
+    /// What the index name says about its schema, if the index is named at
+    /// all.
+    fn index_qualifier(&self) -> Qualifier<'_> {
+        self.attribute().name.as_ref().map_or(Qualifier::Absent, qualifier_of)
+    }
 }
 
 impl IndexLike for TableAttribute<CreateTable, CreateIndex> {
@@ -42,16 +50,12 @@ impl IndexLike for TableAttribute<CreateTable, CreateIndex> {
 
     #[inline]
     fn schema(&self) -> Option<&str> {
-        self.attribute().name.as_ref().and_then(schema_from_object_name).map(|(schema, _)| schema)
+        self.index_qualifier().named().map(|(schema, _)| schema)
     }
 
     #[inline]
     fn schema_is_quoted(&self) -> bool {
-        self.attribute()
-            .name
-            .as_ref()
-            .and_then(schema_from_object_name)
-            .is_some_and(|(_, quoted)| quoted)
+        self.index_qualifier().named().is_some_and(|(_, quoted)| quoted)
     }
 
     #[inline]

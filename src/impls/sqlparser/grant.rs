@@ -44,14 +44,8 @@ fn object_names_match(left: &ObjectName, right: &ObjectName) -> bool {
                     right_ident.quote_style.is_some(),
                 )
             }
-            (ObjectNamePart::Function(left_fn), ObjectNamePart::Function(right_fn)) => {
-                identifiers_match(
-                    left_fn.name.value.as_str(),
-                    left_fn.name.quote_style.is_some(),
-                    right_fn.name.value.as_str(),
-                    right_fn.name.quote_style.is_some(),
-                )
-            }
+            // A part built when the statement runs names nothing yet, so it
+            // matches no part, including another such part.
             _ => false,
         }
     })

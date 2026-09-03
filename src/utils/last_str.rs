@@ -1,7 +1,9 @@
 //! Returns a reference to the value at the last value in the provided
 //! `ObjectName`.
 
-use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
+use sqlparser::ast::ObjectName;
+
+use crate::utils::object_name::object_name_last_part;
 
 /// Returns a reference to the value at the last part of the provided
 /// `ObjectName`.
@@ -10,8 +12,10 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 /// qualifier and the quoting of the identifier. Resolving a name against a
 /// database MUST go through `resolve_object_name` instead, which honours both.
 ///
-/// An empty name returns an empty string. The parser never produces one, so a
-/// caller receiving `""` built the name by hand.
+/// An empty name returns an empty string, and so does a name whose last part
+/// is a call producing it when the statement runs, since neither carries an
+/// identifier to display. The parser never produces an empty name, so a caller
+/// receiving `""` built the name by hand.
 ///
 /// # Examples
 ///
@@ -23,21 +27,18 @@ use sqlparser::ast::{ObjectName, ObjectNamePart, ObjectNamePartFunction};
 ///     ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(Ident::new("table"))]);
 /// assert_eq!(last_str(&object_name), "table");
 ///
-/// // Test with function part
-/// let func_part = ObjectNamePartFunction { name: Ident::new("func"), args: vec![] };
+/// // A name built when the statement runs displays as nothing, since the
+/// // identifier it will carry is not known yet.
+/// let func_part = ObjectNamePartFunction { name: Ident::new("IDENTIFIER"), args: vec![] };
 /// let object_name_func = ObjectName(vec![ObjectNamePart::Function(func_part)]);
-/// assert_eq!(last_str(&object_name_func), "func");
+/// assert_eq!(last_str(&object_name_func), "");
 ///
 /// // An empty name returns an empty string.
 /// assert_eq!(last_str(&ObjectName(vec![])), "");
 /// ```
 #[must_use]
 pub fn last_str(object_name: &ObjectName) -> &str {
-    match object_name.0.last() {
-        None => "",
-        Some(ObjectNamePart::Identifier(ident)) => ident.value.as_str(),
-        Some(ObjectNamePart::Function(ObjectNamePartFunction { name, .. })) => name.value.as_str(),
-    }
+    object_name_last_part(object_name).map_or("", |(value, _)| value)
 }
 
 #[cfg(test)]
