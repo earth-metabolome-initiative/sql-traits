@@ -10689,7 +10689,7 @@ mod tests {
                  ALTER TABLE t ADD CONSTRAINT t_pkey PRIMARY KEY (id);
                  ALTER TABLE t DROP CONSTRAINT t_pkey;",
             );
-            assert!(primary_key(&dropped_pk, "t").is_empty());
+            assert_eq!(primary_key(&dropped_pk, "t"), Vec::<String>::new());
             assert_eq!(unique_index_count(&dropped_pk, "t"), 0);
         }
 
@@ -10710,7 +10710,7 @@ mod tests {
                 "CREATE TABLE t (id uuid NOT NULL);
                  ALTER TABLE t DROP CONSTRAINT IF EXISTS t_pkey;",
             );
-            assert!(primary_key(&tolerated, "t").is_empty());
+            assert_eq!(primary_key(&tolerated, "t"), Vec::<String>::new());
         }
 
         #[test]

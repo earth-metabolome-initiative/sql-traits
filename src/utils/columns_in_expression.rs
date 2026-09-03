@@ -239,10 +239,12 @@ mod tests {
         ));
 
         let empty = Expr::CompoundIdentifier(Vec::new());
-        let found: Vec<<ParserDB as DatabaseLike>::Column> =
-            columns_in_expression(&empty, "catalog", &table, &columns)
-                .expect("a reference with no parts reads no column");
-        assert!(found.is_empty());
+        let found: Vec<String> = columns_in_expression(&empty, "catalog", &table, &columns)
+            .expect("a reference with no parts reads no column")
+            .iter()
+            .map(|column| ColumnLike::column_name(column).to_owned())
+            .collect();
+        assert_eq!(found, Vec::<String>::new());
     }
 
     #[test]

@@ -4204,8 +4204,9 @@ mod tests {
             let child_ref = &child;
             let child_deps: Vec<_> = <&_ as TableLike>::dependent_tables(child_ref, &db)
                 .expect("dependent_tables on &T")
+                .map(TableLike::table_name)
                 .collect();
-            assert!(child_deps.is_empty());
+            assert_eq!(child_deps, Vec::<&str>::new());
         }
 
         #[test]
