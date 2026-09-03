@@ -7,6 +7,7 @@
 
 use alloc::{borrow::Cow, string::String};
 
+use sqlparser::ast::{Function, Ident};
 use unicode_normalization::UnicodeNormalization;
 
 /// Parsed lookup identifier from a textual query.
@@ -114,12 +115,207 @@ pub fn normalize_identifier(value: &str, quoted: bool) -> Cow<'_, str> {
     }
 }
 
+/// Returns the name PostgreSQL stores for a written identifier.
+///
+/// This is [`normalize_identifier`] applied to the parser's own node, which
+/// carries the quoting the writer used.
+///
+/// # Example
+///
+/// ```rust
+/// use sql_traits::utils::identifier_resolution::stored_ident_name;
+/// use sqlparser::ast::Ident;
+///
+/// assert_eq!(stored_ident_name(&Ident::new("Owner_Id")), "owner_id");
+/// assert_eq!(stored_ident_name(&Ident::with_quote('"', "Owner_Id")), "Owner_Id");
+/// ```
+#[must_use]
+pub fn stored_ident_name(ident: &Ident) -> Cow<'_, str> {
+    normalize_identifier(&ident.value, ident.quote_style.is_some())
+}
+
+/// Returns the folded terminal name of a call, and [`None`] when that name was
+/// quoted or is built at run time.
+///
+/// This is the form a keyword or a display name is compared against, so a
+/// quoted spelling is refused rather than folded: `"now"` is a function
+/// somebody declared under that exact name, not the keyword `now`. A part some
+/// dialects spell as a call, such as `IDENTIFIER('now')`, names whatever it
+/// returns when the statement runs, so no name can be read from it either.
+///
+/// The qualifier is ignored, so this says what a call is called and not which
+/// function it reaches. Use [`builtin_function_name`] to decide whether a call
+/// can only be a catalog builtin.
+///
+/// # Example
+///
+/// ```rust
+/// # fn main() -> Result<(), sqlparser::parser::ParserError> {
+/// use sql_traits::utils::identifier_resolution::folded_function_name;
+/// use sqlparser::{ast::Expr, dialect::PostgreSqlDialect, parser::Parser};
+///
+/// let written = |sql: &str| -> Result<Option<String>, sqlparser::parser::ParserError> {
+///     let expr = Parser::new(&PostgreSqlDialect {}).try_with_sql(sql)?.parse_expr()?;
+///     let Expr::Function(call) = expr else { return Ok(None) };
+///     Ok(folded_function_name(&call))
+/// };
+///
+/// assert_eq!(written("NOW()")?.as_deref(), Some("now"));
+/// assert_eq!(written("app.NOW()")?.as_deref(), Some("now"));
+/// assert_eq!(written("\"now\"()")?, None);
+/// # Ok(())
+/// # }
+/// ```
+#[must_use]
+pub fn folded_function_name(function: &Function) -> Option<String> {
+    let terminal = function.name.0.last()?.as_ident()?;
+    terminal.quote_style.is_none().then(|| terminal.value.to_ascii_lowercase())
+}
+
+/// Returns the catalog builtin a call can only be, and [`None`] when the
+/// spelling could name a declared function instead.
+///
+/// A call qualifies as a builtin only when its terminal identifier is unquoted
+/// and the name is either unqualified or qualified by exactly `pg_catalog`,
+/// which the quoted spelling `"pg_catalog"` also names. Every other schema
+/// names a declared function whatever the terminal says, which is how
+/// `app.now()` shadows the clock, and a name of three or more parts is refused
+/// outright. So is a part built at run time, such as `IDENTIFIER('now')`,
+/// because what it will name is unknown until the statement runs.
+///
+/// A caller that reads a builtin as something it can trust, a clock or a
+/// current-user probe, has to refuse those spellings: taking `app.now()` for
+/// the real clock turns a policy that grants nothing into one that grants
+/// every row whose expiry has not passed.
+///
+/// One residue is knowingly out of scope: an unqualified call that a declared
+/// function shadows earlier on the search path is still read as the builtin.
+/// Resolving it needs the database, and no dump produces that shape, because a
+/// dump qualifies the calls it emits.
+///
+/// # Example
+///
+/// ```rust
+/// # fn main() -> Result<(), sqlparser::parser::ParserError> {
+/// use sql_traits::utils::identifier_resolution::builtin_function_name;
+/// use sqlparser::{ast::Expr, dialect::PostgreSqlDialect, parser::Parser};
+///
+/// let written = |sql: &str| -> Result<Option<String>, sqlparser::parser::ParserError> {
+///     let expr = Parser::new(&PostgreSqlDialect {}).try_with_sql(sql)?.parse_expr()?;
+///     let Expr::Function(call) = expr else { return Ok(None) };
+///     Ok(builtin_function_name(&call))
+/// };
+///
+/// assert_eq!(written("NOW()")?.as_deref(), Some("now"));
+/// assert_eq!(written("pg_catalog.now()")?.as_deref(), Some("now"));
+/// assert_eq!(written("\"pg_catalog\".now()")?.as_deref(), Some("now"));
+/// assert_eq!(written("app.now()")?, None);
+/// assert_eq!(written("\"now\"()")?, None);
+/// assert_eq!(written("a.b.now()")?, None);
+/// # Ok(())
+/// # }
+/// ```
+#[must_use]
+pub fn builtin_function_name(function: &Function) -> Option<String> {
+    let (schema, terminal) = match function.name.0.as_slice() {
+        [terminal] => (None, terminal.as_ident()?),
+        [schema, terminal] => (Some(schema.as_ident()?), terminal.as_ident()?),
+        _ => return None,
+    };
+    if schema.is_some_and(|schema| stored_ident_name(schema) != "pg_catalog") {
+        return None;
+    }
+    terminal.quote_style.is_none().then(|| terminal.value.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        identifiers_match, normalize_identifier, parse_lookup_identifier,
-        stored_identifier_matches_lookup,
+    use sqlparser::{
+        ast::{
+            Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectNamePart,
+            ObjectNamePartFunction, Value,
+        },
+        dialect::PostgreSqlDialect,
+        parser::Parser,
     };
+
+    use super::{
+        builtin_function_name, folded_function_name, identifiers_match, normalize_identifier,
+        parse_lookup_identifier, stored_ident_name, stored_identifier_matches_lookup,
+    };
+
+    /// Parses a written call into the AST node the helpers read.
+    fn call(sql: &str) -> Function {
+        let dialect = PostgreSqlDialect {};
+        let mut parser = Parser::new(&dialect).try_with_sql(sql).expect("the call tokenizes");
+        match parser.parse_expr().expect("the call parses") {
+            Expr::Function(function) => function,
+            other => panic!("`{sql}` is not a function call: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stored_ident_name_follows_the_parsed_quote_style() {
+        assert_eq!(stored_ident_name(&Ident::new("Owner_Id")), "owner_id");
+        assert_eq!(stored_ident_name(&Ident::with_quote('"', "Owner_Id")), "Owner_Id");
+    }
+
+    #[test]
+    fn folded_function_name_reads_the_terminal_identifier() {
+        assert_eq!(folded_function_name(&call("NOW()")).as_deref(), Some("now"));
+        assert_eq!(folded_function_name(&call("app.NOW()")).as_deref(), Some("now"));
+        assert_eq!(folded_function_name(&call("pg_catalog.now()")).as_deref(), Some("now"));
+        assert_eq!(folded_function_name(&call("\"now\"()")), None);
+    }
+
+    #[test]
+    fn builtin_function_name_accepts_only_the_catalog() {
+        assert_eq!(builtin_function_name(&call("now()")).as_deref(), Some("now"));
+        assert_eq!(builtin_function_name(&call("NOW()")).as_deref(), Some("now"));
+        assert_eq!(builtin_function_name(&call("pg_catalog.now()")).as_deref(), Some("now"));
+        assert_eq!(builtin_function_name(&call("\"pg_catalog\".now()")).as_deref(), Some("now"));
+        assert_eq!(builtin_function_name(&call("PG_CATALOG.now()")).as_deref(), Some("now"));
+        assert_eq!(builtin_function_name(&call("app.now()")), None);
+        assert_eq!(builtin_function_name(&call("\"now\"()")), None);
+        assert_eq!(builtin_function_name(&call("a.b.now()")), None);
+        assert_eq!(builtin_function_name(&call("\"PG_CATALOG\".now()")), None);
+    }
+
+    /// A name part some dialects spell as a call, `IDENTIFIER('now')`, names
+    /// whatever the call returns when the statement runs. Nothing static can
+    /// be read from it, in either position, so both helpers refuse it rather
+    /// than reading the producing function's own name.
+    #[test]
+    fn a_name_part_built_at_run_time_reads_as_no_name() {
+        let identifier_of = |spelled: &str| {
+            ObjectNamePart::Function(ObjectNamePartFunction {
+                name: Ident::new("IDENTIFIER"),
+                args: alloc::vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(
+                    Value::SingleQuotedString(String::from(spelled)).into()
+                )))],
+            })
+        };
+
+        let mut unqualified = call("now()");
+        unqualified.name.0 = alloc::vec![identifier_of("now")];
+        assert_eq!(folded_function_name(&unqualified), None);
+        assert_eq!(builtin_function_name(&unqualified), None);
+
+        let mut qualified = call("app.now()");
+        qualified.name.0 =
+            alloc::vec![identifier_of("pg_catalog"), ObjectNamePart::Identifier(Ident::new("now"))];
+        assert_eq!(builtin_function_name(&qualified), None);
+
+        qualified.name.0 =
+            alloc::vec![ObjectNamePart::Identifier(Ident::new("pg_catalog")), identifier_of("now")];
+        assert_eq!(folded_function_name(&qualified), None);
+        assert_eq!(builtin_function_name(&qualified), None);
+
+        // An empty name has no terminal part to read.
+        unqualified.name.0.clear();
+        assert_eq!(folded_function_name(&unqualified), None);
+        assert_eq!(builtin_function_name(&unqualified), None);
+    }
 
     // ---------------------------------------------------------------
     // Spec §7.1 normalization tests (audit §5, P-02).
