@@ -20,7 +20,9 @@ use crate::{
         TableLike, ViewLike, grant::GrantRelation,
     },
     utils::{
-        identifier_resolution::{identifiers_match, is_public_pseudo_role},
+        identifier_resolution::{
+            SessionPrincipal, identifiers_match, is_public_pseudo_role, session_principal,
+        },
         object_name::{
             object_name_identifiers, object_name_last_part, resolve_object_name,
             resolve_table_object_name_on_search_path_in_iter, table_matches_object_name,
@@ -72,9 +74,26 @@ fn grantee_is_public(grantee: &Grantee) -> bool {
             .is_some_and(|(value, quoted)| is_public_pseudo_role(value, quoted)))
 }
 
+/// Returns whether a grantee names whoever runs the statement, spelled
+/// `CURRENT_USER`, `CURRENT_ROLE` or `SESSION_USER`, rather than a role
+/// somebody declared.
+fn grantee_is_session_principal(grantee: &Grantee) -> Option<SessionPrincipal> {
+    let Some(GranteeName::ObjectName(name)) = &grantee.name else {
+        return None;
+    };
+    let (value, quoted) = object_name_last_part(name)?;
+    session_principal(value, quoted)
+}
+
 fn grantee_matches_role(grantee: &Grantee, role: &CreateRole) -> bool {
     if grantee_is_public(grantee) {
         return true;
+    }
+
+    // The keyword names the session, so no declared role receives the grant,
+    // whatever a role of that spelling is called.
+    if grantee_is_session_principal(grantee).is_some() {
+        return false;
     }
 
     if let Some(GranteeName::ObjectName(name)) = &grantee.name {
@@ -118,6 +137,15 @@ fn grantees_match(left_grantee: &Grantee, right_grantee: &Grantee) -> bool {
         || right_grantee.grantee_type == GranteesType::Public
     {
         return left_grantee.grantee_type == right_grantee.grantee_type;
+    }
+
+    // A keyword principal is the same principal only as the same keyword, and
+    // never the role of that spelling.
+    match (grantee_is_session_principal(left_grantee), grantee_is_session_principal(right_grantee))
+    {
+        (Some(left), Some(right)) => return left == right,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
     }
 
     match (&left_grantee.name, &right_grantee.name) {
@@ -792,5 +820,63 @@ impl ColumnGrantLike for Grant {
 
     fn relation<'a>(&'a self, database: &'a Self::DB) -> Option<GrantRelation<'a, Self::DB>> {
         granted_relations(self, database).into_iter().next()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CreateRole, Grantee, GranteeName, GranteesType, Ident, ObjectName, ObjectNamePart,
+        grantee_matches_role, grantees_match,
+    };
+    use crate::prelude::*;
+
+    fn named(value: &str, quoted: bool) -> Grantee {
+        let ident = if quoted { Ident::with_quote('"', value) } else { Ident::new(value) };
+        Grantee {
+            grantee_type: GranteesType::None,
+            name: Some(GranteeName::ObjectName(ObjectName(vec![ObjectNamePart::Identifier(
+                ident,
+            )]))),
+        }
+    }
+
+    fn unnamed() -> Grantee {
+        Grantee { grantee_type: GranteesType::Role, name: None }
+    }
+
+    fn role(sql: &str) -> CreateRole {
+        let db = ParserDB::parse::<sqlparser::dialect::PostgreSqlDialect>(sql)
+            .expect("the role declaration parses");
+        db.roles().next().expect("one role").clone()
+    }
+
+    /// A keyword principal names the session, so it is the same principal
+    /// only as the same keyword, and never a declared role of that spelling.
+    #[test]
+    fn a_session_principal_matches_only_itself() {
+        let current_user = named("CURRENT_USER", false);
+        let session_user = named("SESSION_USER", false);
+        let quoted = named("current_user", true);
+
+        assert!(grantees_match(&current_user, &named("current_user", false)));
+        assert!(!grantees_match(&current_user, &session_user));
+        assert!(!grantees_match(&current_user, &quoted));
+        assert!(!grantees_match(&quoted, &current_user));
+
+        let declared = role("CREATE ROLE \"current_user\";");
+        assert!(!grantee_matches_role(&current_user, &declared));
+        assert!(grantee_matches_role(&quoted, &declared));
+    }
+
+    /// A grantee the grammar leaves unnamed carries no identifier to read, so
+    /// it names no session principal and falls back to the rendered form.
+    #[test]
+    fn an_unnamed_grantee_names_no_principal() {
+        let declared = role("CREATE ROLE reader;");
+
+        assert!(!grantee_matches_role(&unnamed(), &declared));
+        assert!(grantees_match(&unnamed(), &unnamed()));
+        assert!(!grantees_match(&unnamed(), &named("CURRENT_USER", false)));
     }
 }

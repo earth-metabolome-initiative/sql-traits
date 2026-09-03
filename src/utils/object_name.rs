@@ -36,10 +36,20 @@ pub(crate) fn run_time_object_name(object_name: &ObjectName) -> LookupError {
     }
 }
 
+/// Reports a name carrying more parts than a schema and an object, which
+/// reaches for a catalog this one does not model.
+pub(crate) fn overqualified_object_name(object_name: &ObjectName) -> LookupError {
+    LookupError::InvalidObjectName {
+        object_name: object_name.to_string(),
+        reason: "only one-part or two-part object names are supported".to_string(),
+    }
+}
+
 /// Refuses a name carrying a part built while the statement runs.
 ///
-/// Every path that records an object calls this first, since a name that only
-/// exists at run time cannot be stored under any spelling.
+/// A recording path calls this whatever it does about qualification: a name
+/// that only exists at run time cannot be stored, matched or reported under
+/// any spelling.
 ///
 /// # Errors
 ///
@@ -48,6 +58,27 @@ pub(crate) fn run_time_object_name(object_name: &ObjectName) -> LookupError {
 pub(crate) fn require_static_object_name(object_name: &ObjectName) -> Result<(), LookupError> {
     if object_name.0.iter().any(|part| matches!(part, ObjectNamePart::Function(_))) {
         return Err(run_time_object_name(object_name));
+    }
+    Ok(())
+}
+
+/// Refuses a name this catalog cannot hold: one carrying a part built while
+/// the statement runs, or more parts than a schema and an object.
+///
+/// Every path that records an object calls this first. A name that only
+/// exists at run time cannot be stored under any spelling, and a name with a
+/// leading catalog part denotes an object elsewhere, which the two-part model
+/// here cannot represent. Reading either as a local object is what recorded
+/// tables nobody declared.
+///
+/// # Errors
+///
+/// Returns [`LookupError::InvalidObjectName`] when a part is built at run
+/// time, or when the name carries more than two parts.
+pub(crate) fn require_local_object_name(object_name: &ObjectName) -> Result<(), LookupError> {
+    require_static_object_name(object_name)?;
+    if object_name.0.len() > 2 {
+        return Err(overqualified_object_name(object_name));
     }
     Ok(())
 }
@@ -191,18 +222,12 @@ pub(crate) fn object_name_identifiers(
             reason: "name has no identifier parts".to_string(),
         });
     }
-    if object_name.0.len() > 2 {
-        return Err(LookupError::InvalidObjectName {
-            object_name: object_name.to_string(),
-            reason: "only one-part or two-part object names are supported".to_string(),
-        });
-    }
+    require_local_object_name(object_name)?;
 
     let mut idents: Vec<&Ident> = Vec::with_capacity(object_name.0.len());
     for part in &object_name.0 {
-        match part {
-            ObjectNamePart::Identifier(ident) => idents.push(ident),
-            ObjectNamePart::Function(_) => return Err(run_time_object_name(object_name)),
+        if let ObjectNamePart::Identifier(ident) = part {
+            idents.push(ident);
         }
     }
 
@@ -210,8 +235,11 @@ pub(crate) fn object_name_identifiers(
 }
 
 /// Reads an object name as a [`TargetName`], using an empty string for the
-/// name when the parts list is empty. The parser never produces an empty name,
-/// so a caller receiving an empty-string `TargetName` built the name by hand.
+/// name when nothing static can be read from its last part: an empty parts
+/// list, or a part built when the statement runs. The parser never produces
+/// an empty name, and a recording path refuses a run-time one, so a caller
+/// receiving an empty-string `TargetName` is looking at a name built by hand
+/// or at one it should already have refused.
 pub(crate) fn target_name_of_object_name(object_name: &ObjectName) -> TargetName<'_> {
     target_name_from_object_name(object_name).unwrap_or_else(|| TargetName::new("", false))
 }
@@ -678,11 +706,11 @@ mod tests {
 
     use super::{
         Qualifier, object_name_identifiers, object_name_last_part, qualifier_of,
-        render_table_candidate, render_view_candidate, require_static_object_name,
+        render_table_candidate, render_view_candidate, require_local_object_name,
         resolve_object_name, resolve_table_object_name_in_iter,
         resolve_table_object_name_on_search_path_in_iter, resolve_target_from_candidates,
-        resolve_view_on_search_path_in_iter, table_matches_object_name, table_matches_target,
-        target_name_from_object_name, target_name_of_object_name,
+        resolve_target_in_iter, resolve_view_on_search_path_in_iter, table_matches_object_name,
+        table_matches_target, target_name_from_object_name, target_name_of_object_name,
     };
     use crate::{
         errors::LookupError,
@@ -778,10 +806,10 @@ mod tests {
             ObjectNamePart::Identifier(ident("users", false)),
         ]);
 
-        assert!(require_static_object_name(&obj(&[("users", false)])).is_ok());
+        assert!(require_local_object_name(&obj(&[("users", false)])).is_ok());
         for name in [&terminal, &qualifier] {
             assert!(matches!(
-                require_static_object_name(name),
+                require_local_object_name(name),
                 Err(LookupError::InvalidObjectName { .. })
             ));
             assert!(matches!(
@@ -789,6 +817,27 @@ mod tests {
                 Err(LookupError::InvalidObjectName { .. })
             ));
             assert!(!table_matches_object_name(users, name));
+        }
+    }
+
+    /// The fallback answers an empty name for both inputs it cannot read, an
+    /// empty parts list and a name built at run time, and an empty name
+    /// reaches no relation.
+    #[test]
+    fn the_unreadable_fallback_names_nothing() {
+        let tables = fixtures();
+        let empty = ObjectName(Vec::new());
+        let run_time = ObjectName(vec![function_part("IDENTIFIER")]);
+
+        for name in [&empty, &run_time] {
+            let target = target_name_of_object_name(name);
+            assert_eq!(target.name(), "");
+            assert_eq!(target.schema(), None);
+            assert!(
+                resolve_target_in_iter(tables.iter(), &target)
+                    .expect("nothing is ambiguous")
+                    .is_none()
+            );
         }
     }
 

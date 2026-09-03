@@ -26,7 +26,7 @@ use sqlparser::ast::{
 
 use super::{
     ParserDBBuilder, SchemaQualifier, object_name_last_identifier, relation_name_holder,
-    require_named, search_path_qualifier, validate_relation_schema,
+    require_named_in_catalog, search_path_qualifier, validate_relation_schema,
 };
 use crate::{
     errors::{Error, ObjectKind},
@@ -60,7 +60,7 @@ pub(super) fn create_view(
     mut node: CreateView,
 ) -> Result<ParserDBBuilder, Error> {
     let kind = declared_kind(&node);
-    require_named(&node.name, kind)?;
+    require_named_in_catalog(&mut node.name, kind, builder.catalog_name())?;
 
     if node.materialized && node.or_replace {
         return Err(Error::MaterializedViewCannotBeReplaced {

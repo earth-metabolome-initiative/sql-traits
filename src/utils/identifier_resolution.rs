@@ -88,6 +88,40 @@ pub fn is_public_pseudo_role(value: &str, quoted: bool) -> bool {
     !quoted && value.eq_ignore_ascii_case("PUBLIC")
 }
 
+/// A principal the grammar spells as a keyword, naming whoever runs the
+/// statement rather than a role somebody created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SessionPrincipal {
+    /// The role the statement runs as, spelled `CURRENT_USER` or
+    /// `CURRENT_ROLE`, which PostgreSQL treats as one principal: a grant to
+    /// one is revoked by the other.
+    CurrentUser,
+    /// The role that opened the session, spelled `SESSION_USER`, which stays
+    /// itself after a `SET ROLE` moves the current one.
+    SessionUser,
+}
+
+/// Returns the principal an identifier names, when it names whoever runs the
+/// statement rather than a role somebody created.
+///
+/// SQL spells these principals as keywords, which the grammar hands back as
+/// ordinary identifiers wherever a role name may stand. A quoted
+/// `"current_user"` is a role of that exact name and is not the keyword, the
+/// same rule [`is_public_pseudo_role`] applies to `PUBLIC`.
+#[must_use]
+pub fn session_principal(value: &str, quoted: bool) -> Option<SessionPrincipal> {
+    if quoted {
+        return None;
+    }
+    if value.eq_ignore_ascii_case("CURRENT_USER") || value.eq_ignore_ascii_case("CURRENT_ROLE") {
+        return Some(SessionPrincipal::CurrentUser);
+    }
+    if value.eq_ignore_ascii_case("SESSION_USER") {
+        return Some(SessionPrincipal::SessionUser);
+    }
+    None
+}
+
 /// Normalizes an identifier for comparison and fingerprint encoding.
 ///
 /// Applies the FINGERPRINT_SPEC §7.1 / audit §5 rules:

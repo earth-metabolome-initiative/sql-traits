@@ -240,6 +240,18 @@ pub enum Error {
         /// Name of the table the check constraint belongs to.
         table_name: String,
     },
+    #[error(
+        "Column reference `{reference}` in table `{table_name}` names something other than that \
+         table, so it is not one of its columns."
+    )]
+    /// A check constraint or an index expression qualified a column with a
+    /// table, schema or catalog other than the one the expression belongs to.
+    ForeignColumnReference {
+        /// The reference as written.
+        reference: String,
+        /// Name of the table the expression is declared on.
+        table_name: String,
+    },
     #[error("Invalid primary key in table `{table_name}`: {reason}")]
     /// A primary key constraint referenced something other than a plain column,
     /// such as an expression like `PRIMARY KEY (a - b)`.

@@ -173,6 +173,12 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
         &self.dialect
     }
 
+    /// Returns the catalog this builder is filling, which a qualified
+    /// reference may name outermost.
+    pub(crate) fn catalog_name(&self) -> &str {
+        &self.catalog_name
+    }
+
     /// Returns the path a database starts with, and the one `RESET` restores.
     pub(crate) fn default_search_path() -> Vec<(String, bool)> {
         alloc::vec![("public".to_string(), false)]

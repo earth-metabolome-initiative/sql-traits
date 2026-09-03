@@ -7,6 +7,7 @@ use sqlparser::ast::Expr;
 
 use crate::{
     errors::LookupError,
+    structs::TargetName,
     traits::{DatabaseLike, Metadata, TableLike},
     utils::columns_in_expression::columns_in_expression,
 };
@@ -204,10 +205,17 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
         let all_columns: Vec<&<Self::DB as DatabaseLike>::Column> =
             table.columns(database)?.collect();
 
-        let table_name = table.table_name();
+        let mut target = TargetName::new(table.table_name(), table.table_name_is_quoted());
+        if let Some(schema) = table.table_schema() {
+            target = target.with_schema(schema, table.table_schema_is_quoted());
+        }
 
+        // A reference this table does not own, or a column it does not
+        // declare, leaves the index reporting no columns rather than a wrong
+        // one. A creation refuses both before they can be recorded.
         let found_cols: Vec<&<Self::DB as DatabaseLike>::Column> =
-            columns_in_expression(expr, table_name, &all_columns).unwrap_or_default();
+            columns_in_expression(expr, database.catalog_name(), &target, &all_columns)
+                .unwrap_or_default();
 
         Ok(found_cols.into_iter())
     }

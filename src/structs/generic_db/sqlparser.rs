@@ -50,13 +50,16 @@ use crate::{
     traits::{ColumnLike, FunctionLike, IndexLike, TableLike, ViewLike},
     utils::{
         columns_in_expression,
-        identifier_resolution::{identifiers_match, is_public_pseudo_role, normalize_identifier},
+        identifier_resolution::{
+            identifiers_match, is_public_pseudo_role, normalize_identifier, session_principal,
+        },
         last_str, normalize_postgres_type_cow, normalize_sqlparser_type,
         object_name::{
-            Qualifier, object_name_identifiers, object_name_last_part, qualifier_of,
-            require_static_object_name, resolve_table_object_name_in_iter,
-            resolve_table_object_name_on_search_path_in_iter, resolve_view_on_search_path_in_iter,
-            stored_table_key, table_matches_object_name, target_name_of_idents,
+            Qualifier, object_name_identifiers, object_name_last_part, overqualified_object_name,
+            qualifier_of, require_local_object_name, require_static_object_name,
+            resolve_table_object_name_in_iter, resolve_table_object_name_on_search_path_in_iter,
+            resolve_view_on_search_path_in_iter, stored_table_key, table_matches_object_name,
+            target_name_of_idents, target_name_of_object_name,
         },
     },
 };
@@ -441,21 +444,33 @@ fn rename_created_collation_schemas(
     to_quoted: bool,
 ) {
     for metadata in collations {
-        if let Some((schema, schema_quoted)) = qualifier_of(&metadata.name).named() {
-            if identifiers_match(schema, schema_quoted, from, from_quoted) {
-                let ident = if to_quoted { Ident::with_quote('"', to) } else { Ident::new(to) };
-                metadata.name.0[0] = ObjectNamePart::Identifier(ident);
+        let renamed = |quoted: bool| {
+            if quoted { Ident::with_quote('"', to) } else { Ident::new(to) }
+        };
+        match qualifier_of(&metadata.name) {
+            Qualifier::Named(schema, schema_quoted) => {
+                if identifiers_match(schema, schema_quoted, from, from_quoted) {
+                    metadata.name.0[0] = ObjectNamePart::Identifier(renamed(to_quoted));
+                }
             }
-        } else if identifiers_match("public", false, from, from_quoted) {
-            let ident = if to_quoted { Ident::with_quote('"', to) } else { Ident::new(to) };
-            metadata.name.0.insert(0, ObjectNamePart::Identifier(ident));
+            Qualifier::Absent => {
+                if identifiers_match("public", false, from, from_quoted) {
+                    metadata.name.0.insert(0, ObjectNamePart::Identifier(renamed(to_quoted)));
+                }
+            }
+            // Which schema the name will carry is decided when the statement
+            // runs, so a rename of one schema cannot claim it.
+            Qualifier::RunTime => {}
         }
     }
 }
 
+/// The schema a collation name resolves in, `public` when it names none.
+///
+/// A creation refuses a run-time qualifier before reaching here, and the
+/// resolvers refuse one on their own, so only a readable qualifier or none
+/// arrives.
 fn collation_effective_schema(name: &ObjectName) -> (&str, bool) {
-    // A creation refuses a run-time qualifier before reaching here, so an
-    // unreadable one and an absent one both mean the default schema.
     qualifier_of(name).named().unwrap_or(("public", false))
 }
 
@@ -1414,7 +1429,104 @@ fn require_named(
     if object_name.0.is_empty() {
         return Err(crate::errors::Error::UnnamedObject { object_kind: kind });
     }
+    require_local_object_name(object_name)?;
+    Ok(())
+}
+
+/// Refuses a creation name this catalog cannot hold, and drops a leading part
+/// that names this catalog.
+///
+/// A server lets a table, a function or a view carry the catalog outermost
+/// when it is the one being written to, measured on PostgreSQL 18, and
+/// refuses any other catalog as a cross-database reference. It refuses a
+/// qualifier outright on an index or a schema name, which stay on
+/// [`require_named`].
+///
+/// # Errors
+///
+/// Returns [`crate::errors::Error::UnnamedObject`] for a name with no parts,
+/// and [`LookupError::InvalidObjectName`] for a part built at run time or a
+/// leading part naming another catalog.
+fn require_named_in_catalog(
+    object_name: &mut ObjectName,
+    kind: crate::errors::ObjectKind,
+    catalog_name: &str,
+) -> Result<(), crate::errors::Error> {
+    if object_name.0.is_empty() {
+        return Err(crate::errors::Error::UnnamedObject { object_kind: kind });
+    }
     require_static_object_name(object_name)?;
+    if object_name.0.len() <= 2 {
+        return Ok(());
+    }
+
+    let names_this_catalog = object_name.0.len() == 3
+        && matches!(
+            &object_name.0[0],
+            ObjectNamePart::Identifier(ident)
+                if identifiers_match(
+                    ident.value.as_str(),
+                    ident.quote_style.is_some(),
+                    catalog_name,
+                    false,
+                )
+        );
+    if !names_this_catalog {
+        return Err(overqualified_object_name(object_name).into());
+    }
+
+    object_name.0.remove(0);
+    Ok(())
+}
+
+/// Refuses every name a grant or a revoke carries that is built while the
+/// statement runs, whichever form the statement takes.
+///
+/// The match is exhaustive on purpose: a form nobody reads today still
+/// records a grant, and a grant recorded against a name nothing can read
+/// covers nothing and says so nowhere.
+///
+/// Qualification is left alone here: a grant may name a table this catalog
+/// does not hold, and the open world keeps that as an unresolved reference
+/// rather than refusing the statement.
+fn require_static_access_names(objects: Option<&GrantObjects>) -> Result<(), LookupError> {
+    let Some(objects) = objects else {
+        return Ok(());
+    };
+    let names: &[ObjectName] = match objects {
+        GrantObjects::AllSequencesInSchema { schemas }
+        | GrantObjects::AllTablesInSchema { schemas }
+        | GrantObjects::AllViewsInSchema { schemas }
+        | GrantObjects::AllMaterializedViewsInSchema { schemas }
+        | GrantObjects::AllExternalTablesInSchema { schemas }
+        | GrantObjects::AllFunctionsInSchema { schemas }
+        | GrantObjects::FutureTablesInSchema { schemas }
+        | GrantObjects::FutureViewsInSchema { schemas }
+        | GrantObjects::FutureExternalTablesInSchema { schemas }
+        | GrantObjects::FutureMaterializedViewsInSchema { schemas }
+        | GrantObjects::FutureSequencesInSchema { schemas } => schemas,
+        GrantObjects::FutureSchemasInDatabase { databases }
+        | GrantObjects::Databases(databases) => databases,
+        GrantObjects::Schemas(names)
+        | GrantObjects::Sequences(names)
+        | GrantObjects::Tables(names)
+        | GrantObjects::Views(names)
+        | GrantObjects::Warehouses(names)
+        | GrantObjects::Integrations(names)
+        | GrantObjects::ResourceMonitors(names)
+        | GrantObjects::Users(names)
+        | GrantObjects::ComputePools(names)
+        | GrantObjects::Connections(names)
+        | GrantObjects::FailoverGroup(names)
+        | GrantObjects::ReplicationGroup(names)
+        | GrantObjects::ExternalVolumes(names) => names,
+        GrantObjects::Procedure { name, .. } | GrantObjects::Function { name, .. } => {
+            return require_static_object_name(name);
+        }
+    };
+    for name in names {
+        require_static_object_name(name)?;
+    }
     Ok(())
 }
 
@@ -2172,17 +2284,16 @@ fn object_names_match(left: &ObjectName, right: &ObjectName) -> bool {
     }
 }
 
-fn object_name_part_ident(part: &ObjectNamePart) -> &Ident {
-    match part {
-        ObjectNamePart::Identifier(ident) => ident,
-        ObjectNamePart::Function(function) => &function.name,
-    }
-}
-
 fn function_configuration_names_match(left: &ObjectName, right: &ObjectName) -> bool {
     left.0.len() == right.0.len()
         && left.0.iter().zip(&right.0).all(|(left, right)| {
-            idents_match(object_name_part_ident(left), object_name_part_ident(right))
+            match (left.as_ident(), right.as_ident()) {
+                (Some(left), Some(right)) => idents_match(left, right),
+                // A part built at run time names no parameter until it runs,
+                // so it is the same parameter as nothing, another such part
+                // included.
+                _ => false,
+            }
         })
 }
 
@@ -2246,7 +2357,10 @@ fn grantee_role_ident(grantee: &Grantee) -> Option<&Ident> {
     };
     let grantee_ident = object_name_last_identifier(grantee_name)?;
 
-    if is_public_pseudo_role(grantee_ident.value.as_str(), grantee_ident.quote_style.is_some()) {
+    if is_public_pseudo_role(grantee_ident.value.as_str(), grantee_ident.quote_style.is_some())
+        || session_principal(grantee_ident.value.as_str(), grantee_ident.quote_style.is_some())
+            .is_some()
+    {
         return None;
     }
 
@@ -3804,7 +3918,8 @@ impl ParserDB {
         let columns_in_expression =
             columns_in_expression::<Arc<TableAttribute<CreateTable, ColumnDef>>>(
                 check_expr,
-                &create_table.name.to_string(),
+                builder.catalog_name(),
+                &target_name_of_object_name(&create_table.name),
                 table_metadata.column_arc_slice(),
             )?;
         let functions_in_expression = functions_in_expression::functions_in_expression::<Self>(
@@ -5598,12 +5713,16 @@ impl ParserDB {
         let dialect = *builder.dialect();
         for statement in statements {
             match statement {
-                Statement::CreateFunction(create_function) => {
+                Statement::CreateFunction(mut create_function) => {
                     // Two functions may share a name as long as they take
                     // different arguments. A `CREATE OR REPLACE` replaces the
                     // stored node rather than appending a second one, which
                     // would leave the stale node answering every lookup.
-                    require_named(&create_function.name, crate::errors::ObjectKind::Function)?;
+                    require_named_in_catalog(
+                        &mut create_function.name,
+                        crate::errors::ObjectKind::Function,
+                        builder.catalog_name(),
+                    )?;
                     let existing = builder.functions().iter().position(|(existing, _)| {
                         function_signatures_match(
                             &existing.name,
@@ -6561,7 +6680,11 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateTable(mut create_table) => {
-                    require_named(&create_table.name, crate::errors::ObjectKind::Table)?;
+                    require_named_in_catalog(
+                        &mut create_table.name,
+                        crate::errors::ObjectKind::Table,
+                        builder.catalog_name(),
+                    )?;
                     // Where the table lands is decided before the name is read,
                     // so `IF NOT EXISTS` compares the schema it truly creates
                     // in rather than the one the statement spelled.
@@ -6778,6 +6901,11 @@ impl ParserDB {
                     }
                 }
                 Statement::Grant(grant) => {
+                    // Every name the statement carries first, including the
+                    // schemas of a blanket grant, since a grant recorded
+                    // against a name nothing can read covers nothing and says
+                    // so nowhere.
+                    require_static_access_names(grant.objects.as_ref())?;
                     if access_resolution == AccessResolution::ClosedWorld {
                         validate_access_targets_against_builder(
                             &builder,
@@ -6803,6 +6931,7 @@ impl ParserDB {
                     builder = builder.add_column_grant(Arc::new(grant), ());
                 }
                 Statement::Revoke(revoke) => {
+                    require_static_access_names(revoke.objects.as_ref())?;
                     // A revoke naming no recorded grant is a no-op, as it is in
                     // the database.
                     if access_resolution == AccessResolution::ClosedWorld {
@@ -7478,11 +7607,114 @@ mod tests {
             ])
         }
 
+        /// Every form a grant or a revoke can name objects in is guarded, so
+        /// no form quietly records a grant against a name nothing can read.
+        /// A form nobody parses today still reaches the recorder through
+        /// another dialect.
+        #[test]
+        fn every_access_form_refuses_a_run_time_name() {
+            let names = alloc::vec![run_time_qualified("c")];
+            let name = run_time_qualified("c");
+            let forms = alloc::vec![
+                GrantObjects::AllSequencesInSchema { schemas: names.clone() },
+                GrantObjects::AllTablesInSchema { schemas: names.clone() },
+                GrantObjects::AllViewsInSchema { schemas: names.clone() },
+                GrantObjects::AllMaterializedViewsInSchema { schemas: names.clone() },
+                GrantObjects::AllExternalTablesInSchema { schemas: names.clone() },
+                GrantObjects::AllFunctionsInSchema { schemas: names.clone() },
+                GrantObjects::FutureTablesInSchema { schemas: names.clone() },
+                GrantObjects::FutureViewsInSchema { schemas: names.clone() },
+                GrantObjects::FutureExternalTablesInSchema { schemas: names.clone() },
+                GrantObjects::FutureMaterializedViewsInSchema { schemas: names.clone() },
+                GrantObjects::FutureSequencesInSchema { schemas: names.clone() },
+                GrantObjects::FutureSchemasInDatabase { databases: names.clone() },
+                GrantObjects::Databases(names.clone()),
+                GrantObjects::Schemas(names.clone()),
+                GrantObjects::Sequences(names.clone()),
+                GrantObjects::Tables(names.clone()),
+                GrantObjects::Views(names.clone()),
+                GrantObjects::Warehouses(names.clone()),
+                GrantObjects::Integrations(names.clone()),
+                GrantObjects::ResourceMonitors(names.clone()),
+                GrantObjects::Users(names.clone()),
+                GrantObjects::ComputePools(names.clone()),
+                GrantObjects::Connections(names.clone()),
+                GrantObjects::FailoverGroup(names.clone()),
+                GrantObjects::ReplicationGroup(names.clone()),
+                GrantObjects::ExternalVolumes(names.clone()),
+                GrantObjects::Procedure { name: name.clone(), arg_types: Vec::new() },
+                GrantObjects::Function { name, arg_types: Vec::new() },
+            ];
+
+            for form in &forms {
+                assert!(
+                    require_static_access_names(Some(form)).is_err(),
+                    "{form} recorded a name built at run time"
+                );
+            }
+
+            // A statement naming no objects has nothing to refuse.
+            assert!(require_static_access_names(None).is_ok());
+            assert!(
+                require_static_access_names(Some(&GrantObjects::Tables(alloc::vec![qualified(
+                    "app", "docs"
+                )])))
+                .is_ok()
+            );
+        }
+
+        /// A configuration parameter whose name is built at run time is not
+        /// the same parameter as another such name, nor as a parameter called
+        /// after the call that builds it.
+        #[test]
+        fn a_run_time_configuration_name_matches_nothing() {
+            let run_time = ObjectName(vec![ObjectNamePart::Function(ObjectNamePartFunction {
+                name: Ident::new("IDENTIFIER"),
+                args: Vec::new(),
+            })]);
+            let producer_name =
+                ObjectName(vec![ObjectNamePart::Identifier(Ident::new("IDENTIFIER"))]);
+            let plain = ObjectName(vec![ObjectNamePart::Identifier(Ident::new("search_path"))]);
+
+            assert!(function_configuration_names_match(&plain, &plain));
+            assert!(!function_configuration_names_match(&run_time, &run_time));
+            assert!(!function_configuration_names_match(&run_time, &producer_name));
+            assert!(!function_configuration_names_match(&producer_name, &run_time));
+        }
+
         #[test]
         fn a_run_time_qualifier_matches_no_collation_schema() {
             assert!(collation_schema_matches(&qualified("app", "c"), "app", false));
             assert!(!collation_schema_matches(&run_time_qualified("c"), "app", false));
             assert!(!collation_schema_matches(&run_time_qualified("c"), "public", false));
+        }
+
+        #[test]
+        fn a_schema_rename_leaves_a_run_time_collation_name_alone() {
+            let mut collations = vec![
+                CreatedCollationMetadata {
+                    name: qualified("app", "c"),
+                    postgres_deterministic: None,
+                },
+                CreatedCollationMetadata {
+                    name: run_time_qualified("c"),
+                    postgres_deterministic: None,
+                },
+                CreatedCollationMetadata {
+                    name: ObjectName(vec![ObjectNamePart::Identifier(Ident::new("bare"))]),
+                    postgres_deterministic: None,
+                },
+            ];
+
+            rename_created_collation_schemas(&mut collations, "app", false, "renamed", false);
+            assert_eq!(collations[0].name.to_string(), "renamed.c");
+            // Which schema this one will carry is unknown, so no rename of a
+            // schema may claim it, and none may be inserted into it either.
+            assert_eq!(collations[1].name.to_string(), "IDENTIFIER().c");
+
+            rename_created_collation_schemas(&mut collations, "public", false, "moved", false);
+            assert_eq!(collations[1].name.to_string(), "IDENTIFIER().c");
+            assert_eq!(collations[2].name.to_string(), "moved.bare");
         }
 
         #[test]
