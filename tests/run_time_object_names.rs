@@ -74,6 +74,30 @@ fn a_reference_to_a_run_time_name_stays_refused() {
     );
 }
 
+/// A grant over a schema named at run time is refused rather than recorded as
+/// a grant that quietly covers nothing.
+#[test]
+fn a_schema_wide_grant_over_a_run_time_name_is_refused() {
+    assert_refused(
+        "CREATE SCHEMA app;
+         CREATE ROLE r;
+         GRANT SELECT ON ALL TABLES IN SCHEMA IDENTIFIER('app') TO r",
+    );
+    assert_refused(
+        "CREATE SCHEMA app; CREATE ROLE r; GRANT USAGE ON SCHEMA IDENTIFIER('app') TO r",
+    );
+    assert_refused(
+        "CREATE SCHEMA app;
+         CREATE ROLE r;
+         GRANT SELECT ON ALL SEQUENCES IN SCHEMA IDENTIFIER('app') TO r",
+    );
+    assert_refused(
+        "CREATE SCHEMA app;
+         CREATE ROLE r;
+         GRANT USAGE ON FUNCTION IDENTIFIER('app').f TO r",
+    );
+}
+
 /// Nothing about ordinary names changes, including the quoted spelling of the
 /// word the dialect uses for a dynamic name.
 #[test]
