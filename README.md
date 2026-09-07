@@ -4,6 +4,7 @@
 [![Security Audit](https://github.com/earth-metabolome-initiative/sql-traits/workflows/Security%20Audit/badge.svg)](https://github.com/earth-metabolome-initiative/sql-traits/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Codecov](https://codecov.io/gh/earth-metabolome-initiative/sql-traits/branch/main/graph/badge.svg)](https://codecov.io/gh/earth-metabolome-initiative/sql-traits)
+[![Codacy](https://app.codacy.com/project/badge/Grade/f09fd33374a741d0bbfc60a26c9f9b62)](https://app.codacy.com/gh/earth-metabolome-initiative/sql-traits/dashboard)
 
 Rust traits describing SQL-like objects.
 
