@@ -5,57 +5,21 @@
 //! or once per key column. Both answer the same ordinals, so this file counts
 //! allocations instead: past width one, where the key needs no storage of its
 //! own, a wider key must not cost more.
-
+#![cfg(not(tarpaulin))]
 #![allow(clippy::expect_used)]
-
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    cell::Cell,
-};
-use std::alloc::System;
 
 use sql_traits::{errors::Error, prelude::*};
 use sqlparser::dialect::PostgreSqlDialect;
 
-thread_local! {
-    static MEASURING: Cell<bool> = const { Cell::new(false) };
-    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-}
-
-/// Counts the allocations of the thread that opened the measurement, so a test
-/// counts its own work and not that of the tests running beside it.
-struct CountingAllocator;
-
-// SAFETY: every request is forwarded to `System` with the layout it arrived
-// with, and the counters are thread-local `Cell`s of `Copy` types, so the impl
-// adds no shared state and keeps `System`'s own guarantees.
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if MEASURING.get() {
-            ALLOCATIONS.set(ALLOCATIONS.get() + 1);
-        }
-        // SAFETY: `layout` is the caller's, forwarded unchanged.
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        // SAFETY: `pointer` came from `System.alloc` with this same `layout`,
-        // since every allocation here is forwarded there.
-        unsafe { System.dealloc(pointer, layout) }
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/counting_allocator.rs"));
 
 /// Runs `body` and answers how many times it allocated.
-fn allocations<T>(body: impl FnOnce() -> T) -> usize {
-    ALLOCATIONS.set(0);
-    MEASURING.set(true);
+fn allocations_of<T>(body: impl FnOnce() -> T) -> usize {
+    let before = allocations();
     let answer = body();
-    MEASURING.set(false);
+    let counted = allocations() - before;
     drop(answer);
-    ALLOCATIONS.get()
+    counted
 }
 
 #[test]
@@ -79,10 +43,10 @@ fn the_key_ordinal_cost_does_not_grow_with_the_key_width() -> Result<(), Error> 
     assert_eq!(width_three.primary_key_column_ids(&db)?, vec![2, 0, 1]);
     assert_eq!(width_four.primary_key_column_ids(&db)?, vec![2, 0, 3, 1]);
 
-    let one = allocations(|| width_one.primary_key_column_ids(&db));
-    let two = allocations(|| width_two.primary_key_column_ids(&db));
-    let three = allocations(|| width_three.primary_key_column_ids(&db));
-    let four = allocations(|| width_four.primary_key_column_ids(&db));
+    let one = allocations_of(|| width_one.primary_key_column_ids(&db));
+    let two = allocations_of(|| width_two.primary_key_column_ids(&db));
+    let three = allocations_of(|| width_three.primary_key_column_ids(&db));
+    let four = allocations_of(|| width_four.primary_key_column_ids(&db));
 
     assert_eq!(
         three, two,
