@@ -1323,3 +1323,24 @@ fn an_unresolvable_key_column_stops_the_ordinals() -> Result<(), LookupError> {
 
     Ok(())
 }
+
+/// A key with no resolvable column at all is that same error, not an empty
+/// key, and the first key column is the one named.
+#[test]
+fn a_wholly_unresolvable_key_names_its_first_column() {
+    let mut catalog = catalog();
+    let mut docs = table(Some("app"), "docs");
+    docs.undeclared_key_column = Some(column(Some("app"), "docs", "dropped_id"));
+    catalog.tables = vec![docs];
+    catalog.columns = vec![column(Some("app"), "docs", "body")];
+
+    let docs = catalog.table(Some("app"), "docs").expect("the qualified lookup finds it");
+
+    assert_eq!(
+        docs.primary_key_column_ids(&catalog),
+        Err(LookupError::ColumnNotFound {
+            table_name: String::from("docs"),
+            column_name: String::from("dropped_id"),
+        })
+    );
+}
