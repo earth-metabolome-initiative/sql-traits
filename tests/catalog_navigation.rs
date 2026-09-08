@@ -145,3 +145,17 @@ fn a_column_ordinal_is_asked_of_the_table_that_declares_it() -> Result<(), Error
 
     Ok(())
 }
+
+#[test]
+fn the_navigation_accessors_answer_the_same_through_a_reference() -> Result<(), Error> {
+    let db =
+        ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (a INT, b INT, PRIMARY KEY (b, a));")?;
+    let table = db.table(None, "t").expect("table t was created");
+    let by_reference = &table;
+
+    assert_eq!(TableLike::column_id_by_name(by_reference, "b", &db)?, Some(1));
+    assert_eq!(TableLike::column_name_by_id(by_reference, 0, &db)?, Some("a"));
+    assert_eq!(TableLike::primary_key_column_ids(by_reference, &db)?, vec![1, 0]);
+
+    Ok(())
+}
