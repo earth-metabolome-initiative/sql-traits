@@ -45,7 +45,12 @@ use crate::errors::TargetNameParseError;
 /// assert!(parsed.name_is_quoted());
 /// assert_eq!(parsed.to_string(), r#""my.schema"."Docs""#);
 /// ```
+///
+/// Under the `serde` feature the two parts deserialise owned rather than
+/// borrowed from the input, so a name read back outlives the bytes it came
+/// from and carries escaped text that a borrow could not.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TargetName<'a> {
     name: Cow<'a, str>,
     name_is_quoted: bool,

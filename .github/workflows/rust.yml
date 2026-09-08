@@ -29,7 +29,7 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
     - name: Run tests
-      run: cargo test --all-targets --features git
+      run: cargo test --all-targets --features git,serde
 
   no_std:
     name: no_std + alloc build
@@ -69,6 +69,12 @@ jobs:
       run: cargo build --lib --no-default-features --target thumbv7em-none-eabihf
     - name: Cross-compile lib for wasm32-unknown-unknown (WebAssembly)
       run: cargo build --lib --no-default-features --target wasm32-unknown-unknown
+    - name: Build lib and cross-compile it with the serde feature
+      run: |
+        cargo build --lib --no-default-features --features serde
+        cargo clippy --lib --no-default-features --features serde -- -D warnings
+        cargo build --lib --no-default-features --features serde --target thumbv7em-none-eabihf
+        cargo build --lib --no-default-features --features serde --target wasm32-unknown-unknown
     - name: Run full test suite under default features
       run: cargo test --all-targets
 
@@ -96,7 +102,7 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
     - name: Run clippy
-      run: cargo clippy --all-targets --features git -- -D warnings
+      run: cargo clippy --all-targets --features git,serde -- -D warnings
 
   doc:
     name: Documentation
@@ -108,7 +114,7 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
     - name: Check documentation
-      run: cargo doc --no-deps --document-private-items --features git
+      run: cargo doc --no-deps --document-private-items --features git,serde
       env:
         RUSTDOCFLAGS: -D warnings
 
@@ -127,7 +133,7 @@ jobs:
     - name: Install tarpaulin
       uses: taiki-e/install-action@cargo-tarpaulin
     - name: Generate coverage
-      run: cargo tarpaulin --engine=llvm --out xml --workspace --run-types AllTargets --run-types Doctests --features git
+      run: cargo tarpaulin --engine=llvm --out xml --workspace --run-types AllTargets --run-types Doctests --features git,serde
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
       with:
