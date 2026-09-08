@@ -1088,8 +1088,9 @@ pub trait TableLike:
     /// Returns the positions of the primary key columns in the table's column
     /// iterator, in the order the key declares them.
     ///
-    /// The columns are walked once for the whole key, so a wider key costs no
-    /// more than a narrow one.
+    /// The columns are walked once for the whole key, so the cost is flat from
+    /// a key of two columns upward, and a single column key stores nothing of
+    /// its own and costs less still.
     ///
     /// # Arguments
     ///
