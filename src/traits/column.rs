@@ -55,9 +55,14 @@ impl<'a> NamedColumnCollation<'a> {
     }
 
     /// Returns the collation name.
+    ///
+    /// The name is lent, so a reader comparing its text allocates nothing
+    /// even when the collation owns its parts. Use [`Self::into_name`] to
+    /// take the name out, or clone it when the facts beside it are still
+    /// needed.
     #[must_use]
-    pub fn name(&self) -> TargetName<'a> {
-        self.name.clone()
+    pub fn name(&self) -> &TargetName<'a> {
+        &self.name
     }
 
     /// Returns PostgreSQL determinism, or `None` when it is unknown.
@@ -93,6 +98,21 @@ impl<'a> NamedColumnCollation<'a> {
             postgres_deterministic: self.postgres_deterministic,
             mysql_padding: self.mysql_padding,
         }
+    }
+
+    /// Takes the collation name out, dropping the catalog facts beside it.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use sql_traits::{prelude::*, traits::NamedColumnCollation};
+    ///
+    /// let name = NamedColumnCollation::new(TargetName::new("ci", false)).into_name();
+    /// assert_eq!(name.name(), "ci");
+    /// ```
+    #[must_use]
+    pub fn into_name(self) -> TargetName<'a> {
+        self.name
     }
 }
 
