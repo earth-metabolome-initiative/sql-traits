@@ -1,6 +1,6 @@
 //! Submodule providing a trait for describing SQL Table-like entities.
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{borrow::Cow, string::ToString, vec::Vec};
 use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use crate::{
@@ -13,7 +13,9 @@ use crate::{
         ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
         PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
     },
-    utils::identifier_resolution::{normalize_identifier, stored_identifier_matches_lookup},
+    utils::identifier_resolution::{
+        identifiers_match, normalize_identifier, stored_identifier_matches_lookup,
+    },
 };
 
 /// How a partitioned table routes a row to one of its partitions.
@@ -866,6 +868,50 @@ pub trait TableLike:
         }))
     }
 
+    /// Returns the position of the named column in the table's column
+    /// iterator, if the table declares it.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the column to locate, quoted as SQL quotes it.
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (\"ID\" INT, id INT);")?;
+    /// let table = db.table(None, "t").unwrap();
+    ///
+    /// assert_eq!(table.column_id_by_name("\"ID\"", &db)?, Some(0));
+    /// assert_eq!(table.column_id_by_name("ID", &db)?, Some(1));
+    /// assert_eq!(table.column_id_by_name("absent", &db)?, None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn column_id_by_name(
+        &self,
+        name: &str,
+        database: &Self::DB,
+    ) -> Result<Option<usize>, LookupError> {
+        Ok(TableLike::columns(self, database)?.position(|column| {
+            stored_identifier_matches_lookup(
+                column.column_name(),
+                column.column_name_is_quoted(),
+                name,
+            )
+        }))
+    }
+
     /// Returns the corresponding column by ID position in the table's column
     /// iterator, if it exists.
     ///
@@ -905,6 +951,46 @@ pub trait TableLike:
         Self: 'db,
     {
         Ok(TableLike::columns(self, database)?.nth(column_id))
+    }
+
+    /// Returns the name of the column at the given position in the table's
+    /// column iterator, if the position names one.
+    ///
+    /// # Arguments
+    ///
+    /// * `column_id` - The position of the column to name.
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT, name TEXT);")?;
+    /// let table = db.table(None, "t").unwrap();
+    ///
+    /// assert_eq!(table.column_name_by_id(1, &db)?, Some("name"));
+    /// assert_eq!(table.column_name_by_id(2, &db)?, None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn column_name_by_id<'db>(
+        &'db self,
+        column_id: usize,
+        database: &'db Self::DB,
+    ) -> Result<Option<&'db str>, LookupError>
+    where
+        Self: 'db,
+    {
+        Ok(TableLike::column_by_id(self, column_id, database)?.map(ColumnLike::column_name))
     }
 
     /// Returns whether the provided column belongs to this table.
@@ -998,6 +1084,62 @@ pub trait TableLike:
     ) -> Result<impl Iterator<Item = &'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db;
+
+    /// Returns the positions of the primary key columns in the table's column
+    /// iterator, in the order the key declares them.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the database instance to which the table
+    ///   belongs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::ObjectNotInDatabase`] when `database` does not
+    /// hold this table, and [`LookupError::ColumnNotFound`] when a key column
+    /// is not among the table's own columns, which a shorter key would hide.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "
+    /// CREATE TABLE composite (a INT, b INT, c INT, PRIMARY KEY (c, a));
+    /// CREATE TABLE keyless (a INT);
+    /// ",
+    /// )?;
+    /// let composite = db.table(None, "composite").unwrap();
+    /// assert_eq!(composite.primary_key_column_ids(&db)?, vec![2, 0]);
+    ///
+    /// let keyless = db.table(None, "keyless").unwrap();
+    /// assert_eq!(keyless.primary_key_column_ids(&db)?, Vec::<usize>::new());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn primary_key_column_ids(&self, database: &Self::DB) -> Result<Vec<usize>, LookupError> {
+        let mut column_ids = Vec::new();
+        for key_column in TableLike::primary_key_columns(self, database)? {
+            let position = TableLike::columns(self, database)?.position(|column| {
+                identifiers_match(
+                    column.column_name(),
+                    column.column_name_is_quoted(),
+                    key_column.column_name(),
+                    key_column.column_name_is_quoted(),
+                )
+            });
+            let Some(position) = position else {
+                return Err(LookupError::ColumnNotFound {
+                    table_name: self.table_name().to_string(),
+                    column_name: key_column.column_name().to_string(),
+                });
+            };
+            column_ids.push(position);
+        }
+        Ok(column_ids)
+    }
 
     /// Returns the single primary key column of the table, if it exists and is
     /// non-composite.
@@ -3989,6 +4131,25 @@ where
         T::column_by_id(self, column_id, database)
     }
 
+    fn column_id_by_name(
+        &self,
+        name: &str,
+        database: &Self::DB,
+    ) -> Result<Option<usize>, LookupError> {
+        T::column_id_by_name(self, name, database)
+    }
+
+    fn column_name_by_id<'db>(
+        &'db self,
+        column_id: usize,
+        database: &'db Self::DB,
+    ) -> Result<Option<&'db str>, LookupError>
+    where
+        Self: 'db,
+    {
+        T::column_name_by_id(self, column_id, database)
+    }
+
     fn has_row_level_security(&self, database: &Self::DB) -> Result<bool, LookupError> {
         T::has_row_level_security(self, database)
     }
@@ -4009,6 +4170,10 @@ where
         Self: 'db,
     {
         T::primary_key_columns(self, database)
+    }
+
+    fn primary_key_column_ids(&self, database: &Self::DB) -> Result<Vec<usize>, LookupError> {
+        T::primary_key_column_ids(self, database)
     }
 
     fn check_constraints<'db>(
