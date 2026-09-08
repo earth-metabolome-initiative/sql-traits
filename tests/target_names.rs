@@ -347,3 +347,20 @@ fn function_target_reads_back_unqualified() {
     assert!(!target.name_is_quoted());
     assert_eq!(target.schema(), None);
 }
+
+/// An owned target name keeps both parts and their quoting after the text it
+/// was read from is gone.
+#[test]
+fn an_owned_target_name_keeps_both_parts_and_their_quoting() {
+    let target = {
+        let schema = String::from("my.schema");
+        let name = String::from("Docs");
+        TargetName::new(&name, true).with_schema(&schema, true).into_owned()
+    };
+
+    assert_eq!(target.schema(), Some("my.schema"));
+    assert!(target.schema_is_quoted());
+    assert_eq!(target.name(), "Docs");
+    assert!(target.name_is_quoted());
+    assert_eq!(target.to_string(), "\"my.schema\".\"Docs\"");
+}

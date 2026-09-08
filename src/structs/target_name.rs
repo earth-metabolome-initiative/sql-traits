@@ -218,6 +218,31 @@ impl<'a> TargetName<'a> {
     pub fn schema_is_quoted(&self) -> bool {
         self.schema_is_quoted
     }
+
+    /// Takes ownership of both parts, so the name outlives the SQL it was read
+    /// from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use sql_traits::prelude::*;
+    ///
+    /// let owned = {
+    ///     let text = String::from("app.\"Docs\"");
+    ///     TargetName::parse(&text).expect("a qualified name parses").into_owned()
+    /// };
+    /// assert_eq!(owned.schema(), Some("app"));
+    /// assert_eq!(owned.name(), "Docs");
+    /// ```
+    #[must_use]
+    pub fn into_owned(self) -> TargetName<'static> {
+        TargetName {
+            name: Cow::Owned(self.name.into_owned()),
+            name_is_quoted: self.name_is_quoted,
+            schema: self.schema.map(|schema| Cow::Owned(schema.into_owned())),
+            schema_is_quoted: self.schema_is_quoted,
+        }
+    }
 }
 
 /// Writes one identifier, quoting it and doubling any embedded quote when it

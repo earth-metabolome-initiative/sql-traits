@@ -69,6 +69,29 @@ impl<'a> NamedColumnCollation<'a> {
     pub fn mysql_padding(&self) -> Option<MySqlCollationPadding> {
         self.mysql_padding
     }
+
+    /// Takes ownership of the collation name, so the metadata outlives the
+    /// database it was resolved against.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use sql_traits::{prelude::*, traits::NamedColumnCollation};
+    ///
+    /// let owned = {
+    ///     let text = String::from("ci");
+    ///     NamedColumnCollation::new(TargetName::new(&text, false)).into_owned()
+    /// };
+    /// assert_eq!(owned.name().name(), "ci");
+    /// ```
+    #[must_use]
+    pub fn into_owned(self) -> NamedColumnCollation<'static> {
+        NamedColumnCollation {
+            name: self.name.into_owned(),
+            postgres_deterministic: self.postgres_deterministic,
+            mysql_padding: self.mysql_padding,
+        }
+    }
 }
 
 /// How a column resolves text comparison rules.
@@ -80,6 +103,42 @@ pub enum ColumnCollation<'a> {
     Named(NamedColumnCollation<'a>),
     /// The source changes comparison rules without a resolved collation name.
     Unknown,
+}
+
+impl ColumnCollation<'_> {
+    /// Takes ownership of the declared name, so a resolved collation outlives
+    /// the database borrow it came from.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::PostgreSqlDialect;
+    ///
+    /// let collation = {
+    ///     let db = ParserDB::parse::<PostgreSqlDialect>(
+    ///         "CREATE TABLE t (name TEXT COLLATE \"und-x-icu\");",
+    ///     )?;
+    ///     let table = db.table(None, "t").unwrap();
+    ///     let column = table.column("name", &db)?.unwrap();
+    ///     column.collation(&db)?.into_owned()
+    /// };
+    /// let ColumnCollation::Named(named) = collation else {
+    ///     panic!("a declared COLLATE resolves to a named collation");
+    /// };
+    /// assert_eq!(named.name().name(), "und-x-icu");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn into_owned(self) -> ColumnCollation<'static> {
+        match self {
+            Self::DatabaseDefault => ColumnCollation::DatabaseDefault,
+            Self::Named(named) => ColumnCollation::Named(named.into_owned()),
+            Self::Unknown => ColumnCollation::Unknown,
+        }
+    }
 }
 
 /// A trait for types that can be treated as SQL columns.

@@ -69,6 +69,9 @@ struct MemoryTable {
     schema_is_quoted: bool,
     name: String,
     name_is_quoted: bool,
+    /// A key column the table does not declare, which a catalog read from a
+    /// live server can hand back when the key and the column list disagree.
+    undeclared_key_column: Option<MemoryColumn>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -413,7 +416,10 @@ impl TableLike for MemoryTable {
     where
         Self: 'db,
     {
-        Ok(self.columns(database)?.filter(|column| column.primary_key))
+        Ok(self
+            .columns(database)?
+            .filter(|column| column.primary_key)
+            .chain(self.undeclared_key_column.as_ref()))
     }
 
     fn check_constraints<'db>(
@@ -1090,6 +1096,7 @@ fn table(schema: Option<&str>, name: &str) -> MemoryTable {
         schema_is_quoted: false,
         name: String::from(name),
         name_is_quoted: false,
+        undeclared_key_column: None,
     }
 }
 
@@ -1284,6 +1291,35 @@ fn the_inherited_accessors_answer_from_the_catalog() -> Result<(), LookupError> 
     assert_eq!(docs.primary_key_columns(&catalog)?.count(), 1);
     let first_column = docs.columns(&catalog)?.next().expect("a column");
     assert_eq!(catalog.dialect().is_bool(&catalog, first_column), TypeMatch::No);
+
+    Ok(())
+}
+
+/// A key column the table does not declare is an error, not a shorter key.
+#[test]
+fn an_unresolvable_key_column_stops_the_ordinals() -> Result<(), LookupError> {
+    let mut catalog = catalog();
+    let mut docs = table(Some("app"), "docs");
+    docs.undeclared_key_column = Some(column(Some("app"), "docs", "dropped_id"));
+    catalog.tables = vec![docs];
+    catalog.columns = vec![
+        column(Some("app"), "docs", "body"),
+        column(Some("app"), "docs", "id"),
+        column(Some("app"), "docs", "extra"),
+    ];
+
+    let docs = catalog.table(Some("app"), "docs").expect("the qualified lookup finds it");
+
+    assert_eq!(docs.column_id_by_name("id", &catalog)?, Some(1));
+    assert_eq!(docs.column_name_by_id(2, &catalog)?, Some("extra"));
+    assert_eq!(docs.column_name_by_id(3, &catalog)?, None);
+    assert_eq!(
+        docs.primary_key_column_ids(&catalog),
+        Err(LookupError::ColumnNotFound {
+            table_name: String::from("docs"),
+            column_name: String::from("dropped_id"),
+        })
+    );
 
     Ok(())
 }
