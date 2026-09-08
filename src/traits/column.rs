@@ -16,6 +16,7 @@ use crate::{
 
 /// The padding rule MySQL exposes for a collation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MySqlCollationPadding {
     /// Comparisons ignore trailing spaces.
     PadSpace,
@@ -25,6 +26,7 @@ pub enum MySqlCollationPadding {
 
 /// Collation metadata for one named comparison rule.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NamedColumnCollation<'a> {
     name: TargetName<'a>,
     postgres_deterministic: Option<bool>,
@@ -96,6 +98,7 @@ impl<'a> NamedColumnCollation<'a> {
 
 /// How a column resolves text comparison rules.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ColumnCollation<'a> {
     /// No declared rule is present, so the database default applies.
     DatabaseDefault,

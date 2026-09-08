@@ -1,6 +1,9 @@
 ---
 exclude_paths:
   - "fuzz/**"
+  # The counting allocator a test binary needs cannot be written without
+  # `unsafe`, and the library itself has none.
+  - "tests/support/**"
 # Tests duplicate by design; every other tool and metric still covers them.
 engines:
   duplication:

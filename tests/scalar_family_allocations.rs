@@ -1,67 +1,12 @@
 //! Pins scalar family allocation behavior outside coverage instrumentation.
 #![cfg(not(tarpaulin))]
 
-use core::{cell::Cell, hint::black_box, sync::atomic::Ordering};
-use std::alloc::{GlobalAlloc, Layout, System};
+use core::{hint::black_box, sync::atomic::Ordering};
 
 use sql_traits::utils::scalar_family::{ScalarFamily, scalar_family};
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/scalar_family_cases.rs"));
-
-struct CountingAllocator;
-
-thread_local! {
-    /// Allocations the current thread asked for.
-    ///
-    /// The `const` initializer keeps the slot from allocating when it is first
-    /// touched, which would recurse through this allocator.
-    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-}
-
-/// Records one allocation for the current thread, ignoring a slot already
-/// destroyed during thread teardown.
-fn record_allocation() {
-    let _ = ALLOCATIONS.try_with(|allocations| allocations.set(allocations.get() + 1));
-}
-
-/// Allocations the current thread has asked for so far.
-fn allocations() -> usize {
-    ALLOCATIONS.with(Cell::get)
-}
-
-// SAFETY: The wrapper preserves `System` allocation contracts and adds
-// per-thread accounting only.
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        record_allocation();
-        // SAFETY: The caller provides the allocation contract required by
-        // `System`.
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        record_allocation();
-        // SAFETY: The caller provides the allocation contract required by
-        // `System`.
-        unsafe { System.alloc_zeroed(layout) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: The caller provides the pointer and layout returned by this
-        // allocator.
-        unsafe { System.dealloc(ptr, layout) }
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        record_allocation();
-        // SAFETY: The caller provides the reallocation contract required by
-        // `System`.
-        unsafe { System.realloc(ptr, layout, new_size) }
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/counting_allocator.rs"));
 
 #[test]
 fn scalar_family_classification_does_not_allocate() {

@@ -1088,6 +1088,9 @@ pub trait TableLike:
     /// Returns the positions of the primary key columns in the table's column
     /// iterator, in the order the key declares them.
     ///
+    /// The columns are walked once for the whole key, so a wider key costs no
+    /// more than a narrow one.
+    ///
     /// # Arguments
     ///
     /// * `database` - A reference to the database instance to which the table
@@ -1120,23 +1123,44 @@ pub trait TableLike:
     /// # }
     /// ```
     fn primary_key_column_ids(&self, database: &Self::DB) -> Result<Vec<usize>, LookupError> {
-        let mut column_ids = Vec::new();
-        for key_column in TableLike::primary_key_columns(self, database)? {
-            let position = TableLike::columns(self, database)?.position(|column| {
-                identifiers_match(
-                    column.column_name(),
-                    column.column_name_is_quoted(),
-                    key_column.column_name(),
-                    key_column.column_name_is_quoted(),
-                )
-            });
-            let Some(position) = position else {
-                return Err(LookupError::ColumnNotFound {
-                    table_name: self.table_name().to_string(),
-                    column_name: key_column.column_name().to_string(),
-                });
+        let mut declared = TableLike::primary_key_columns(self, database)?;
+        let Some(first_key_column) = declared.next() else {
+            return Ok(Vec::new());
+        };
+        // A single column key leaves this empty, and collecting an exhausted
+        // iterator allocates nothing.
+        let remaining_key_columns: Vec<&<Self::DB as DatabaseLike>::Column> = declared.collect();
+        let key_columns =
+            || core::iter::once(first_key_column).chain(remaining_key_columns.iter().copied());
+
+        // No ordinal can be `usize::MAX`, so it stands for a key column the
+        // walk below has not reached yet.
+        let mut column_ids = alloc::vec![usize::MAX; remaining_key_columns.len() + 1];
+        for (position, column) in TableLike::columns(self, database)?.enumerate() {
+            for (ordinal, key_column) in column_ids.iter_mut().zip(key_columns()) {
+                if *ordinal == usize::MAX
+                    && identifiers_match(
+                        column.column_name(),
+                        column.column_name_is_quoted(),
+                        key_column.column_name(),
+                        key_column.column_name_is_quoted(),
+                    )
+                {
+                    *ordinal = position;
+                }
+            }
+        }
+
+        if let Some(unresolved) = column_ids.iter().position(|ordinal| *ordinal == usize::MAX) {
+            let key_column = if unresolved == 0 {
+                first_key_column
+            } else {
+                remaining_key_columns[unresolved - 1]
             };
-            column_ids.push(position);
+            return Err(LookupError::ColumnNotFound {
+                table_name: self.table_name().to_string(),
+                column_name: key_column.column_name().to_string(),
+            });
         }
         Ok(column_ids)
     }
