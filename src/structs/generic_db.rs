@@ -302,7 +302,7 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
     /// let table =
     ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let column = table.column("id", &db)?.unwrap();
+    /// let column = table.column("id", &db, IdentifierCase::AsWritten)?.unwrap();
     /// let metadata = db.column_metadata(column).unwrap();
     /// assert_eq!(metadata.postgres_deterministic(), None);
     /// # Ok(())

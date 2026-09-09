@@ -1496,7 +1496,7 @@ fn an_unresolvable_key_column_stops_the_ordinals() -> Result<(), LookupError> {
         )?
         .expect("the qualified lookup finds it");
 
-    assert_eq!(docs.column_id_by_name("id", &catalog)?, Some(1));
+    assert_eq!(docs.column_id_by_name("id", &catalog, IdentifierCase::AsWritten)?, Some(1));
     assert_eq!(docs.column_name_by_id(2, &catalog)?, Some("extra"));
     assert_eq!(docs.column_name_by_id(3, &catalog)?, None);
     assert_eq!(

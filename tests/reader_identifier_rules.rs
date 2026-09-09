@@ -32,16 +32,25 @@ fn a_check_constraint_reads_a_column_by_the_identifier_rule() -> Result<(), Look
         .check_constraints(&database)?
         .next()
         .expect("the table declares one check");
-    assert!(plain.column(&database, "plain")?.is_some());
-    assert!(plain.column(&database, "PLAIN")?.is_some(), "an unquoted lookup folds");
-    assert!(plain.column(&database, "\"PLAIN\"")?.is_none(), "a quoted lookup is literal");
+    assert!(plain.column(&database, "plain", IdentifierCase::AsWritten)?.is_some());
+    assert!(
+        plain.column(&database, "PLAIN", IdentifierCase::AsWritten)?.is_some(),
+        "an unquoted lookup folds"
+    );
+    assert!(
+        plain.column(&database, "\"PLAIN\"", IdentifierCase::AsWritten)?.is_none(),
+        "a quoted lookup is literal"
+    );
 
     let quoted = table(&database, "q")
         .check_constraints(&database)?
         .next()
         .expect("the table declares one check");
-    assert!(quoted.column(&database, "\"Body\"")?.is_some());
-    assert!(quoted.column(&database, "Body")?.is_none(), "the stored name keeps its case");
+    assert!(quoted.column(&database, "\"Body\"", IdentifierCase::AsWritten)?.is_some());
+    assert!(
+        quoted.column(&database, "Body", IdentifierCase::AsWritten)?.is_none(),
+        "the stored name keeps its case"
+    );
 
     Ok(())
 }

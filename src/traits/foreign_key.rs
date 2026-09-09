@@ -1451,8 +1451,12 @@ pub trait ForeignKeyLike:
     ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
-    /// let ref_id_col = host_table.column("ref_id", &db)?.expect("Should have ref_id column");
-    /// let ref_name_col = host_table.column("ref_name", &db)?.expect("Should have ref_name column");
+    /// let ref_id_col = host_table
+    ///     .column("ref_id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Should have ref_id column");
+    /// let ref_name_col = host_table
+    ///     .column("ref_name", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Should have ref_name column");
     /// let referenced_id_col = foreign_key
     ///     .referenced_column_for_host_column(&db, &ref_id_col)?
     ///     .expect("ref_id is a key column");
@@ -1466,7 +1470,8 @@ pub trait ForeignKeyLike:
     /// let unrelated = db
     ///     .table_by_target(TargetName::new("referenced_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let unrelated_col = unrelated.column("name", &db)?.expect("Should have name column");
+    /// let unrelated_col =
+    ///     unrelated.column("name", &db, IdentifierCase::AsWritten)?.expect("Should have name column");
     /// assert!(foreign_key.referenced_column_for_host_column(&db, unrelated_col)?.is_none());
     /// # Ok(())
     /// # }

@@ -62,8 +62,10 @@ fn adding_a_column_declares_it() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let added =
-        table.column("x", &database).expect("t is in this database").expect("x is declared");
+    let added = table
+        .column("x", &database, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("x is declared");
     assert!(!added.is_nullable(&database).expect("x is in this database"));
     assert_eq!(added.data_type(&database).to_string(), "TEXT");
 }
@@ -91,8 +93,10 @@ fn adding_a_column_that_exists_is_refused_unless_tolerated() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let untouched =
-        table.column("a", &tolerated).expect("t is in this database").expect("a is declared");
+    let untouched = table
+        .column("a", &tolerated, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("a is declared");
     assert_eq!(
         untouched.data_type(&tolerated).to_string(),
         "INT",
@@ -619,8 +623,10 @@ fn altering_a_column_changes_what_it_declares() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let column =
-        table.column("a", &not_null).expect("t is in this database").expect("a is declared");
+    let column = table
+        .column("a", &not_null, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("a is declared");
     assert!(!column.is_nullable(&not_null).expect("a is in this database"));
 
     let nullable = parse(
@@ -632,8 +638,10 @@ fn altering_a_column_changes_what_it_declares() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let column =
-        table.column("a", &nullable).expect("t is in this database").expect("a is declared");
+    let column = table
+        .column("a", &nullable, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("a is declared");
     assert!(column.is_nullable(&nullable).expect("a is in this database"));
 
     let defaulted = parse(
@@ -645,8 +653,10 @@ fn altering_a_column_changes_what_it_declares() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let column =
-        table.column("a", &defaulted).expect("t is in this database").expect("a is declared");
+    let column = table
+        .column("a", &defaulted, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("a is declared");
     assert_eq!(column.default_value().as_deref(), Some("7"));
 
     let undefaulted = parse(
@@ -658,8 +668,10 @@ fn altering_a_column_changes_what_it_declares() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let column =
-        table.column("a", &undefaulted).expect("t is in this database").expect("a is declared");
+    let column = table
+        .column("a", &undefaulted, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("a is declared");
     assert_eq!(column.default_value(), None);
 
     let retyped = parse(
@@ -671,8 +683,10 @@ fn altering_a_column_changes_what_it_declares() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let column =
-        table.column("a", &retyped).expect("t is in this database").expect("a is declared");
+    let column = table
+        .column("a", &retyped, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("a is declared");
     assert_eq!(column.data_type(&retyped).to_string(), "TEXT");
 }
 
@@ -703,8 +717,10 @@ fn the_mysql_spellings_restate_the_declaration() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let column =
-        table.column("b", &changed).expect("t is in this database").expect("b is declared");
+    let column = table
+        .column("b", &changed, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("b is declared");
     assert_eq!(column.data_type(&changed).to_string(), "TEXT");
     assert!(!column.is_nullable(&changed).expect("b is in this database"));
 
@@ -718,8 +734,10 @@ fn the_mysql_spellings_restate_the_declaration() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("t exists");
-    let column =
-        table.column("a", &modified).expect("t is in this database").expect("a is declared");
+    let column = table
+        .column("a", &modified, IdentifierCase::AsWritten)
+        .expect("t is in this database")
+        .expect("a is declared");
     assert_eq!(column.data_type(&modified).to_string(), "TEXT");
     assert!(
         column.is_nullable(&modified).expect("a is in this database"),

@@ -57,7 +57,10 @@ fn test_array_column_normalized_data_type() {
     let database =
         ParserDB::from_statements(statements, "test".to_string()).expect("schema builds");
     let table = database.tables().next().expect("input declares a table");
-    let column = table.column("tags", &database).expect("lookup runs").expect("column exists");
+    let column = table
+        .column("tags", &database, IdentifierCase::AsWritten)
+        .expect("lookup runs")
+        .expect("column exists");
 
     assert_eq!(column.normalized_data_type(&database), "TEXT[]");
     assert!(!column.is_textual(&database));

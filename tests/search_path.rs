@@ -476,7 +476,7 @@ fn if_not_exists_weighs_the_schema_the_path_selects() {
         .expect("unambiguous lookup")
         .expect("the first table");
     assert_eq!(docs.columns(&db).expect("in this database").count(), 1);
-    assert!(docs.column("id", &db).is_ok(), "the first table was kept");
+    assert!(docs.column("id", &db, IdentifierCase::AsWritten).is_ok(), "the first table was kept");
 }
 
 /// `IF NOT EXISTS` asks whether a table is already there, not whether there is

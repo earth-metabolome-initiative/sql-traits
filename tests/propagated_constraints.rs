@@ -104,7 +104,7 @@ fn is_nullable(database: &ParserDB, table_name: &str, column_name: &str) -> bool
         )
         .expect("unambiguous lookup")
         .expect("table exists")
-        .column(column_name, database)
+        .column(column_name, database, IdentifierCase::AsWritten)
         .expect("lookup succeeds")
         .expect("column exists")
         .is_nullable(database)
