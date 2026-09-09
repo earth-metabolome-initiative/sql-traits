@@ -12,6 +12,17 @@ use crate::{
     utils::identifier_resolution::identifiers_match,
 };
 
+/// Whether a written reference names a stored column, folding an unquoted
+/// spelling as the engine does.
+fn column_named_by<C: ColumnLike>(column: &C, written: &Ident) -> bool {
+    identifiers_match(
+        column.column_name(),
+        column.column_name_is_quoted(),
+        written.value.as_str(),
+        written.quote_style.is_some(),
+    )
+}
+
 /// Returns whether a column reference's qualifier chain names the table the
 /// expression belongs to.
 ///
@@ -89,8 +100,7 @@ pub fn columns_in_expression<C: ColumnLike + Clone>(
 
     match expr {
         Expr::Identifier(ident) => {
-            if let Some(col) = columns.iter().find(|col| col.column_name() == ident.value.as_str())
-            {
+            if let Some(col) = columns.iter().find(|col| column_named_by(*col, ident)) {
                 result.push(col.clone());
             } else {
                 return Err(crate::errors::Error::UnknownColumnInCheckConstraint {
@@ -109,7 +119,7 @@ pub fn columns_in_expression<C: ColumnLike + Clone>(
                     table_name: table.name().to_string(),
                 });
             }
-            if let Some(col) = columns.iter().find(|col| col.column_name() == column.value.as_str())
+            if let Some(col) = columns.iter().find(|candidate| column_named_by(*candidate, column))
             {
                 result.push(col.clone());
             } else {
