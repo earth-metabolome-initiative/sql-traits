@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 honggfuzz = { version = "0.5.58", features = ["arbitrary"] }
 sql-traits = { path = ".." }
-sqlparser = "0.62"
+sqlparser = "0.63"
 
 [[bin]]
 name = "fuzz_dialect"
