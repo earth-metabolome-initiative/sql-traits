@@ -14,6 +14,7 @@ use sqlparser::ast::{
 use crate::{
     errors::LookupError,
     traits::{DatabaseLike, Metadata, TableLike, column::ColumnLike, function_like::FunctionLike},
+    utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
 /// Helper function to determine if an expression evaluates to a constant
@@ -717,7 +718,13 @@ pub trait CheckConstraintLike:
         database: &'db Self::DB,
         name: &str,
     ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError> {
-        Ok(self.columns(database)?.find(|c| c.column_name() == name))
+        Ok(self.columns(database)?.find(|column| {
+            stored_identifier_matches_lookup(
+                column.column_name(),
+                column.column_name_is_quoted(),
+                name,
+            )
+        }))
     }
 
     /// Iterates over the functions used in the check constraint.

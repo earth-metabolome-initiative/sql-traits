@@ -32,9 +32,12 @@ use crate::{
     errors::{Error, ObjectKind},
     structs::{IdentifierCase, MaterializedView, View, metadata::ViewMetadata},
     traits::ViewLike,
-    utils::object_name::{
-        RelationKey, object_name_last_part, qualifier_of, stored_table_key, stored_view_key,
-        target_key, target_name_from_object_name,
+    utils::{
+        identifier_resolution::identifiers_match,
+        object_name::{
+            RelationKey, object_name_last_part, qualifier_of, stored_table_key, stored_view_key,
+            target_key, target_name_from_object_name,
+        },
     },
 };
 
@@ -156,8 +159,10 @@ fn check_replacement_columns(existing: &View, node: &CreateView) -> Result<(), E
             view_name: existing.view_name().to_string(),
         });
     }
-    for ((existing_name, _), (new_name, _)) in before.iter().zip(after.iter()) {
-        if existing_name != new_name {
+    for ((existing_name, existing_quoted), (new_name, new_quoted)) in
+        before.iter().zip(after.iter())
+    {
+        if !identifiers_match(existing_name, *existing_quoted, new_name, *new_quoted) {
             return Err(Error::ViewColumnRenamedByReplace {
                 view_name: existing.view_name().to_string(),
                 existing_column: existing_name.clone(),
