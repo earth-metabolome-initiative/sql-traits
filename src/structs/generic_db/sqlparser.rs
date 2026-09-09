@@ -929,6 +929,7 @@ impl ParserDBBuilder {
             let Some(referenced_table) = resolve_table_object_name_in_iter(
                 self.tables().iter().map(|(table, _)| table.as_ref()),
                 &fk.attribute().foreign_table,
+                self.identifier_case(),
             )
             .ok()
             .flatten() else {
@@ -937,6 +938,7 @@ impl ParserDBBuilder {
             let Some(host_table) = resolve_table_object_name_in_iter(
                 self.tables().iter().map(|(table, _)| table.as_ref()),
                 &fk.table().name,
+                self.identifier_case(),
             )
             .ok()
             .flatten() else {
@@ -1365,6 +1367,7 @@ impl ParserDBBuilder {
             self.tables().iter().map(|(table, _)| table.as_ref()),
             object_name,
             self.search_path(),
+            self.identifier_case(),
         )
     }
 
@@ -2331,7 +2334,11 @@ fn function_signatures_match(
     if !object_names_match(left, right)
         || matches!(qualifier_of(left), Qualifier::RunTime)
         || matches!(qualifier_of(right), Qualifier::RunTime)
-        || !schema_qualifiers_match(qualifier_of(left).named(), qualifier_of(right).named())
+        || !schema_qualifiers_match(
+            qualifier_of(left).named(),
+            qualifier_of(right).named(),
+            IdentifierCase::AsWritten,
+        )
     {
         return false;
     }
@@ -2810,14 +2817,18 @@ fn table_schema_qualifier(table: &CreateTable) -> SchemaQualifier<'_> {
 /// Returns whether two qualifiers name the same schema, reading a missing one
 /// as `public`, which is the allowance the table store already makes when it
 /// refuses a lookup ambiguity.
-fn schema_qualifiers_match(left: SchemaQualifier<'_>, right: SchemaQualifier<'_>) -> bool {
+fn schema_qualifiers_match(
+    left: SchemaQualifier<'_>,
+    right: SchemaQualifier<'_>,
+    case: IdentifierCase,
+) -> bool {
     match (left, right) {
         (None, None) => true,
         (Some((left, left_quoted)), Some((right, right_quoted))) => {
-            identifiers_match(left, left_quoted, right, right_quoted)
+            case.identifiers_match(left, left_quoted, right, right_quoted)
         }
         (Some((schema, quoted)), None) | (None, Some((schema, quoted))) => {
-            identifiers_match(schema, quoted, "public", false)
+            case.identifiers_match(schema, quoted, "public", false)
         }
     }
 }
@@ -2866,18 +2877,19 @@ fn index_holds_name<A>(
     index: &TableAttribute<CreateTable, A>,
     name: &Ident,
     schema: SchemaQualifier<'_>,
+    case: IdentifierCase,
 ) -> bool
 where
     TableAttribute<CreateTable, A>: IndexLike,
 {
     IndexLike::name(index).is_some_and(|candidate| {
-        identifiers_match(
+        case.identifiers_match(
             candidate,
             index.name_is_quoted(),
             name.value.as_str(),
             name.quote_style.is_some(),
         )
-    }) && schema_qualifiers_match(table_schema_qualifier(index.table()), schema)
+    }) && schema_qualifiers_match(table_schema_qualifier(index.table()), schema, case)
 }
 
 /// Returns the kind of index already holding `name` in `schema`, if any,
@@ -2888,13 +2900,14 @@ fn index_name_holder(
     name: &Ident,
     schema: SchemaQualifier<'_>,
 ) -> Option<ObjectKind> {
-    if builder.indices().iter().any(|(index, _)| index_holds_name(index, name, schema)) {
+    let case = builder.identifier_case();
+    if builder.indices().iter().any(|(index, _)| index_holds_name(index, name, schema, case)) {
         return Some(ObjectKind::Index);
     }
     builder
         .unique_indices()
         .iter()
-        .any(|(index, _)| index_holds_name(index, name, schema))
+        .any(|(index, _)| index_holds_name(index, name, schema, case))
         .then_some(ObjectKind::UniqueIndex)
 }
 
@@ -2904,19 +2917,25 @@ fn view_name_holder(
     name: &Ident,
     schema: SchemaQualifier<'_>,
 ) -> Option<ObjectKind> {
-    if builder.views().iter().any(|(view, _)| view_holds_name(view.as_ref(), name, schema)) {
+    let case = builder.identifier_case();
+    if builder.views().iter().any(|(view, _)| view_holds_name(view.as_ref(), name, schema, case)) {
         return Some(ObjectKind::View);
     }
     builder
         .materialized_views()
         .iter()
-        .any(|(view, _)| view_holds_name(view.as_ref(), name, schema))
+        .any(|(view, _)| view_holds_name(view.as_ref(), name, schema, case))
         .then_some(ObjectKind::MaterializedView)
 }
 
 /// Returns whether a stored view answers `name` in `schema`.
-fn view_holds_name<V: ViewLike>(view: &V, name: &Ident, schema: SchemaQualifier<'_>) -> bool {
-    identifiers_match(
+fn view_holds_name<V: ViewLike>(
+    view: &V,
+    name: &Ident,
+    schema: SchemaQualifier<'_>,
+    case: IdentifierCase,
+) -> bool {
+    case.identifiers_match(
         view.view_name(),
         view.view_name_is_quoted(),
         name.value.as_str(),
@@ -2924,6 +2943,7 @@ fn view_holds_name<V: ViewLike>(view: &V, name: &Ident, schema: SchemaQualifier<
     ) && schema_qualifiers_match(
         view.view_schema().map(|value| (value, view.view_schema_is_quoted())),
         schema,
+        case,
     )
 }
 
@@ -2937,13 +2957,14 @@ fn relation_name_holder(
     name: &Ident,
     schema: SchemaQualifier<'_>,
 ) -> Option<ObjectKind> {
+    let case = builder.identifier_case();
     let table = builder.tables().iter().any(|(table, _)| {
-        identifiers_match(
+        case.identifiers_match(
             table.table_name(),
             table.table_name_is_quoted(),
             name.value.as_str(),
             name.quote_style.is_some(),
-        ) && schema_qualifiers_match(table_schema_qualifier(table), schema)
+        ) && schema_qualifiers_match(table_schema_qualifier(table), schema, case)
     });
     if table {
         return Some(ObjectKind::Table);
@@ -3504,7 +3525,7 @@ impl ParserDBIngestor {
         dialect: SqlparserDialect,
         options: ParseOptions,
     ) -> Self {
-        let (access_resolution, postgres_catalog) = options.into_parts();
+        let (access_resolution, postgres_catalog, identifier_case) = options.into_parts();
         let active_postgres_catalog =
             Arc::new(if matches!(dialect, SqlparserDialect::PostgreSql) {
                 postgres_catalog
@@ -3516,7 +3537,8 @@ impl ParserDBIngestor {
             active_postgres_catalog,
             collation_metadata: Vec::new(),
         });
-        let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect);
+        let mut builder: ParserDBBuilder = super::GenericDBBuilder::new(catalog_name, dialect)
+            .with_identifier_case(identifier_case);
 
         let any_type = DataType::Custom(
             ObjectName(vec![ObjectNamePart::Identifier(Ident::with_quote('"', "any"))]),
@@ -4302,6 +4324,7 @@ impl ParserDB {
                 .chain(core::iter::once(create_table.as_ref())),
             &fk.foreign_table,
             builder.search_path(),
+            builder.identifier_case(),
         )?;
         let Some(referenced_table) = referenced_table else {
             // A view holding the name is a different complaint: the relation
@@ -6945,6 +6968,7 @@ impl ParserDB {
                         grant.objects.as_ref(),
                         &tables,
                         &path,
+                        builder.identifier_case(),
                     )?;
 
                     builder = builder.add_table_grant(Arc::new(grant.clone()), ());
@@ -6970,6 +6994,7 @@ impl ParserDB {
                         revoke.objects.as_ref(),
                         &tables,
                         &path,
+                        builder.identifier_case(),
                     )?;
 
                     let unsupported =
@@ -8186,7 +8211,8 @@ mod tests {
                 result,
                 Err(Error::IdentifierLookupError(LookupError::TableLookupConflict {
                     table,
-                    conflicting_table
+                    conflicting_table,
+                    ..
                 })) if table == "public.t" && conflicting_table == "t"
             ));
         }

@@ -4,6 +4,8 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 
 use sqlparser::parser::ParserError;
 
+use crate::structs::IdentifierCase;
+
 /// Kind of database object a metadata lookup was made for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ObjectKind {
@@ -157,13 +159,15 @@ pub enum LookupError {
     },
     /// Adding a table would create semantic lookup ambiguity.
     #[error(
-        "Cannot add table `{table}` because it conflicts with existing table `{conflicting_table}`."
+        "Cannot add table `{table}` because existing table `{conflicting_table}` already uses that name under the {case} identifier comparison."
     )]
     TableLookupConflict {
         /// Table being inserted.
         table: String,
         /// Existing conflicting table.
         conflicting_table: String,
+        /// Comparison under which the two names are one.
+        case: IdentifierCase,
     },
     /// A database object handed to a metadata accessor is not present in the
     /// database being queried, for instance because it was renamed away, was

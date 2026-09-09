@@ -14,17 +14,13 @@ use crate::{
         generic_db::{RelationSlot, Stored},
     },
     traits::{FunctionLike, PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
-    utils::{
-        identifier_resolution::identifiers_match,
-        object_name::{
-            RelationKey, render_table_candidate, stored_function_key, stored_table_key,
-            stored_view_key,
-        },
+    utils::object_name::{
+        RelationKey, render_table_candidate, stored_function_key, stored_table_key, stored_view_key,
     },
 };
 
-fn table_names_match_semantically<T: TableLike>(left: &T, right: &T) -> bool {
-    identifiers_match(
+fn table_names_match<T: TableLike>(left: &T, right: &T, case: IdentifierCase) -> bool {
+    case.identifiers_match(
         left.table_name(),
         left.table_name_is_quoted(),
         right.table_name(),
@@ -32,18 +28,18 @@ fn table_names_match_semantically<T: TableLike>(left: &T, right: &T) -> bool {
     )
 }
 
-fn table_schema_is_public<T: TableLike>(table: &T) -> bool {
+fn table_schema_is_public<T: TableLike>(table: &T, case: IdentifierCase) -> bool {
     table.table_schema().is_some_and(|schema_name| {
-        identifiers_match(schema_name, table.table_schema_is_quoted(), "public", false)
+        case.identifiers_match(schema_name, table.table_schema_is_quoted(), "public", false)
     })
 }
 
-fn tables_share_semantic_identity<T: TableLike>(left: &T, right: &T) -> bool {
-    table_names_match_semantically(left, right)
+fn tables_share_identity<T: TableLike>(left: &T, right: &T, case: IdentifierCase) -> bool {
+    table_names_match(left, right, case)
         && match (left.table_schema(), right.table_schema()) {
             (None, None) => true,
             (Some(left_schema), Some(right_schema)) => {
-                identifiers_match(
+                case.identifiers_match(
                     left_schema,
                     left.table_schema_is_quoted(),
                     right_schema,
@@ -54,10 +50,14 @@ fn tables_share_semantic_identity<T: TableLike>(left: &T, right: &T) -> bool {
         }
 }
 
-fn creates_implicit_public_ambiguity<T: TableLike>(left: &T, right: &T) -> bool {
-    table_names_match_semantically(left, right)
-        && ((left.table_schema().is_none() && table_schema_is_public(right))
-            || (right.table_schema().is_none() && table_schema_is_public(left)))
+fn creates_implicit_public_ambiguity<T: TableLike>(
+    left: &T,
+    right: &T,
+    case: IdentifierCase,
+) -> bool {
+    table_names_match(left, right, case)
+        && ((left.table_schema().is_none() && table_schema_is_public(right, case))
+            || (right.table_schema().is_none() && table_schema_is_public(left, case)))
 }
 
 /// Builder for constructing a `GenericDB` instance.
@@ -103,6 +103,9 @@ pub struct GenericDBBuilder<P: SchemaProfile> {
     /// Defaults to `public` alone, and `SET search_path` replaces it wholesale
     /// rather than extending it, which is what the database does.
     search_path: Vec<(String, bool)>,
+    /// Comparison deciding whether a creation takes a name something already
+    /// holds, which each engine answers its own way.
+    identifier_case: IdentifierCase,
 }
 
 impl<P: SchemaProfile> GenericDBBuilder<P> {
@@ -129,6 +132,7 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             table_grants: self.table_grants.clone(),
             column_grants: self.column_grants.clone(),
             search_path: self.search_path.clone(),
+            identifier_case: self.identifier_case,
         }
         .into_database(ingestion)
     }
@@ -323,20 +327,37 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             table_grants: Vec::new(),
             column_grants: Vec::new(),
             search_path: Self::default_search_path(),
+            identifier_case: IdentifierCase::AsWritten,
         }
     }
 }
 
 impl<P: SchemaProfile> GenericDBBuilder<P> {
+    /// The comparison this input takes a name under.
+    pub(crate) const fn identifier_case(&self) -> IdentifierCase {
+        self.identifier_case
+    }
+
+    /// Sets the comparison deciding whether a creation takes a name already
+    /// held, which is PostgreSQL's rule unless the caller says otherwise.
+    #[must_use]
+    #[inline]
+    pub fn with_identifier_case(mut self, case: IdentifierCase) -> Self {
+        self.identifier_case = case;
+        self
+    }
+
     fn ensure_table_lookup_invariants(&self, table: &P::Table) -> Result<(), LookupError> {
+        let case = self.identifier_case;
         for (existing, _) in self.tables() {
             let existing = existing.as_ref();
-            if tables_share_semantic_identity(existing, table)
-                || creates_implicit_public_ambiguity(existing, table)
+            if tables_share_identity(existing, table, case)
+                || creates_implicit_public_ambiguity(existing, table, case)
             {
                 return Err(LookupError::TableLookupConflict {
                     table: render_table_candidate(table),
                     conflicting_table: render_table_candidate(existing),
+                    case,
                 });
             }
         }
@@ -697,6 +718,7 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             column_grants,
             schemas,
             search_path,
+            identifier_case,
             ingestion,
         } = database;
         let builder = Self {
@@ -719,6 +741,7 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             table_grants,
             column_grants,
             search_path,
+            identifier_case,
         };
         (builder, ingestion)
     }
@@ -820,6 +843,7 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             table_grants: self.table_grants,
             column_grants: self.column_grants,
             search_path: self.search_path,
+            identifier_case: self.identifier_case,
             ingestion,
         }
     }

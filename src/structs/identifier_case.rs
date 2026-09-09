@@ -1,6 +1,7 @@
 //! The comparison a lookup applies to the identifiers it matches.
 
 use alloc::borrow::Cow;
+use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::utils::identifier_resolution::normalize_identifier;
 
@@ -86,5 +87,39 @@ impl IdentifierCase {
     #[inline]
     pub fn compared_form(self, value: &str, quoted: bool) -> Cow<'_, str> {
         normalize_identifier(value, !self.folds(quoted))
+    }
+
+    /// Whether two identifiers are one name under the rule.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use sql_traits::prelude::*;
+    ///
+    /// // SQLite reads these as one name, PostgreSQL as two.
+    /// assert!(IdentifierCase::Folded.identifiers_match("docs", false, "Docs", true));
+    /// assert!(!IdentifierCase::AsWritten.identifiers_match("docs", false, "Docs", true));
+    /// // A case-sensitive MySQL reads an unquoted pair as two names.
+    /// assert!(!IdentifierCase::Exact.identifiers_match("docs", false, "Docs", false));
+    /// ```
+    #[must_use]
+    pub fn identifiers_match(
+        self,
+        left: &str,
+        left_quoted: bool,
+        right: &str,
+        right_quoted: bool,
+    ) -> bool {
+        self.compared_form(left, left_quoted) == self.compared_form(right, right_quoted)
+    }
+}
+
+impl Display for IdentifierCase {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::AsWritten => f.write_str("quoting decides"),
+            Self::Folded => f.write_str("folded"),
+            Self::Exact => f.write_str("exact"),
+        }
     }
 }
