@@ -22,17 +22,39 @@ const UNQUOTED_VARIANTS: &str = "CREATE TABLE docs (id INT PRIMARY KEY);
      CREATE TABLE Docs (id INT PRIMARY KEY);";
 
 /// PostgreSQL's rule stays the default, so nothing about a parse that says
-/// nothing changes.
+/// nothing changes, and the refusal says which rule read the two names as one.
 #[test]
 fn the_default_parse_keeps_postgresqls_rule() {
+    assert_eq!(ParseOptions::default().identifier_case(), IdentifierCase::AsWritten);
+
     let db = ParserDB::parse::<GenericDialect>(CASE_VARIANTS).expect("PostgreSQL accepts the pair");
     assert_eq!(db.tables().count(), 2);
 
-    let refused = ParserDB::parse::<GenericDialect>(UNQUOTED_VARIANTS);
-    assert!(matches!(
-        refused,
-        Err(Error::IdentifierLookupError(LookupError::TableLookupConflict { .. }))
-    ));
+    let refused = ParserDB::parse::<GenericDialect>(UNQUOTED_VARIANTS)
+        .expect_err("PostgreSQL folds the unquoted pair into one name");
+    assert!(
+        refused.to_string().contains("quoting decides"),
+        "the refusal names the rule that decided it: {refused}"
+    );
+}
+
+/// Two spellings a case-sensitive engine keeps apart still collide when they
+/// are the same bytes, and the refusal names that rule too.
+#[test]
+fn an_exact_parse_refuses_the_same_name_twice() {
+    let options = ParseOptions::default().with_identifier_case(IdentifierCase::Exact);
+    assert_eq!(options.identifier_case(), IdentifierCase::Exact);
+
+    let refused = options
+        .parse::<MySqlDialect>(
+            "CREATE TABLE docs (id INT PRIMARY KEY);
+             CREATE TABLE docs (id INT PRIMARY KEY);",
+        )
+        .expect_err("one name twice is one name under every rule");
+    assert!(
+        refused.to_string().contains("exact"),
+        "the refusal names the rule that decided it: {refused}"
+    );
 }
 
 /// A folding parse refuses the pair SQLite refuses, and reports the rule that
@@ -54,6 +76,11 @@ fn a_folding_parse_refuses_a_quoted_case_variant() {
     assert_eq!(table, "\"Docs\"");
     assert_eq!(conflicting_table, "docs");
     assert_eq!(case, IdentifierCase::Folded);
+    assert!(
+        LookupError::TableLookupConflict { table, conflicting_table, case }
+            .to_string()
+            .contains("folded")
+    );
 }
 
 /// An exact parse accepts the three spellings a case-sensitive MySQL server
