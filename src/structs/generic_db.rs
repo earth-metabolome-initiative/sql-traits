@@ -109,6 +109,9 @@ pub struct GenericDB<P: SchemaProfile> {
     schemas: Vec<Stored<P::Schema>>,
     /// Schemas an unqualified name resolves against, in order.
     search_path: Vec<(String, bool)>,
+    /// Comparison the creations in this catalog were taken under, which each
+    /// engine answers its own way. A lookup takes its own comparison.
+    identifier_case: IdentifierCase,
     /// Continuation state a resumed ingestion needs beyond the objects.
     ingestion: P::Ingestion,
 }
@@ -135,6 +138,7 @@ impl<P: SchemaProfile> Debug for GenericDB<P> {
             .field("column_grants", &self.column_grants.len())
             .field("schemas", &self.schemas.len())
             .field("search_path", &self.search_path)
+            .field("identifier_case", &self.identifier_case)
             .field("ingestion", &self.ingestion)
             .field("relation_index", &self.relation_index.len())
             .field("function_index", &self.function_index.len())
@@ -166,6 +170,7 @@ impl<P: SchemaProfile> Clone for GenericDB<P> {
             column_grants: self.column_grants.clone(),
             schemas: self.schemas.clone(),
             search_path: self.search_path.clone(),
+            identifier_case: self.identifier_case,
             ingestion: self.ingestion.clone(),
             relation_index: self.relation_index.clone(),
             function_index: self.function_index.clone(),

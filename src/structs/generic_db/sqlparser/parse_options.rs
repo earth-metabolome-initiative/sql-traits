@@ -9,7 +9,7 @@ use sqlparser::{ast::Statement, dialect::Dialect};
 use crate::{
     errors::Error,
     impls::SqlparserDialect,
-    structs::{ParserDB, ParserDBIngestor, PostgresCatalog},
+    structs::{IdentifierCase, ParserDB, ParserDBIngestor, PostgresCatalog},
 };
 
 /// How an access control statement is resolved against the objects the parsed
@@ -64,6 +64,7 @@ pub enum AccessResolution {
 pub struct ParseOptions {
     access_resolution: AccessResolution,
     postgres_catalog: PostgresCatalog,
+    identifier_case: IdentifierCase,
 }
 
 impl Default for ParseOptions {
@@ -71,6 +72,7 @@ impl Default for ParseOptions {
         Self {
             access_resolution: AccessResolution::ClosedWorld,
             postgres_catalog: PostgresCatalog::default(),
+            identifier_case: IdentifierCase::AsWritten,
         }
     }
 }
@@ -92,6 +94,49 @@ impl ParseOptions {
         self
     }
 
+    /// Sets the comparison deciding whether a creation takes a name the input
+    /// already holds.
+    ///
+    /// Each engine answers it differently and no DDL carries the answer, so
+    /// this states it: [`IdentifierCase::AsWritten`] is PostgreSQL's rule and
+    /// the default, [`IdentifierCase::Folded`] is SQLite's and MySQL's with
+    /// `lower_case_table_names` at 1 or 2, and [`IdentifierCase::Exact`] is
+    /// MySQL's with that setting at 0, where `docs` and `Docs` are two tables.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::SQLiteDialect;
+    ///
+    /// let sql = "CREATE TABLE docs (id INT); CREATE TABLE \"Docs\" (id INT);";
+    ///
+    /// // PostgreSQL keeps the quoted spelling apart, and accepts both.
+    /// assert_eq!(ParserDB::parse::<SQLiteDialect>(sql)?.tables().count(), 2);
+    ///
+    /// // SQLite reads them as one name and refuses the second.
+    /// assert!(
+    ///     ParseOptions::default()
+    ///         .with_identifier_case(IdentifierCase::Folded)
+    ///         .parse::<SQLiteDialect>(sql)
+    ///         .is_err()
+    /// );
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn with_identifier_case(mut self, case: IdentifierCase) -> Self {
+        self.identifier_case = case;
+        self
+    }
+
+    /// Returns the comparison a creation takes a name under.
+    #[must_use]
+    #[inline]
+    pub const fn identifier_case(&self) -> IdentifierCase {
+        self.identifier_case
+    }
+
     /// Returns how grants resolve against the objects the input creates.
     #[must_use]
     #[inline]
@@ -107,8 +152,8 @@ impl ParseOptions {
     }
 
     /// Returns the owned settings used during ingestion.
-    pub(super) fn into_parts(self) -> (AccessResolution, PostgresCatalog) {
-        (self.access_resolution, self.postgres_catalog)
+    pub(super) fn into_parts(self) -> (AccessResolution, PostgresCatalog, IdentifierCase) {
+        (self.access_resolution, self.postgres_catalog, self.identifier_case)
     }
 
     /// Starts statement-by-statement ingestion under these options.

@@ -542,13 +542,10 @@ pub(crate) fn resolve_target_in_iter<'a, T: TableLike>(
 pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
     object_name: &ObjectName,
+    case: IdentifierCase,
 ) -> Result<Option<&'a T>, LookupError> {
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-    resolve_target_in_iter(
-        tables,
-        &target_name_of_idents(schema_ident, table_ident),
-        IdentifierCase::AsWritten,
-    )
+    resolve_target_in_iter(tables, &target_name_of_idents(schema_ident, table_ident), case)
 }
 
 /// Resolves a written target name against an iterator of relations of one
@@ -726,13 +723,14 @@ pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, 'path, T: Tab
     tables: impl Iterator<Item = &'a T>,
     object_name: &ObjectName,
     search_path: impl Iterator<Item = (&'path str, bool)>,
+    case: IdentifierCase,
 ) -> Result<Option<&'a T>, LookupError> {
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
     resolve_target_on_search_path_in_iter(
         tables,
         &target_name_of_idents(schema_ident, table_ident),
         search_path,
-        IdentifierCase::AsWritten,
+        case,
         // Only tables are in hand here, so a view holding the name does not
         // end the walk, which is the creation-time namespace question this
         // crate answers separately.
@@ -1029,15 +1027,20 @@ mod tests {
     #[test]
     fn resolve_in_iter_rejects_overqualified_names() {
         let tables = fixtures();
-        let resolved = resolve_table_object_name_in_iter(tables.iter(), &obj(&[("users", false)]))
-            .expect("resolves")
-            .expect("matches");
+        let resolved = resolve_table_object_name_in_iter(
+            tables.iter(),
+            &obj(&[("users", false)]),
+            IdentifierCase::AsWritten,
+        )
+        .expect("resolves")
+        .expect("matches");
         assert_eq!(resolved.table_name(), "users");
 
         assert!(matches!(
             resolve_table_object_name_in_iter(
                 tables.iter(),
                 &obj(&[("a", false), ("b", false), ("c", false)]),
+                IdentifierCase::AsWritten,
             ),
             Err(LookupError::InvalidObjectName { .. })
         ));
@@ -1052,6 +1055,7 @@ mod tests {
             tables.iter(),
             &obj(&[("s", false), ("scoped", false)]),
             default_path(),
+            IdentifierCase::AsWritten,
         )
         .expect("resolves")
         .expect("matches");
@@ -1062,6 +1066,7 @@ mod tests {
             tables.iter(),
             &obj(&[("only_pub", false)]),
             default_path(),
+            IdentifierCase::AsWritten,
         )
         .expect("resolves")
         .expect("matches");
@@ -1074,6 +1079,7 @@ mod tests {
                 tables.iter(),
                 &obj(&[("things", false)]),
                 default_path(),
+                IdentifierCase::AsWritten,
             ),
             Err(LookupError::AmbiguousTableLookup { ref object_name, .. }) if object_name == "things"
         ));
@@ -1083,6 +1089,7 @@ mod tests {
             tables.iter(),
             &obj(&[("users", false)]),
             [("s", false), ("public", false)].into_iter(),
+            IdentifierCase::AsWritten,
         )
         .expect("resolves")
         .expect("matches");
@@ -1092,6 +1099,7 @@ mod tests {
             tables.iter(),
             &obj(&[("users", false)]),
             [("public", false), ("s", false)].into_iter(),
+            IdentifierCase::AsWritten,
         )
         .expect("resolves")
         .expect("matches");
@@ -1103,6 +1111,7 @@ mod tests {
                 tables.iter(),
                 &obj(&[("only_pub", false)]),
                 core::iter::once(("s", false)),
+                IdentifierCase::AsWritten,
             )
             .unwrap()
             .is_none()
@@ -1114,6 +1123,7 @@ mod tests {
                 tables.iter(),
                 &obj(&[("absent", false)]),
                 default_path(),
+                IdentifierCase::AsWritten,
             )
             .unwrap()
             .is_none()

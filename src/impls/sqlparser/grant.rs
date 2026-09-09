@@ -308,6 +308,7 @@ pub(crate) fn validate_granted_columns(
     objects: Option<&GrantObjects>,
     database_tables: &[&CreateTable],
     search_path: &[(&str, bool)],
+    case: IdentifierCase,
 ) -> Result<(), crate::errors::Error> {
     let Privileges::Actions(actions) = privileges else {
         return Ok(());
@@ -322,6 +323,7 @@ pub(crate) fn validate_granted_columns(
                 database_tables.iter().copied(),
                 name,
                 search_path.iter().copied(),
+                case,
             )
             .map_err(crate::errors::Error::IdentifierLookupError)?
         } else {

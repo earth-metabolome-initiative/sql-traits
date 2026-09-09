@@ -6128,7 +6128,8 @@ mod tests {
                 Err(crate::errors::Error::IdentifierLookupError(
                     crate::errors::LookupError::TableLookupConflict {
                         table,
-                        conflicting_table
+                        conflicting_table,
+                        ..
                     }
                 )) if table == "foo" && conflicting_table == "foo"
             ));
@@ -6148,7 +6149,8 @@ mod tests {
                 Err(crate::errors::Error::IdentifierLookupError(
                     crate::errors::LookupError::TableLookupConflict {
                         table,
-                        conflicting_table
+                        conflicting_table,
+                        ..
                     }
                 )) if table == "public.t" && conflicting_table == "t"
             ));
@@ -6168,7 +6170,8 @@ mod tests {
                 Err(crate::errors::Error::IdentifierLookupError(
                     crate::errors::LookupError::TableLookupConflict {
                         table,
-                        conflicting_table
+                        conflicting_table,
+                        ..
                     }
                 )) if table == "\"foo\"" && conflicting_table == "foo"
             ));
@@ -6240,7 +6243,8 @@ mod tests {
                 Err(crate::errors::Error::IdentifierLookupError(
                     crate::errors::LookupError::TableLookupConflict {
                         table,
-                        conflicting_table
+                        conflicting_table,
+                        ..
                     }
                 )) if table == "foo" && conflicting_table == "foo"
             ));
@@ -6260,7 +6264,8 @@ mod tests {
                 Err(crate::errors::Error::IdentifierLookupError(
                     crate::errors::LookupError::TableLookupConflict {
                         table,
-                        conflicting_table
+                        conflicting_table,
+                        ..
                     }
                 )) if table == "public.t" && conflicting_table == "t"
             ));
@@ -6280,7 +6285,8 @@ mod tests {
                 Err(crate::errors::Error::IdentifierLookupError(
                     crate::errors::LookupError::TableLookupConflict {
                         table,
-                        conflicting_table
+                        conflicting_table,
+                        ..
                     }
                 )) if table == "\"foo\"" && conflicting_table == "foo"
             ));
