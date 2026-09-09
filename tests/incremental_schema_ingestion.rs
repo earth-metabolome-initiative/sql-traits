@@ -136,8 +136,10 @@ fn postgres_catalog_and_created_collations_survive_incremental_statements() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    let column =
-        table.column("name", &database).expect("column lookup runs").expect("column exists");
+    let column = table
+        .column("name", &database, IdentifierCase::AsWritten)
+        .expect("column lookup runs")
+        .expect("column exists");
     let ColumnCollation::Named(collation) =
         column.collation(&database).expect("collation metadata resolves")
     else {
@@ -166,8 +168,18 @@ fn finished_schema_resumes_ingestion() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    assert!(table.column("id", &database).expect("column lookup runs").is_some());
-    assert!(table.column("label", &database).expect("column lookup runs").is_some());
+    assert!(
+        table
+            .column("id", &database, IdentifierCase::AsWritten)
+            .expect("column lookup runs")
+            .is_some()
+    );
+    assert!(
+        table
+            .column("label", &database, IdentifierCase::AsWritten)
+            .expect("column lookup runs")
+            .is_some()
+    );
 }
 
 #[test]
@@ -208,8 +220,10 @@ fn resumed_ingestion_preserves_options_and_created_collations() {
         .table_by_target(TargetName::new("u", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    let column =
-        table.column("name", &database).expect("column lookup runs").expect("column exists");
+    let column = table
+        .column("name", &database, IdentifierCase::AsWritten)
+        .expect("column lookup runs")
+        .expect("column exists");
     let ColumnCollation::Named(collation) =
         column.collation(&database).expect("collation metadata resolves")
     else {
@@ -234,7 +248,12 @@ fn batch_parsed_database_resumes_ingestion() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    assert!(table.column("label", &database).expect("column lookup runs").is_some());
+    assert!(
+        table
+            .column("label", &database, IdentifierCase::AsWritten)
+            .expect("column lookup runs")
+            .is_some()
+    );
 }
 
 #[test]
@@ -283,8 +302,10 @@ fn one_shot_parsed_database_resumes_with_options_and_collations() {
         .table_by_target(TargetName::new("u", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    let column =
-        table.column("name", &database).expect("column lookup runs").expect("column exists");
+    let column = table
+        .column("name", &database, IdentifierCase::AsWritten)
+        .expect("column lookup runs")
+        .expect("column exists");
     let ColumnCollation::Named(collation) =
         column.collation(&database).expect("collation metadata resolves")
     else {
@@ -310,12 +331,22 @@ fn snapshot_resumes_ingestion_independently() {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    assert!(table.column("label", &database).expect("column lookup runs").is_some());
+    assert!(
+        table
+            .column("label", &database, IdentifierCase::AsWritten)
+            .expect("column lookup runs")
+            .is_some()
+    );
 
     let original = input.finish();
     let table = original
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    assert!(table.column("label", &original).expect("column lookup runs").is_none());
+    assert!(
+        table
+            .column("label", &original, IdentifierCase::AsWritten)
+            .expect("column lookup runs")
+            .is_none()
+    );
 }

@@ -13,8 +13,8 @@ use sqlparser::ast::{
 
 use crate::{
     errors::LookupError,
+    structs::IdentifierCase,
     traits::{DatabaseLike, Metadata, TableLike, column::ColumnLike, function_like::FunctionLike},
-    utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 
 /// Helper function to determine if an expression evaluates to a constant
@@ -272,7 +272,9 @@ where
     }
 
     // Verify it's a textual column
-    if !check_constraint.column(database, &col_ident.value)?.is_some_and(|c| c.is_textual(database))
+    if !check_constraint
+        .column(database, &col_ident.value, IdentifierCase::AsWritten)?
+        .is_some_and(|c| c.is_textual(database))
     {
         return Ok(None);
     }
@@ -467,7 +469,7 @@ where
                         && let Value::SingleQuotedString(s) = &val_wrapper.value
                         && s.is_empty()
                         && check_constraint
-                            .column(database, &ident.value)?
+                            .column(database, &ident.value, IdentifierCase::AsWritten)?
                             .is_some_and(|c| c.is_textual(database))
                     {
                         return Ok(true);
@@ -706,9 +708,9 @@ pub trait CheckConstraintLike:
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
     /// };
-    /// let col = cc1.column(&db, "id")?.unwrap();
+    /// let col = cc1.column(&db, "id", IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(col, *id);
-    /// assert!(cc2.column(&db, "id")?.is_none());
+    /// assert!(cc2.column(&db, "id", IdentifierCase::AsWritten)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -717,13 +719,10 @@ pub trait CheckConstraintLike:
         &'db self,
         database: &'db Self::DB,
         name: &str,
+        case: IdentifierCase,
     ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError> {
         Ok(self.columns(database)?.find(|column| {
-            stored_identifier_matches_lookup(
-                column.column_name(),
-                column.column_name_is_quoted(),
-                name,
-            )
+            case.names_stored(column.column_name(), column.column_name_is_quoted(), name)
         }))
     }
 

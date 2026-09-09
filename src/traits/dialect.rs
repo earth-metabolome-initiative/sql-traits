@@ -63,7 +63,8 @@ pub trait DialectLike: Debug + Clone + Default + Send + Sync + Hash + Eq + Ord +
     ///         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
     ///         .expect("unambiguous lookup")
     ///         .unwrap();
-    ///     let col = table.column("flag", &db).expect("column lookup").unwrap();
+    ///     let col =
+    ///         table.column("flag", &db, IdentifierCase::AsWritten).expect("column lookup").unwrap();
     ///     db.dialect().is_bool(&db, col)
     /// }
     ///
@@ -106,7 +107,8 @@ pub trait DialectLike: Debug + Clone + Default + Send + Sync + Hash + Eq + Ord +
     ///         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
     ///         .expect("unambiguous lookup")
     ///         .unwrap();
-    ///     let col = table.column("id", &db).expect("column lookup").unwrap();
+    ///     let col =
+    ///         table.column("id", &db, IdentifierCase::AsWritten).expect("column lookup").unwrap();
     ///     db.dialect().is_uuid(&db, col)
     /// }
     ///

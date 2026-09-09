@@ -560,8 +560,9 @@ pub trait TriggerLike: Clone + Debug + Metadata + Send + Sync {
     /// let assignments: Vec<_> = trigger.maintenance_assignments(&db)?.collect();
     /// let brands_table =
     ///     db.table_by_target(TargetName::new("brands", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let edited_at_column = brands_table.column("edited_at", &db)?.unwrap();
-    /// let name_column = brands_table.column("name", &db)?.unwrap();
+    /// let edited_at_column =
+    ///     brands_table.column("edited_at", &db, IdentifierCase::AsWritten)?.unwrap();
+    /// let name_column = brands_table.column("name", &db, IdentifierCase::AsWritten)?.unwrap();
     ///
     /// assert_eq!(assignments.len(), 2);
     /// assert_eq!(assignments[0].0, edited_at_column);

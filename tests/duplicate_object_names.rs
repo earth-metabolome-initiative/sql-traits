@@ -242,7 +242,7 @@ fn if_not_exists_skips_a_taken_name() {
         db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
             .expect("unambiguous lookup")
             .expect("it exists")
-            .column("other", &db)
+            .column("other", &db, IdentifierCase::AsWritten)
             .expect("lookup")
             .is_none()
     );

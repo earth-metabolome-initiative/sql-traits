@@ -13,6 +13,7 @@ use sqlparser::{
 
 use crate::{
     errors::LookupError,
+    structs::IdentifierCase,
     traits::{DatabaseLike, TableLike},
 };
 
@@ -74,7 +75,8 @@ where
         match iter.next() {
             Some(Ok(MaintenanceToken::Assignment(col_name, expr))) => {
                 // Verify column exists
-                let Some(column) = table.column(&col_name, database)? else {
+                let Some(column) = table.column(&col_name, database, IdentifierCase::AsWritten)?
+                else {
                     return Err(MaintenanceBodyError::NotMaintenanceBody);
                 };
                 assignments.push((column, *expr));

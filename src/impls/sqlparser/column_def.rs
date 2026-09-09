@@ -152,7 +152,10 @@ mod tests {
             .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
             .expect("unambiguous lookup")
             .expect("table t exists");
-        let column = table.column(col, db).expect("column lookup").expect("column exists");
+        let column = table
+            .column(col, db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists");
         db.dialect().is_bool(db, column)
     }
 
@@ -161,7 +164,10 @@ mod tests {
             .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
             .expect("unambiguous lookup")
             .expect("table t exists");
-        let column = table.column(col, db).expect("column lookup").expect("column exists");
+        let column = table
+            .column(col, db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists");
         db.dialect().is_uuid(db, column)
     }
 
@@ -292,7 +298,10 @@ mod tests {
             .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
             .expect("unambiguous lookup")
             .expect("table t exists");
-        table.column(name, db).expect("column lookup").expect("column exists")
+        table
+            .column(name, db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists")
     }
 
     #[test]
@@ -549,14 +558,19 @@ mod tests {
             )
             .expect("unambiguous lookup")
             .expect("table app.t exists");
-        let column = table.column("name", &db).expect("column lookup").expect("column exists");
+        let column = table
+            .column("name", &db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
             panic!("expected a named collation");
         };
         assert_eq!(collation.postgres_deterministic(), Some(false));
-        let column =
-            table.column("child_name", &db).expect("column lookup").expect("column exists");
+        let column = table
+            .column("child_name", &db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
             panic!("expected a named collation");
@@ -948,7 +962,10 @@ mod tests {
             )
             .expect("unambiguous lookup")
             .expect("table app.t exists");
-        let column = table.column("name", &db).expect("column lookup").expect("column exists");
+        let column = table
+            .column("name", &db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
             panic!("expected a named collation");
@@ -1342,7 +1359,10 @@ mod tests {
             )
             .expect("unambiguous lookup")
             .expect("table app.t exists");
-        let column = table.column("name", &db).expect("column lookup").expect("column exists");
+        let column = table
+            .column("name", &db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
             panic!("expected a named collation");
@@ -1488,7 +1508,10 @@ mod tests {
             )
             .expect("unambiguous lookup")
             .expect("table exists");
-        let column = table.column("name", &db).expect("column lookup").expect("column exists");
+        let column = table
+            .column("name", &db, IdentifierCase::AsWritten)
+            .expect("column lookup")
+            .expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
             panic!("expected a named collation");

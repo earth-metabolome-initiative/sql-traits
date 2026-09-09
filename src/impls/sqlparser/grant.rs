@@ -338,7 +338,7 @@ pub(crate) fn validate_granted_columns(
 
         for column in actions.iter().filter_map(action_columns).flatten() {
             let known = table.columns.iter().any(|declared| {
-                identifiers_match(
+                case.identifiers_match(
                     declared.name.value.as_str(),
                     declared.name.quote_style.is_some(),
                     column.value.as_str(),

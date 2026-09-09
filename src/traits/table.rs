@@ -6,16 +6,14 @@ use core::{borrow::Borrow, fmt::Debug, hash::Hash};
 use crate::{
     errors::{Error, LookupError, ObjectKind},
     structs::{
-        SchemaFingerprint,
+        IdentifierCase, SchemaFingerprint,
         fingerprint::{FingerprintError, compute_persistence_v1},
     },
     traits::{
         ColumnLike, DatabaseLike, DocumentationMetadata, ForeignKeyLike, GrantLike, Metadata,
         PolicyLike, TableGrantLike, TriggerLike, check_constraint::CheckConstraintLike,
     },
-    utils::identifier_resolution::{
-        identifiers_match, normalize_identifier, stored_identifier_matches_lookup,
-    },
+    utils::identifier_resolution::{identifiers_match, normalize_identifier},
 };
 
 /// How a partitioned table routes a row to one of its partitions.
@@ -906,9 +904,10 @@ pub trait TableLike:
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
     /// assert_eq!(id_column.column_name(), "id");
-    /// let non_existent_column = table.column("non_existent", &db)?;
+    /// let non_existent_column = table.column("non_existent", &db, IdentifierCase::AsWritten)?;
     /// assert!(non_existent_column.is_none());
     /// # Ok(())
     /// # }
@@ -936,12 +935,12 @@ pub trait TableLike:
     ///     .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
     ///     .expect("Table should exist");
     ///
-    /// assert!(table.column("foo", &db)?.is_some());
-    /// assert!(table.column("\"foo\"", &db)?.is_some());
-    /// assert!(table.column("\"Foo\"", &db)?.is_none());
+    /// assert!(table.column("foo", &db, IdentifierCase::AsWritten)?.is_some());
+    /// assert!(table.column("\"foo\"", &db, IdentifierCase::AsWritten)?.is_some());
+    /// assert!(table.column("\"Foo\"", &db, IdentifierCase::AsWritten)?.is_none());
     ///
-    /// assert!(table.column("\"ColA\"", &db)?.is_some());
-    /// assert!(table.column("cola", &db)?.is_none());
+    /// assert!(table.column("\"ColA\"", &db, IdentifierCase::AsWritten)?.is_some());
+    /// assert!(table.column("cola", &db, IdentifierCase::AsWritten)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
@@ -950,13 +949,13 @@ pub trait TableLike:
         &'db self,
         name: &str,
         database: &'db Self::DB,
+        case: IdentifierCase,
     ) -> Result<Option<&'db <Self::DB as DatabaseLike>::Column>, LookupError>
     where
         Self: 'db,
     {
-        Ok(TableLike::columns(self, database)?.find(|col| {
-            stored_identifier_matches_lookup(col.column_name(), col.column_name_is_quoted(), name)
-        }))
+        Ok(TableLike::columns(self, database)?
+            .find(|col| case.names_stored(col.column_name(), col.column_name_is_quoted(), name)))
     }
 
     /// Returns the position of the named column in the table's column
@@ -983,9 +982,9 @@ pub trait TableLike:
     /// let table =
     ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     ///
-    /// assert_eq!(table.column_id_by_name("\"ID\"", &db)?, Some(0));
-    /// assert_eq!(table.column_id_by_name("ID", &db)?, Some(1));
-    /// assert_eq!(table.column_id_by_name("absent", &db)?, None);
+    /// assert_eq!(table.column_id_by_name("\"ID\"", &db, IdentifierCase::AsWritten)?, Some(0));
+    /// assert_eq!(table.column_id_by_name("ID", &db, IdentifierCase::AsWritten)?, Some(1));
+    /// assert_eq!(table.column_id_by_name("absent", &db, IdentifierCase::AsWritten)?, None);
     /// # Ok(())
     /// # }
     /// ```
@@ -994,13 +993,10 @@ pub trait TableLike:
         &self,
         name: &str,
         database: &Self::DB,
+        case: IdentifierCase,
     ) -> Result<Option<usize>, LookupError> {
         Ok(TableLike::columns(self, database)?.position(|column| {
-            stored_identifier_matches_lookup(
-                column.column_name(),
-                column.column_name_is_quoted(),
-                name,
-            )
+            case.names_stored(column.column_name(), column.column_name_is_quoted(), name)
         }))
     }
 
@@ -1116,8 +1112,12 @@ pub trait TableLike:
     ///     db.table_by_target(TargetName::new("table1", false), IdentifierCase::AsWritten)?.unwrap();
     /// let table2 =
     ///     db.table_by_target(TargetName::new("table2", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let table1_id = table1.column("id", &db)?.expect("Column 'id' should exist in table1");
-    /// let table2_id = table2.column("id", &db)?.expect("Column 'id' should exist in table2");
+    /// let table1_id = table1
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist in table1");
+    /// let table2_id = table2
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist in table2");
     /// assert!(table1.has_column(table1_id, &db)?);
     /// assert!(!table1.has_column(table2_id, &db)?);
     /// assert!(table2.has_column(table2_id, &db)?);
@@ -1441,8 +1441,10 @@ pub trait TableLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
     /// assert!(table.is_primary_key_column(&db, id_column)?);
     /// assert!(!table.is_primary_key_column(&db, name_column)?);
     ///
@@ -1455,10 +1457,10 @@ pub trait TableLike:
     /// let pair =
     ///     db.table_by_target(TargetName::new("pair", false), IdentifierCase::AsWritten)?.unwrap();
     /// for name in ["a", "b"] {
-    ///     let column = pair.column(name, &db)?.expect("column exists");
+    ///     let column = pair.column(name, &db, IdentifierCase::AsWritten)?.expect("column exists");
     ///     assert!(pair.is_primary_key_column(&db, column)?);
     /// }
-    /// let c = pair.column("c", &db)?.expect("column exists");
+    /// let c = pair.column("c", &db, IdentifierCase::AsWritten)?.expect("column exists");
     /// assert!(!pair.is_primary_key_column(&db, c)?);
     /// # Ok(())
     /// # }
@@ -2823,10 +2825,13 @@ pub trait TableLike:
     /// let host_table = db
     ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let id_column =
+    ///     host_table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
     /// let referenced_tables = host_table.referenced_tables_via_column(&db, id_column)?;
     /// assert_eq!(referenced_tables.len(), 1);
-    /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let name_column = host_table
+    ///     .column("name", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'name' should exist");
     /// let no_referenced_tables = host_table.referenced_tables_via_column(&db, name_column)?;
     /// assert_eq!(no_referenced_tables.len(), 0);
     /// # Ok(())
@@ -4481,8 +4486,9 @@ where
         &self,
         name: &str,
         database: &Self::DB,
+        case: IdentifierCase,
     ) -> Result<Option<usize>, LookupError> {
-        T::column_id_by_name(self, name, database)
+        T::column_id_by_name(self, name, database, case)
     }
 
     fn column_name_by_id<'db>(
@@ -4653,16 +4659,56 @@ mod tests {
                 .expect("Table 't' should exist");
 
             // Unquoted column created as Foo resolves as lowercase identifier.
-            assert!(table.column("foo", &db).expect("column lookup").is_some());
-            assert!(table.column("FOO", &db).expect("column lookup").is_some());
-            assert!(table.column("\"foo\"", &db).expect("column lookup").is_some());
-            assert!(table.column("\"Foo\"", &db).expect("column lookup").is_none());
+            assert!(
+                table
+                    .column("foo", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_some()
+            );
+            assert!(
+                table
+                    .column("FOO", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_some()
+            );
+            assert!(
+                table
+                    .column("\"foo\"", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_some()
+            );
+            assert!(
+                table
+                    .column("\"Foo\"", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_none()
+            );
 
             // Quoted column keeps exact case.
-            assert!(table.column("\"ColA\"", &db).expect("column lookup").is_some());
-            assert!(table.column("\"cola\"", &db).expect("column lookup").is_none());
-            assert!(table.column("cola", &db).expect("column lookup").is_none());
-            assert!(table.column("COLA", &db).expect("column lookup").is_none());
+            assert!(
+                table
+                    .column("\"ColA\"", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_some()
+            );
+            assert!(
+                table
+                    .column("\"cola\"", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_none()
+            );
+            assert!(
+                table
+                    .column("cola", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_none()
+            );
+            assert!(
+                table
+                    .column("COLA", &db, IdentifierCase::AsWritten)
+                    .expect("column lookup")
+                    .is_none()
+            );
         }
     }
 

@@ -36,17 +36,17 @@ fn a_column_ordinal_follows_the_identifier_rule() -> Result<(), Error> {
         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
         .expect("table t was created");
 
-    assert_eq!(table.column_id_by_name("\"ID\"", &db)?, Some(0));
-    assert_eq!(table.column_id_by_name("id", &db)?, Some(1));
+    assert_eq!(table.column_id_by_name("\"ID\"", &db, IdentifierCase::AsWritten)?, Some(0));
+    assert_eq!(table.column_id_by_name("id", &db, IdentifierCase::AsWritten)?, Some(1));
     // A bare lookup folds before comparing, so it reaches the bare column and
     // never the quoted one.
-    assert_eq!(table.column_id_by_name("ID", &db)?, Some(1));
+    assert_eq!(table.column_id_by_name("ID", &db, IdentifierCase::AsWritten)?, Some(1));
     // A quoted lookup compares exactly, and the bare column is stored folded,
     // so the folded spelling quoted still reaches it.
-    assert_eq!(table.column_id_by_name("\"id\"", &db)?, Some(1));
-    assert_eq!(table.column_id_by_name("\"Name\"", &db)?, Some(2));
-    assert_eq!(table.column_id_by_name("name", &db)?, None);
-    assert_eq!(table.column_id_by_name("absent", &db)?, None);
+    assert_eq!(table.column_id_by_name("\"id\"", &db, IdentifierCase::AsWritten)?, Some(1));
+    assert_eq!(table.column_id_by_name("\"Name\"", &db, IdentifierCase::AsWritten)?, Some(2));
+    assert_eq!(table.column_id_by_name("name", &db, IdentifierCase::AsWritten)?, None);
+    assert_eq!(table.column_id_by_name("absent", &db, IdentifierCase::AsWritten)?, None);
 
     Ok(())
 }
@@ -68,7 +68,7 @@ fn a_column_name_and_its_ordinal_round_trip() -> Result<(), Error> {
             table.column_by_id(column_id, &db)?.expect("the ordinal is inside the column list");
         assert_eq!(table.column_name_by_id(column_id, &db)?, Some(column.column_name()));
         assert_eq!(
-            table.column_id_by_name(&as_lookup_text(column), &db)?,
+            table.column_id_by_name(&as_lookup_text(column), &db, IdentifierCase::AsWritten)?,
             Some(column_id),
             "the name at ordinal {column_id} answers that same ordinal"
         );
@@ -140,14 +140,14 @@ fn a_column_ordinal_is_asked_of_the_table_that_declares_it() -> Result<(), Error
         .table_by_target(TargetName::new("second", false), IdentifierCase::AsWritten)?
         .expect("table second was created");
 
-    assert_eq!(first.column_id_by_name("id", &db)?, Some(0));
-    assert_eq!(second.column_id_by_name("id", &db)?, Some(1));
+    assert_eq!(first.column_id_by_name("id", &db, IdentifierCase::AsWritten)?, Some(0));
+    assert_eq!(second.column_id_by_name("id", &db, IdentifierCase::AsWritten)?, Some(1));
 
     // A table the database does not hold answers with the object error rather
     // than a missing column.
     let other = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE first (id INT);")?;
     assert!(matches!(
-        second.column_id_by_name("id", &other),
+        second.column_id_by_name("id", &other, IdentifierCase::AsWritten),
         Err(LookupError::ObjectNotInDatabase { .. })
     ));
     assert!(matches!(
@@ -171,7 +171,10 @@ fn the_navigation_accessors_answer_the_same_through_a_reference() -> Result<(), 
         .expect("table t was created");
     let by_reference = &table;
 
-    assert_eq!(TableLike::column_id_by_name(by_reference, "b", &db)?, Some(1));
+    assert_eq!(
+        TableLike::column_id_by_name(by_reference, "b", &db, IdentifierCase::AsWritten)?,
+        Some(1)
+    );
     assert_eq!(TableLike::column_name_by_id(by_reference, 0, &db)?, Some("a"));
     assert_eq!(TableLike::primary_key_column_ids(by_reference, &db)?, vec![1, 0]);
 
