@@ -20,7 +20,7 @@ use crate::{
     utils::{
         identifier_resolution::stored_identifier_matches_lookup,
         object_name::{
-            function_has_stored_identity, resolve_function_in_iter,
+            function_has_stored_identity, relation_name_is_claimed, resolve_function_in_iter,
             resolve_function_on_search_path_in_iter, resolve_one_function, resolve_target_in_iter,
             resolve_target_on_search_path_in_iter, resolve_view_in_iter,
             resolve_view_on_search_path_in_iter,
@@ -564,7 +564,13 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
         target: TargetName<'_>,
         case: IdentifierCase,
     ) -> Result<Option<&Self::Table>, LookupError> {
-        resolve_target_on_search_path_in_iter(self.tables(), &target, self.search_path(), case)
+        resolve_target_on_search_path_in_iter(
+            self.tables(),
+            &target,
+            self.search_path(),
+            case,
+            |key| relation_name_is_claimed(self, key, case),
+        )
     }
 
     /// Resolves a name a statement wrote into the plain view it denotes,
@@ -581,7 +587,13 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
         target: TargetName<'_>,
         case: IdentifierCase,
     ) -> Result<Option<&Self::View>, LookupError> {
-        resolve_view_on_search_path_in_iter(self.views(), &target, self.search_path(), case)
+        resolve_view_on_search_path_in_iter(
+            self.views(),
+            &target,
+            self.search_path(),
+            case,
+            |key| relation_name_is_claimed(self, key, case),
+        )
     }
 
     /// Resolves a name a statement wrote into the materialized view it denotes,
@@ -603,6 +615,7 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
             &target,
             self.search_path(),
             case,
+            |key| relation_name_is_claimed(self, key, case),
         )
     }
 

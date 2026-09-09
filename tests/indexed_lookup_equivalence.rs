@@ -1,11 +1,11 @@
-//! Differential test: the indexed table readers must answer exactly what the
-//! original linear scan answered.
+//! Differential test: the indexed relation readers must answer exactly what a
+//! linear scan answers, under every identifier comparison.
 //!
-//! The oracles here reproduce the pre-index scan arms verbatim using only the
-//! public API, and are compared against `DatabaseLike::table`,
-//! `DatabaseLike::resolve_target_table`, and the `ParserDB` object-name
-//! resolvers over a fixture of adversarial spellings (quote states, case,
-//! bare versus explicit `public`, multiple schemas, multi-entry search paths).
+//! The oracles here implement the documented rule directly using only the
+//! public API, and are compared against `DatabaseLike::resolve_target_table`,
+//! `DatabaseLike::table_by_target` and the `ParserDB` object-name resolvers
+//! over a fixture of adversarial spellings (quote states, case, bare versus
+//! explicit `public`, multiple schemas, multi-entry search paths).
 #![allow(clippy::expect_used)]
 
 use sql_traits::{
@@ -34,6 +34,9 @@ const FIXTURE: &str = "
     CREATE TABLE app.\"Keyed\" (id INT);
     CREATE TABLE app_2.other (id INT);
     CREATE TABLE \"Odd Space\" (id INT);
+    CREATE VIEW app.bare_a AS SELECT id FROM bare_a;
+    CREATE MATERIALIZED VIEW app_2.plain AS SELECT id FROM app.plain;
+    CREATE VIEW app_2.\"MIXED\" AS SELECT id FROM \"Mixed\";
 ";
 
 fn fixture_variants() -> Vec<(ParserDB, String)> {
@@ -149,33 +152,62 @@ fn outcome(result: &Result<Option<&Table>, LookupError>) -> String {
     }
 }
 
-/// Pre-index default of `DatabaseLike::resolve_target_table`.
-fn oracle_resolve<'a>(
+/// Scan oracle for the search-path resolver under any comparison.
+///
+/// Tables, views and materialized views share one pool of names, so a schema
+/// holding the name under any kind ends the walk whether or not it holds a
+/// table.
+fn oracle_resolve_with<'a>(
     db: &'a ParserDB,
     target: &TargetName<'_>,
+    case: IdentifierCase,
 ) -> Result<Option<&'a Table>, LookupError> {
-    let name = target.name();
-    let name_quoted = target.name_is_quoted();
-    let matching = |schema: Option<&str>, schema_quoted: bool| -> Vec<&Table> {
-        db.tables()
-            .filter(|table| {
-                table_name_matches(table, name, name_quoted)
-                    && schema_pair_matches(table, schema, schema_quoted)
-            })
-            .collect()
-    };
-
-    if target.schema().is_some() {
-        return resolve_candidates(target, &matching(target.schema(), target.schema_is_quoted()));
+    if let Some(schema) = target.schema() {
+        let schema_key = case.compared_form(schema, target.schema_is_quoted());
+        return resolve_candidates(target, &matching_tables(db, target, case, &schema_key));
     }
 
     for (entry_schema, entry_quoted) in db.search_path().collect::<Vec<_>>() {
-        let candidates = matching(Some(entry_schema), entry_quoted);
-        if !candidates.is_empty() {
+        let schema_key = case.compared_form(entry_schema, entry_quoted);
+        let candidates = matching_tables(db, target, case, &schema_key);
+        if !candidates.is_empty() || name_is_claimed_by_a_view(db, target, case, &schema_key) {
             return resolve_candidates(target, &candidates);
         }
     }
     Ok(None)
+}
+
+/// Whether a view or a materialized view of either kind holds the name in the
+/// schema `schema_key` names, found by scanning.
+fn name_is_claimed_by_a_view(
+    db: &ParserDB,
+    target: &TargetName<'_>,
+    case: IdentifierCase,
+    schema_key: &str,
+) -> bool {
+    let name_key = case.compared_form(target.name(), target.name_is_quoted());
+    let claims = |schema: Option<&str>, schema_quoted: bool, name: &str, quoted: bool| {
+        let stored_schema = schema.map_or_else(
+            || String::from("public"),
+            |schema| case.compared_form(schema, schema_quoted).into_owned(),
+        );
+        stored_schema == schema_key && case.compared_form(name, quoted) == name_key
+    };
+    db.views().any(|view| {
+        claims(
+            view.view_schema(),
+            view.view_schema_is_quoted(),
+            view.view_name(),
+            view.view_name_is_quoted(),
+        )
+    }) || db.materialized_views().any(|view| {
+        claims(
+            view.view_schema(),
+            view.view_schema_is_quoted(),
+            view.view_name(),
+            view.view_name_is_quoted(),
+        )
+    })
 }
 
 fn object_name(parts: &[(&str, bool)]) -> ObjectName {
@@ -219,22 +251,6 @@ fn target_of_object_name(object_name: &ObjectName) -> TargetName<'_> {
     }
 }
 
-#[test]
-fn resolve_target_table_matches_scan() {
-    for (db, path_sql) in fixture_variants() {
-        for target in target_matrix() {
-            let shown = target.to_string();
-            let indexed = db.resolve_target_table(target.clone(), IdentifierCase::AsWritten);
-            let scanned = oracle_resolve(&db, &target);
-            assert_eq!(
-                outcome(&indexed),
-                outcome(&scanned),
-                "resolve_target_table({shown}, IdentifierCase::AsWritten) on {path_sql:?}"
-            );
-        }
-    }
-}
-
 /// Tables whose stored parts equal `schema_key` and the target's name under
 /// `case`, found by scanning.
 fn matching_tables<'a>(
@@ -254,27 +270,6 @@ fn matching_tables<'a>(
                 && stored_schema == schema_key
         })
         .collect()
-}
-
-/// Scan oracle for the search-path resolver under any comparison.
-fn oracle_resolve_with<'a>(
-    db: &'a ParserDB,
-    target: &TargetName<'_>,
-    case: IdentifierCase,
-) -> Result<Option<&'a Table>, LookupError> {
-    if let Some(schema) = target.schema() {
-        let schema_key = case.compared_form(schema, target.schema_is_quoted());
-        return resolve_candidates(target, &matching_tables(db, target, case, &schema_key));
-    }
-
-    for (entry_schema, entry_quoted) in db.search_path().collect::<Vec<_>>() {
-        let schema_key = case.compared_form(entry_schema, entry_quoted);
-        let candidates = matching_tables(db, target, case, &schema_key);
-        if !candidates.is_empty() {
-            return resolve_candidates(target, &candidates);
-        }
-    }
-    Ok(None)
 }
 
 /// Scan oracle for the parts lookup, which consults no search path.
@@ -352,7 +347,7 @@ fn object_name_resolvers_match_scan() {
             );
             assert_eq!(
                 outcome(&db.resolve_table_object_name_on_search_path(name)),
-                outcome(&oracle_resolve(&db, &target)),
+                outcome(&oracle_resolve_with(&db, &target, IdentifierCase::AsWritten)),
                 "resolve_table_object_name_on_search_path({name}) on {path_sql:?}"
             );
         }

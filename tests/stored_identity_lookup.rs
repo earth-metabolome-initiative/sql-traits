@@ -64,7 +64,7 @@ fn no_schema_and_public_are_distinct_identities() {
 /// The name is taken as stored, so a quote character stands for itself: it
 /// matches only a stored name that carries one.
 #[test]
-fn quoting_is_not_interpreted() {
+fn quoting_is_not_interpreted() -> Result<(), LookupError> {
     let db = db();
 
     assert!(db.table_by_stored_identity(None, "\"Docs\"").is_none());
@@ -73,13 +73,19 @@ fn quoting_is_not_interpreted() {
     assert!(db.table_by_stored_identity(Some("other"), "docs").is_none());
 
     // A table whose stored name really carries quote characters is reached by
-    // exactly those characters, and the written lookup cannot reach it at all
-    // without doubling them.
+    // exactly those characters, and a written reference reaches it too, since
+    // it takes the value apart from its quoting.
     let doubled = db
         .table_by_stored_identity(None, "\"Doubled\"")
         .expect("the stored name carries the quote characters");
     assert_eq!(doubled.stored_table_name(), "\"Doubled\"");
+    assert!(
+        db.table_by_target(TargetName::new("\"Doubled\"", true), IdentifierCase::AsWritten)?
+            .is_some()
+    );
     assert!(db.table_by_stored_identity(None, "Doubled").is_none());
+
+    Ok(())
 }
 
 /// The answer is the table stored under that exact schema, not a same-named one

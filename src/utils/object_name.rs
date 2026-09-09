@@ -570,6 +570,7 @@ fn resolve_relation_on_search_path<'a, 'path, R>(
     search_path: impl Iterator<Item = (&'path str, bool)>,
     case: IdentifierCase,
     key_of: impl Fn(&R, IdentifierCase) -> RelationKey,
+    claimed: impl Fn(&RelationKey) -> bool,
     render: impl Fn(&R) -> String,
 ) -> Result<Option<&'a R>, LookupError> {
     if target.schema().is_some() {
@@ -579,40 +580,50 @@ fn resolve_relation_on_search_path<'a, 'path, R>(
         return resolve_one_relation(target, &candidates, render);
     }
 
-    let name = case.compared_form(target.name(), target.name_is_quoted()).into_owned();
-    let path: Vec<String> = search_path
-        .map(|(schema, quoted)| case.compared_form(schema, quoted).into_owned())
-        .collect();
-    let mut winner = usize::MAX;
-    let mut candidates: Vec<&'a R> = Vec::new();
-    for relation in relations {
-        let key = key_of(relation, case);
-        if name != key.name {
+    let indexed: Vec<(RelationKey, &'a R)> =
+        relations.map(|relation| (key_of(relation, case), relation)).collect();
+    let mut key = RelationKey {
+        schema: String::new(),
+        name: case.compared_form(target.name(), target.name_is_quoted()).into_owned(),
+    };
+    for (entry_schema, entry_quoted) in search_path {
+        key.schema.clear();
+        key.schema.push_str(&case.compared_form(entry_schema, entry_quoted));
+        let candidates: Vec<&'a R> = indexed
+            .iter()
+            .filter_map(|(stored, relation)| (*stored == key).then_some(*relation))
+            .collect();
+        if candidates.is_empty() && !claimed(&key) {
             continue;
         }
-        for (entry, path_schema) in path.iter().take(winner.saturating_add(1)).enumerate() {
-            if path_schema == &key.schema {
-                if entry < winner {
-                    winner = entry;
-                    candidates = vec![relation];
-                } else {
-                    candidates.push(relation);
-                }
-                break;
-            }
-        }
+        // Reported under the written name: the entry qualifier is resolution
+        // machinery, not something the statement spelled.
+        return resolve_one_relation(target, &candidates, render);
     }
 
-    if winner == usize::MAX {
-        return Ok(None);
-    }
-    // Reported under the written name: the entry qualifier is resolution
-    // machinery, not something the statement spelled.
-    resolve_one_relation(target, &candidates, render)
+    Ok(None)
+}
+
+/// Whether any relation of any kind in `database` is stored under `key`.
+///
+/// Tables, views and materialized views share one pool of names, so this is
+/// what ends a search-path walk: a schema holding the name under another kind
+/// is not looked past.
+pub(crate) fn relation_name_is_claimed<DB: DatabaseLike>(
+    database: &DB,
+    key: &RelationKey,
+    case: IdentifierCase,
+) -> bool {
+    database.tables().any(|table| stored_table_key(table, case) == *key)
+        || database.views().any(|view| stored_view_key(view, case) == *key)
+        || database.materialized_views().any(|view| stored_view_key(view, case) == *key)
 }
 
 /// Resolves a written target name against an iterator of tables, trying each
 /// schema on `search_path` in turn for an unqualified name.
+///
+/// `claimed` answers whether a schema holds the name under any relation kind,
+/// which ends the walk even when no table of that name lives there.
 ///
 /// # Errors
 ///
@@ -624,6 +635,7 @@ pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
     target: &TargetName<'_>,
     search_path: impl Iterator<Item = (&'path str, bool)>,
     case: IdentifierCase,
+    claimed: impl Fn(&RelationKey) -> bool,
 ) -> Result<Option<&'a T>, LookupError> {
     resolve_relation_on_search_path(
         tables,
@@ -631,12 +643,16 @@ pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
         search_path,
         case,
         stored_table_key,
+        claimed,
         render_table_candidate,
     )
 }
 
 /// Resolves a written target name against an iterator of views of one kind,
 /// trying each schema on `search_path` in turn for an unqualified name.
+///
+/// `claimed` carries the same meaning it has for
+/// [`resolve_target_on_search_path_in_iter`].
 ///
 /// # Errors
 ///
@@ -648,6 +664,7 @@ pub(crate) fn resolve_view_on_search_path_in_iter<'a, 'path, V: ViewLike>(
     target: &TargetName<'_>,
     search_path: impl Iterator<Item = (&'path str, bool)>,
     case: IdentifierCase,
+    claimed: impl Fn(&RelationKey) -> bool,
 ) -> Result<Option<&'a V>, LookupError> {
     resolve_relation_on_search_path(
         views,
@@ -655,6 +672,7 @@ pub(crate) fn resolve_view_on_search_path_in_iter<'a, 'path, V: ViewLike>(
         search_path,
         case,
         stored_view_key,
+        claimed,
         render_view_candidate,
     )
 }
@@ -715,6 +733,10 @@ pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, 'path, T: Tab
         &target_name_of_idents(schema_ident, table_ident),
         search_path,
         IdentifierCase::AsWritten,
+        // Only tables are in hand here, so a view holding the name does not
+        // end the walk, which is the creation-time namespace question this
+        // crate answers separately.
+        |_| false,
     )
 }
 
@@ -772,8 +794,8 @@ mod tests {
 
     use super::{
         Qualifier, object_name_identifiers, object_name_last_part, qualifier_of,
-        render_table_candidate, render_view_candidate, require_local_object_name,
-        resolve_object_name, resolve_table_object_name_in_iter,
+        relation_name_is_claimed, render_table_candidate, render_view_candidate,
+        require_local_object_name, resolve_object_name, resolve_table_object_name_in_iter,
         resolve_table_object_name_on_search_path_in_iter, resolve_target_from_candidates,
         resolve_target_in_iter, resolve_view_on_search_path_in_iter, table_matches_object_name,
         table_matches_target, target_name_from_object_name, target_name_of_object_name,
@@ -1138,6 +1160,7 @@ mod tests {
             &TargetName::new("v", false),
             [("s", false)].into_iter(),
             IdentifierCase::AsWritten,
+            |key| relation_name_is_claimed(&db, key, IdentifierCase::AsWritten),
         )
         .expect("view resolves")
         .expect("view matches");

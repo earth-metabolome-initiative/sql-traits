@@ -1381,6 +1381,9 @@ impl ParserDBBuilder {
             &target_name_of_idents(schema_ident, name_ident),
             self.search_path(),
             IdentifierCase::AsWritten,
+            // Ingestion resolves within one kind, which is the creation-time
+            // namespace question this crate answers separately.
+            |_| false,
         )
     }
 
@@ -1396,6 +1399,9 @@ impl ParserDBBuilder {
             &target_name_of_idents(schema_ident, name_ident),
             self.search_path(),
             IdentifierCase::AsWritten,
+            // Ingestion resolves within one kind, which is the creation-time
+            // namespace question this crate answers separately.
+            |_| false,
         )
     }
 }

@@ -17,10 +17,14 @@ use sql_traits::{
     structs::TargetName,
     traits::{ColumnCollation, TypeMatch, grant::GrantRelation},
 };
-use sqlparser::ast::{
-    Action, ConstraintReferenceMatchKind, CreatePolicyCommand, CreatePolicyType, Expr,
-    FunctionCalledOnNull, FunctionDefinitionSetParam, FunctionSecurity, Grantee, Owner, Query,
-    TriggerEvent, TriggerObjectKind, TriggerPeriod,
+use sqlparser::{
+    ast::{
+        Action, ConstraintReferenceMatchKind, CreatePolicyCommand, CreatePolicyType, Expr,
+        FunctionCalledOnNull, FunctionDefinitionSetParam, FunctionSecurity, Grantee, Owner, Query,
+        Statement, TriggerEvent, TriggerObjectKind, TriggerPeriod,
+    },
+    dialect::GenericDialect,
+    parser::Parser,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -42,6 +46,9 @@ struct MemoryCatalog {
     roles: Vec<MemoryRole>,
     table_grants: Vec<MemoryTableGrant>,
     column_grants: Vec<MemoryColumnGrant>,
+    /// Schemas an unqualified name resolves against, in order. Empty answers
+    /// `public` alone, as the inherited body does.
+    search_path: Vec<(String, bool)>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -216,6 +223,13 @@ impl DatabaseLike for MemoryCatalog {
 
     fn timezone(&self) -> Option<&str> {
         None
+    }
+
+    fn search_path(&self) -> impl Iterator<Item = (&str, bool)> {
+        self.search_path
+            .iter()
+            .map(|(name, quoted)| (name.as_str(), *quoted))
+            .chain(core::iter::once(("public", false)).filter(|_| self.search_path.is_empty()))
     }
 
     fn tables(&self) -> impl Iterator<Item = &Self::Table> {
@@ -1072,6 +1086,28 @@ fn function(schema: Option<&str>, name: &str, argument_types: &[&str]) -> Memory
     }
 }
 
+/// A relation of a view kind, defined by a projection nobody inspects here.
+fn view(schema: Option<&str>, name: &str, materialized: bool) -> MemoryView {
+    let statements = Parser::parse_sql(&GenericDialect {}, "SELECT id FROM docs")
+        .expect("the projection parses");
+    let definition = statements
+        .into_iter()
+        .find_map(|statement| {
+            match statement {
+                Statement::Query(query) => Some(*query),
+                _ => None,
+            }
+        })
+        .expect("the projection is a query");
+    MemoryView {
+        schema: schema.map(String::from),
+        name: String::from(name),
+        materialized,
+        definition,
+        declared_column_names: Vec::new(),
+    }
+}
+
 /// Two tables named the same in two schemas, one of them the default schema
 /// the inherited resolver walks.
 fn catalog() -> MemoryCatalog {
@@ -1313,7 +1349,9 @@ fn the_inherited_resolvers_take_the_comparison_from_the_caller() -> Result<(), L
 /// is the default schema's, and they carry the comparison too.
 #[test]
 fn the_inherited_parts_lookups_ignore_the_search_path() -> Result<(), LookupError> {
-    let catalog = catalog();
+    let mut catalog = catalog();
+    catalog.views = vec![view(None, "Recent", false)];
+    catalog.materialized_views = vec![view(None, "Counted", true)];
 
     // `docs` sits in both the default schema and `app`, and the parts lookup
     // answers only the one the target names.
@@ -1323,31 +1361,78 @@ fn the_inherited_parts_lookups_ignore_the_search_path() -> Result<(), LookupErro
             .and_then(TableLike::table_schema),
         None
     );
+    let quoted_qualifier = || TargetName::new("docs", false).with_schema("APP", true);
+    assert!(catalog.table_by_target(quoted_qualifier(), IdentifierCase::AsWritten)?.is_none());
     assert_eq!(
         catalog
-            .table_by_target(
-                TargetName::new("docs", false).with_schema("APP", false),
-                IdentifierCase::Folded,
-            )?
+            .table_by_target(quoted_qualifier(), IdentifierCase::Folded)?
             .and_then(TableLike::table_schema),
         Some("app")
     );
 
+    let touch = || TargetName::new("TOUCH", false).with_schema("app", false);
+    assert!(catalog.function_by_target(touch(), IdentifierCase::AsWritten)?.is_some());
+    assert!(catalog.function_by_target(touch(), IdentifierCase::Exact)?.is_none());
+
+    // Both view lookups thread the comparison too: a stored name nobody quoted
+    // folds under PostgreSQL's rule and stands as written under an exact one.
+    let recent = || TargetName::new("recent", false);
+    assert!(catalog.view_by_target(recent(), IdentifierCase::AsWritten)?.is_some());
+    assert!(catalog.view_by_target(recent(), IdentifierCase::Exact)?.is_none());
     assert!(
-        catalog
-            .function_by_target(
-                TargetName::new("touch", false).with_schema("app", false),
-                IdentifierCase::AsWritten,
-            )?
-            .is_some()
+        catalog.view_by_target(TargetName::new("Recent", false), IdentifierCase::Exact)?.is_some()
     );
+    let counted = || TargetName::new("counted", false);
+    assert!(catalog.materialized_view_by_target(counted(), IdentifierCase::Folded)?.is_some());
+    assert!(catalog.materialized_view_by_target(counted(), IdentifierCase::Exact)?.is_none());
+
+    // Each kind answers only its own pool of names.
+    assert!(catalog.view_by_target(counted(), IdentifierCase::Folded)?.is_none());
+    assert!(catalog.materialized_view_by_target(recent(), IdentifierCase::Folded)?.is_none());
     assert!(
         catalog.view_by_target(TargetName::new("docs", false), IdentifierCase::Folded)?.is_none()
     );
+
+    Ok(())
+}
+
+/// Tables, views and materialized views share one pool of names, so a schema
+/// holding the name under any kind ends the walk, which is what the database
+/// does and what the indexed resolver already did.
+#[test]
+fn the_inherited_resolver_reads_one_pool_of_names() -> Result<(), LookupError> {
+    let mut catalog = catalog();
+    catalog.search_path = vec![(String::from("app"), false), (String::from("public"), false)];
+    catalog.tables = vec![table(None, "docs")];
+    catalog.columns = vec![column(None, "docs", "id")];
+    catalog.views = vec![view(Some("app"), "docs", false)];
+
+    // `app` holds the name as a view, so the table in the default schema is
+    // not reached, and asking for the view answers it.
     assert!(
         catalog
-            .materialized_view_by_target(TargetName::new("docs", false), IdentifierCase::Exact)?
+            .resolve_target_table(TargetName::new("docs", false), IdentifierCase::AsWritten)?
             .is_none()
+    );
+    assert!(
+        catalog
+            .resolve_target_view(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+            .is_some()
+    );
+
+    // The mirror: a table earlier on the path shadows a view later on it.
+    catalog.tables = vec![table(Some("app"), "notes")];
+    catalog.columns = vec![column(Some("app"), "notes", "id")];
+    catalog.views = vec![view(None, "notes", false)];
+    assert!(
+        catalog
+            .resolve_target_view(TargetName::new("notes", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
+    assert!(
+        catalog
+            .resolve_target_table(TargetName::new("notes", false), IdentifierCase::AsWritten)?
+            .is_some()
     );
 
     Ok(())
