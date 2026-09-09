@@ -121,6 +121,7 @@ mod tests {
 
     use crate::{
         prelude::ParserDB,
+        structs::{IdentifierCase, TargetName},
         traits::{ColumnLike, DatabaseLike, ForeignKeyLike, TableLike},
     };
 
@@ -133,7 +134,10 @@ mod tests {
             CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let child = db.table(None, "child").unwrap();
+        let child = db
+            .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
         assert!(fk.foreign_key_name().is_none(), "inline REFERENCES has no name");
     }
@@ -150,7 +154,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let child = db.table(None, "child").unwrap();
+        let child = db
+            .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
         assert!(!fk.on_delete_cascade(&db));
     }
@@ -168,7 +175,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let child = db.table(None, "child").unwrap();
+        let child = db
+            .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
 
         let host_names: Vec<&str> = fk
@@ -195,7 +205,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let t = db.table(None, "t").unwrap();
+        let t = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let fk = t.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
 
         assert_eq!(fk.host_table(&db).table_name(), "t");
@@ -214,7 +227,10 @@ mod tests {
             CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES Parent(id));
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let child = db.table(None, "child").unwrap();
+        let child = db
+            .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
         assert_eq!(fk.referenced_table(&db).expect("ref table lookup").table_name(), "parent");
     }
@@ -229,7 +245,10 @@ mod tests {
             CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let child = db.table(None, "child").unwrap();
+        let child = db
+            .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let fk = child.foreign_keys(&db).expect("fk lookup").next().expect("FK should exist");
         assert!(matches!(fk.match_kind(&db), ConstraintReferenceMatchKind::Simple));
     }

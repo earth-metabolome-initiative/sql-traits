@@ -78,7 +78,10 @@ fn an_ownership_change_records_the_owner() {
         parse("CREATE ROLE someone; ALTER TABLE t OWNER TO someone").expect("ownership recorded");
 
     assert_eq!(database.tables().count(), 1);
-    let table = database.table(None, "t").expect("t survives");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t survives");
     assert_eq!(table.columns(&database).expect("t is in this database").count(), 3);
     assert_eq!(table.owner(&database), Ok(Some("someone")));
 }
@@ -100,7 +103,10 @@ fn a_dump_naming_an_owner_it_never_creates_needs_the_permissive_setting() {
         .with_access_resolution(AccessResolution::OpenWorld)
         .parse::<PostgreSqlDialect>(&sql)
         .expect("a dump names owners it does not create");
-    let table = database.table(None, "t").expect("t survives");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t survives");
     assert_eq!(table.owner(&database), Ok(Some("someone")));
 }
 
@@ -110,7 +116,10 @@ fn a_dump_naming_an_owner_it_never_creates_needs_the_permissive_setting() {
 fn operations_over_things_the_model_does_not_describe_change_nothing() {
     let bare = ParserDB::parse::<PostgreSqlDialect>(TABLE).expect("the table alone parses");
     let shape = |database: &ParserDB| {
-        let table = database.table(None, "t").expect("t survives");
+        let table = database
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("t survives");
         (
             database.tables().count(),
             table.columns(database).expect("t is in this database").count(),
@@ -172,7 +181,10 @@ fn vendor_operations_parse_under_their_dialects() {
 fn a_multi_operation_statement_treats_each_operation_on_its_own() {
     let database = parse("CREATE ROLE someone; ALTER TABLE t OWNER TO someone, ADD COLUMN x INT")
         .expect("ownership is recorded, the column is added");
-    let table = database.table(None, "t").expect("t survives");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t survives");
     assert_eq!(table.columns(&database).expect("t is in this database").count(), 4);
     assert_eq!(table.owner(&database), Ok(Some("someone")));
 

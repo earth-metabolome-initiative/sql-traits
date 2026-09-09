@@ -31,7 +31,8 @@ fn database(sql: &str) -> ParserDB {
 
 fn column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .columns(database)
         .expect("table is in this database")
@@ -41,7 +42,8 @@ fn column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
 
 fn local_column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .local_columns(database)
         .expect("table is in this database")
@@ -51,7 +53,8 @@ fn local_column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
 
 fn parent_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .inherits_from(database)
         .expect("table is in this database")
@@ -61,7 +64,8 @@ fn parent_names(database: &ParserDB, table_name: &str) -> Vec<String> {
 
 fn root_name(database: &ParserDB, table_name: &str) -> Option<String> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .partition_root(database)
         .expect("table is in this database")
@@ -97,7 +101,10 @@ fn a_parent_answers_the_tables_inheriting_from_it() {
          CREATE TABLE unrelated (id INT);",
     );
 
-    let docs = database.table(None, "docs").expect("table exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let children: Vec<_> = docs
         .inheritors(&database)
         .expect("table is in this database")
@@ -105,7 +112,10 @@ fn a_parent_answers_the_tables_inheriting_from_it() {
         .collect();
     assert_eq!(children, ["public_docs", "secret_docs"]);
 
-    let unrelated = database.table(None, "unrelated").expect("table exists");
+    let unrelated = database
+        .table_by_target(TargetName::new("unrelated", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(unrelated.inheritors(&database).expect("table is in this database").count(), 0);
 }
 
@@ -123,7 +133,10 @@ fn only_direct_parents_and_children_are_answered() {
     assert_eq!(parent_names(&database, "g3"), ["g2"]);
     assert_eq!(parent_names(&database, "g2"), ["g1"]);
 
-    let g1 = database.table(None, "g1").expect("table exists");
+    let g1 = database
+        .table_by_target(TargetName::new("g1", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let children: Vec<_> = g1
         .inheritors(&database)
         .expect("table is in this database")
@@ -167,7 +180,10 @@ fn a_not_null_survives_whichever_side_states_it() {
          CREATE TABLE nc (loosened INT, tightened INT NOT NULL) INHERITS (np);",
     );
 
-    let table = database.table(None, "nc").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("nc", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let nullability: Vec<(String, bool)> = table
         .columns(&database)
         .expect("table is in this database")
@@ -203,7 +219,10 @@ fn a_child_receives_defaults_and_checks_but_no_key_of_its_own() {
          CREATE TABLE chi (own INT) INHERITS (par);",
     );
 
-    let child = database.table(None, "chi").expect("table exists");
+    let child = database
+        .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     assert_eq!(column_names(&database, "chi"), ["keyed", "uniq", "defaulted", "checked", "own"]);
 
@@ -219,7 +238,10 @@ fn a_child_receives_defaults_and_checks_but_no_key_of_its_own() {
     let keyed = child.column("keyed", &database).expect("lookup succeeds").expect("column exists");
     assert!(!keyed.is_nullable(&database).expect("column is in this database"));
 
-    let parent = database.table(None, "par").expect("table exists");
+    let parent = database
+        .table_by_target(TargetName::new("par", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(parent.primary_key_columns(&database).expect("in database").count(), 1);
 }
 
@@ -230,7 +252,10 @@ fn a_check_written_on_its_own_is_inherited_too() {
          CREATE TABLE tc (extra INT) INHERITS (tp);",
     );
 
-    let child = database.table(None, "tc").expect("table exists");
+    let child = database
+        .table_by_target(TargetName::new("tc", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(child.check_constraints(&database).expect("in database").count(), 1);
 }
 
@@ -278,7 +303,10 @@ fn a_column_a_parent_renames_or_retypes_changes_in_the_child_too() {
 
     assert_eq!(column_names(&database, "chi"), ["a", "renamed", "c", "own"]);
 
-    let child = database.table(None, "chi").expect("table exists");
+    let child = database
+        .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let retyped = child.column("c", &database).expect("lookup succeeds").expect("column exists");
     assert_eq!(retyped.data_type(&database), "BIGINT");
 }
@@ -459,7 +487,10 @@ fn a_table_without_a_parent_is_left_alone() {
     assert_eq!(local_column_names(&database, "plain"), ["a", "b"]);
     assert_eq!(parent_names(&database, "plain"), Vec::<String>::new());
 
-    let table = database.table(None, "plain").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("plain", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(table.primary_key_columns(&database).expect("in database").count(), 1);
 }
 
@@ -471,7 +502,10 @@ fn the_accessors_answer_the_same_through_a_reference() {
          CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
          CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     );
-    let child = database.table(None, "secret_docs").expect("table exists");
+    let child = database
+        .table_by_target(TargetName::new("secret_docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let by_reference = &child;
 
     assert_eq!(
@@ -489,18 +523,27 @@ fn the_accessors_answer_the_same_through_a_reference() {
         ["classification"]
     );
 
-    let parent = database.table(None, "docs").expect("table exists");
+    let parent = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let parent_reference = &parent;
     assert_eq!(TableLike::inheritors(parent_reference, &database).expect("in database").count(), 1);
 
-    let root = database.table(None, "evt").expect("table exists");
+    let root = database
+        .table_by_target(TargetName::new("evt", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let root_reference = &root;
     assert_eq!(TableLike::partitions(root_reference, &database).expect("in database").count(), 1);
     assert_eq!(TableLike::partition_strategy(root_reference), Some(PartitionStrategy::Range));
     assert!(TableLike::is_partitioned(root_reference));
     assert!(!TableLike::is_partition(root_reference, &database).expect("in database"));
 
-    let partition = database.table(None, "evt_low").expect("table exists");
+    let partition = database
+        .table_by_target(TargetName::new("evt_low", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let partition_reference = &partition;
     assert_eq!(
         TableLike::partition_root(partition_reference, &database)
@@ -525,8 +568,14 @@ fn an_identity_stays_with_the_parent_while_a_stored_expression_comes_down() {
 
     assert_eq!(column_names(&database, "chi"), ["counted", "base", "doubled", "labelled", "own"]);
 
-    let child = database.table(None, "chi").expect("table exists");
-    let parent = database.table(None, "par").expect("table exists");
+    let child = database
+        .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
+    let parent = database
+        .table_by_target(TargetName::new("par", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     // Nullability as PostgreSQL reports it for the child. The identity is
     // withheld but the `NOT NULL` it implies is not, which is why `counted`
     // is not nullable even though nothing spells it.
@@ -694,7 +743,10 @@ fn an_identity_spelled_the_other_way_is_withheld_just_the_same() {
 
     assert_eq!(column_names(&database, "chi"), ["counted", "plain", "own"]);
 
-    let child = database.table(None, "chi").expect("table exists");
+    let child = database
+        .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let counted =
         child.column("counted", &database).expect("lookup succeeds").expect("column exists");
     // The identity is gone but the `NOT NULL` it implies stays.
@@ -749,7 +801,10 @@ fn a_partition_receives_the_roots_keys_and_an_inheritor_does_not() {
          CREATE TABLE child (extra TEXT) INHERITS (parent);",
     );
 
-    let part = database.table(None, "part").expect("table exists");
+    let part = database
+        .table_by_target(TargetName::new("part", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(
         part.primary_key_columns(&database)
             .expect("in database")
@@ -761,7 +816,10 @@ fn a_partition_receives_the_roots_keys_and_an_inheritor_does_not() {
     assert_eq!(part.unique_indices(&database).expect("in database").count(), 2);
     assert_eq!(part.foreign_keys(&database).expect("in database").count(), 1);
 
-    let child = database.table(None, "child").expect("table exists");
+    let child = database
+        .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(child.primary_key_columns(&database).expect("in database").count(), 0);
     assert_eq!(child.unique_indices(&database).expect("in database").count(), 0);
     assert_eq!(child.foreign_keys(&database).expect("in database").count(), 0);
@@ -783,7 +841,8 @@ fn a_partition_receives_the_roots_identity() {
 
     let carries_identity = |table_name: &str| {
         database
-            .table(None, table_name)
+            .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .columns
             .iter()
@@ -804,7 +863,10 @@ fn a_partition_receives_the_roots_identity() {
     // Either way the `NOT NULL` an identity implies is kept, which PostgreSQL
     // records as a not-null constraint on the partition as well.
     for table_name in ["part", "child"] {
-        let table = database.table(None, table_name).expect("table exists");
+        let table = database
+            .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table exists");
         assert!(!column(table, "id", &database).is_nullable(&database).expect("in database"));
     }
 }
@@ -819,7 +881,10 @@ fn a_root_answers_its_partitions_and_a_parent_its_inheritors() {
          CREATE TABLE child (extra TEXT) INHERITS (parent);",
     );
 
-    let root = database.table(None, "root").expect("table exists");
+    let root = database
+        .table_by_target(TargetName::new("root", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let partitions: Vec<_> = root
         .partitions(&database)
         .expect("in database")
@@ -828,7 +893,10 @@ fn a_root_answers_its_partitions_and_a_parent_its_inheritors() {
     assert_eq!(partitions, ["part_high", "part_low"]);
     assert_eq!(root.inheritors(&database).expect("in database").count(), 0);
 
-    let parent = database.table(None, "parent").expect("table exists");
+    let parent = database
+        .table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(parent.partitions(&database).expect("in database").count(), 0);
     assert_eq!(parent.inheritors(&database).expect("in database").count(), 1);
     assert!(!parent.is_partition(&database).expect("in database"));
@@ -844,11 +912,17 @@ fn a_root_with_no_partitions_is_still_partitioned() {
          CREATE TABLE plain (id INT);",
     );
 
-    let root = database.table(None, "root").expect("table exists");
+    let root = database
+        .table_by_target(TargetName::new("root", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(root.is_partitioned());
     assert_eq!(root.partitions(&database).expect("in database").count(), 0);
 
-    let plain = database.table(None, "plain").expect("table exists");
+    let plain = database
+        .table_by_target(TargetName::new("plain", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(!plain.is_partitioned());
 }
 
@@ -867,8 +941,13 @@ fn every_partitioning_strategy_is_read_whatever_its_spelling() {
          CREATE TABLE computed (a INT, b INT) PARTITION BY RANGE ((a + b));",
     );
 
-    let strategy =
-        |name: &str| database.table(None, name).expect("table exists").partition_strategy();
+    let strategy = |name: &str| {
+        database
+            .table_by_target(TargetName::new(name, false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table exists")
+            .partition_strategy()
+    };
     assert_eq!(strategy("by_range"), Some(PartitionStrategy::Range));
     assert_eq!(strategy("by_list"), Some(PartitionStrategy::List));
     assert_eq!(strategy("by_hash"), Some(PartitionStrategy::Hash));
@@ -893,7 +972,10 @@ fn a_partitioning_expression_of_another_dialect_is_not_a_strategy() {
     .expect("schema parses");
 
     for name in ["by_call", "by_column", "by_qualified_call"] {
-        let table = database.table(None, name).expect("table exists");
+        let table = database
+            .table_by_target(TargetName::new(name, false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table exists");
         assert_eq!(table.partition_strategy(), None);
         assert!(!table.is_partitioned());
     }
@@ -915,14 +997,20 @@ fn a_partition_can_itself_be_partitioned() {
          CREATE TABLE leaf PARTITION OF middle FOR VALUES IN ('eu');",
     );
 
-    let middle = database.table(None, "middle").expect("table exists");
+    let middle = database
+        .table_by_target(TargetName::new("middle", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(middle.is_partition(&database).expect("in database"));
     assert!(middle.is_partitioned());
     assert_eq!(middle.partition_strategy(), Some(PartitionStrategy::List));
     assert_eq!(root_name(&database, "middle").as_deref(), Some("top"));
 
     // The root's key reaches the whole chain, one level at a time.
-    let leaf = database.table(None, "leaf").expect("table exists");
+    let leaf = database
+        .table_by_target(TargetName::new("leaf", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(leaf.is_partition(&database).expect("in database"));
     assert!(!leaf.is_partitioned());
     assert_eq!(

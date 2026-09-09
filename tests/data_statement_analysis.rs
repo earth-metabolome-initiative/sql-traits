@@ -168,7 +168,10 @@ fn composite_primary_key_table_projection() {
     let source = projection_name("SELECT order_id, sku, qty FROM order_items", &db);
     assert_eq!(source, Some("order_items".to_string()));
 
-    let table = db.table(None, "order_items").unwrap();
+    let table = db
+        .table_by_target(TargetName::new("order_items", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .unwrap();
     let pk: Vec<&str> = table
         .primary_key_columns(&db)
         .expect("primary_key_columns succeeds")

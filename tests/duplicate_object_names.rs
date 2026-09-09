@@ -144,7 +144,8 @@ fn both_spellings_of_a_named_unique_constraint_read_back_the_name() {
     .expect("both build");
 
     let name_of = |table: &str| {
-        db.table(None, table)
+        db.table_by_target(TargetName::new(table, false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("the table exists")
             .unique_indices(&db)
             .expect("its unique indices")
@@ -238,7 +239,12 @@ fn if_not_exists_skips_a_taken_name() {
     assert_eq!(db.tables().count(), 1, "no second table was created");
     assert_eq!(db.indexes().count(), 1, "no second index was created");
     assert!(
-        db.table(None, "docs").expect("it exists").column("other", &db).expect("lookup").is_none()
+        db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("it exists")
+            .column("other", &db)
+            .expect("lookup")
+            .is_none()
     );
 }
 

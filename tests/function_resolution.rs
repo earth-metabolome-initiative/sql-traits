@@ -36,19 +36,19 @@ fn a_qualified_reference_resolves_and_an_unreachable_one_does_not() -> Result<()
     let db = db(TWO_SCHEMAS);
 
     let app = db
-        .resolve_target_function(target("app.helper"))?
+        .resolve_target_function(target("app.helper"), IdentifierCase::AsWritten)?
         .expect("the qualified reference resolves");
     assert_eq!(schema_of(app).as_deref(), Some("app"));
 
     let audit = db
-        .resolve_target_function(target("audit.helper"))?
+        .resolve_target_function(target("audit.helper"), IdentifierCase::AsWritten)?
         .expect("the qualified reference resolves");
     assert_eq!(schema_of(audit).as_deref(), Some("audit"));
 
     // Neither schema is on the default path, so the bare name reaches nothing
     // rather than answering whichever was declared first.
-    assert!(db.resolve_target_function(target("helper"))?.is_none());
-    assert!(db.resolve_target_function(target("absent"))?.is_none());
+    assert!(db.resolve_target_function(target("helper"), IdentifierCase::AsWritten)?.is_none());
+    assert!(db.resolve_target_function(target("absent"), IdentifierCase::AsWritten)?.is_none());
 
     Ok(())
 }
@@ -61,12 +61,12 @@ fn the_search_path_order_decides_a_bare_reference() -> Result<(), LookupError> {
     let app_first = db(&format!("{TWO_SCHEMAS} SET search_path TO app, audit;"));
 
     let audit = audit_first
-        .resolve_target_function(target("helper"))?
+        .resolve_target_function(target("helper"), IdentifierCase::AsWritten)?
         .expect("the first path entry holds it");
     assert_eq!(schema_of(audit).as_deref(), Some("audit"));
 
     let app = app_first
-        .resolve_target_function(target("helper"))?
+        .resolve_target_function(target("helper"), IdentifierCase::AsWritten)?
         .expect("the first path entry holds it");
     assert_eq!(schema_of(app).as_deref(), Some("app"));
 
@@ -79,14 +79,53 @@ fn the_search_path_order_decides_a_bare_reference() -> Result<(), LookupError> {
 fn a_written_lookup_applies_the_identifier_rules() {
     let db = db(TWO_SCHEMAS);
 
-    assert!(db.function(Some("app"), "helper").is_some());
-    assert!(db.function(Some("APP"), "HELPER").is_some());
-    assert!(db.function(Some("\"App\""), "helper").is_none());
-    assert!(db.function(Some("audit"), "helper").is_some());
+    assert!(
+        db.function_by_target(
+            TargetName::new("helper", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.function_by_target(
+            TargetName::new("HELPER", false).with_schema("APP", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.function_by_target(
+            TargetName::new("helper", false).with_schema("App", true),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_none()
+    );
+    assert!(
+        db.function_by_target(
+            TargetName::new("helper", false).with_schema("audit", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
 
     // Nothing declares `helper` in the default schema.
-    assert!(db.function(None, "helper").is_none());
-    assert!(db.function(Some("app"), "absent").is_none());
+    assert!(
+        db.function_by_target(TargetName::new("helper", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    assert!(
+        db.function_by_target(
+            TargetName::new("absent", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_none()
+    );
 }
 
 /// A registered builtin lives in the catalog schema, so it is reached by naming
@@ -95,15 +134,30 @@ fn a_written_lookup_applies_the_identifier_rules() {
 fn a_builtin_is_reached_through_its_own_schema() -> Result<(), LookupError> {
     let db = db("CREATE FUNCTION helper() RETURNS INT LANGUAGE sql AS 'SELECT 1';");
 
-    assert!(db.function(Some("pg_catalog"), "coalesce").is_some());
-    assert!(db.function(None, "coalesce").is_none());
-    assert!(db.resolve_target_function(target("pg_catalog.coalesce"))?.is_some());
-    assert!(db.resolve_target_function(target("coalesce"))?.is_none());
+    assert!(
+        db.function_by_target(
+            TargetName::new("coalesce", false).with_schema("pg_catalog", false),
+            IdentifierCase::AsWritten
+        )?
+        .is_some()
+    );
+    assert!(
+        db.function_by_target(TargetName::new("coalesce", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
+    assert!(
+        db.resolve_target_function(target("pg_catalog.coalesce"), IdentifierCase::AsWritten)?
+            .is_some()
+    );
+    assert!(db.resolve_target_function(target("coalesce"), IdentifierCase::AsWritten)?.is_none());
 
     // A declaration written without a schema resides in the default one, which
     // the path does carry.
-    assert!(db.function(None, "helper").is_some());
-    assert!(db.resolve_target_function(target("helper"))?.is_some());
+    assert!(
+        db.function_by_target(TargetName::new("helper", false), IdentifierCase::AsWritten)?
+            .is_some()
+    );
+    assert!(db.resolve_target_function(target("helper"), IdentifierCase::AsWritten)?.is_some());
 
     Ok(())
 }
@@ -135,7 +189,7 @@ fn overloads_of_one_name_are_reported_as_ambiguous() {
          CREATE FUNCTION app.f(x TEXT) RETURNS INT LANGUAGE sql AS 'SELECT 2';");
 
     assert!(matches!(
-        db.resolve_target_function(target("app.f")),
+        db.resolve_target_function(target("app.f"), IdentifierCase::AsWritten),
         Err(LookupError::AmbiguousFunctionLookup { .. })
     ));
     assert!(matches!(
@@ -143,6 +197,13 @@ fn overloads_of_one_name_are_reported_as_ambiguous() {
         Err(LookupError::AmbiguousFunctionLookup { .. })
     ));
 
-    // The written lookup answers the first of them, as the table lookup does.
-    assert!(db.function(Some("app"), "f").is_some());
+    // The parts lookup reports it too, rather than answering whichever
+    // declaration is stored first.
+    assert!(matches!(
+        db.function_by_target(
+            TargetName::new("f", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        ),
+        Err(LookupError::AmbiguousFunctionLookup { .. })
+    ));
 }

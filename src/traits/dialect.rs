@@ -59,7 +59,10 @@ pub trait DialectLike: Debug + Clone + Default + Send + Sync + Hash + Eq + Ord +
     ///
     /// fn check<D: sqlparser::dialect::Dialect + Default + 'static>(sql: &str) -> TypeMatch {
     ///     let db = ParserDB::parse::<D>(sql).expect("parse");
-    ///     let table = db.table(None, "t").unwrap();
+    ///     let table = db
+    ///         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+    ///         .expect("unambiguous lookup")
+    ///         .unwrap();
     ///     let col = table.column("flag", &db).expect("column lookup").unwrap();
     ///     db.dialect().is_bool(&db, col)
     /// }
@@ -99,7 +102,10 @@ pub trait DialectLike: Debug + Clone + Default + Send + Sync + Hash + Eq + Ord +
     ///
     /// fn check<D: sqlparser::dialect::Dialect + Default + 'static>(sql: &str) -> TypeMatch {
     ///     let db = ParserDB::parse::<D>(sql).expect("parse");
-    ///     let table = db.table(None, "t").unwrap();
+    ///     let table = db
+    ///         .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+    ///         .expect("unambiguous lookup")
+    ///         .unwrap();
     ///     let col = table.column("id", &db).expect("column lookup").unwrap();
     ///     db.dialect().is_uuid(&db, col)
     /// }

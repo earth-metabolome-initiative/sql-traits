@@ -109,6 +109,17 @@ fn ordinary_names_are_unaffected() {
     )
     .expect("plain names build");
 
-    assert!(db.table(Some("app"), "docs").is_some());
-    assert!(db.table(None, "\"IDENTIFIER\"").is_some());
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.table_by_target(TargetName::new("IDENTIFIER", true), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 }

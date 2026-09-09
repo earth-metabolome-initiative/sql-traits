@@ -38,7 +38,10 @@ const DUMP: &str = "CREATE FUNCTION f() RETURNS INT LANGUAGE sql SECURITY DEFINE
 #[test]
 fn an_owner_to_statement_names_the_owning_role() {
     let database = db(DUMP);
-    let function = database.function(None, "f").expect("f exists");
+    let function = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists");
 
     assert_eq!(function.owner(&database), Ok(Some("app_reader")));
     assert_eq!(
@@ -53,7 +56,10 @@ fn an_owner_to_statement_names_the_owning_role() {
 #[test]
 fn a_function_nobody_reassigned_names_no_owner() {
     let database = db("CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';");
-    let function = database.function(None, "f").expect("f exists");
+    let function = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists");
 
     assert_eq!(function.owner(&database), Ok(None));
 }
@@ -63,7 +69,10 @@ fn ownership_moves_to_the_role_named_last() {
     let database = db("CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';
          ALTER FUNCTION f() OWNER TO first;
          ALTER FUNCTION f() OWNER TO second;");
-    let function = database.function(None, "f").expect("f exists");
+    let function = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists");
 
     assert_eq!(function.owner(&database), Ok(Some("second")));
 }
@@ -79,7 +88,10 @@ fn a_session_dependent_owner_leaves_no_role_named() {
              ALTER FUNCTION f() OWNER TO app_reader;
              ALTER FUNCTION f() OWNER TO {spelling};"
         ));
-        let function = database.function(None, "f").expect("f exists");
+        let function = database
+            .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("f exists");
 
         assert_eq!(function.owner(&database), Ok(None), "{spelling} left a stale owner behind");
     }
@@ -93,7 +105,10 @@ fn owner_preserves_role_identity() {
             "CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';
              ALTER FUNCTION f() OWNER TO {spelling};"
         ));
-        let function = database.function(None, "f").expect("f exists");
+        let function = database
+            .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("f exists");
 
         assert_eq!(function.owner(&database), Ok(Some(expected)));
     }
@@ -105,7 +120,10 @@ fn owner_preserves_role_identity() {
          ALTER FUNCTION f() OWNER TO ACTOR;",
     )
     .expect("schema builds");
-    let function = database.function(None, "f").expect("f exists");
+    let function = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists");
     let owner = function.owner(&database).expect("f is in this database").expect("owner exists");
     let role = database.role(owner).expect("owner resolves");
 
@@ -119,7 +137,10 @@ fn owner_preserves_role_identity() {
          ALTER FUNCTION f() OWNER TO App_Reader;",
     )
     .expect("schema builds");
-    let function = database.function(None, "f").expect("f exists");
+    let function = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists");
     let owner = function.owner(&database).expect("f is in this database").expect("owner exists");
     let role = database.role(owner).expect("owner resolves");
 
@@ -136,7 +157,11 @@ fn a_bare_name_reaches_the_only_function_carrying_it() {
          ALTER FUNCTION f OWNER TO app_reader;");
 
     assert_eq!(
-        database.function(None, "f").expect("f exists").owner(&database),
+        database
+            .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("f exists")
+            .owner(&database),
         Ok(Some("app_reader"))
     );
 }
@@ -172,7 +197,10 @@ fn the_owner_survives_a_replacement() {
     let database = db("CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';
          ALTER FUNCTION f() OWNER TO app_reader;
          CREATE OR REPLACE FUNCTION f() RETURNS INT AS 'SELECT 2';");
-    let function = database.function(None, "f").expect("f exists");
+    let function = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists");
 
     assert_eq!(function.body(), Some("SELECT 2"), "the replacement is the stored definition");
     assert_eq!(function.owner(&database), Ok(Some("app_reader")));
@@ -190,7 +218,10 @@ fn the_owner_and_the_security_clause_do_not_displace_each_other() {
          ALTER FUNCTION f() OWNER TO app_reader;");
 
     for database in [owner_first, security_first] {
-        let function = database.function(None, "f").expect("f exists");
+        let function = database
+            .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("f exists");
         assert_eq!(function.owner(&database), Ok(Some("app_reader")));
         assert_eq!(function.security_mode(), FunctionSecurity::Definer);
     }
@@ -207,7 +238,10 @@ fn the_owner_is_visible_through_a_policy_cached_node() {
          CREATE POLICY p ON t USING (guard(id));
          ALTER FUNCTION guard(INT) OWNER TO app_reader;");
 
-    let table = database.table(None, "t").expect("t exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let policy = table.policies(&database).expect("policies").next().expect("p exists");
     let via_policy = policy
         .using_functions(&database)
@@ -226,7 +260,10 @@ fn the_owner_is_visible_through_a_check_cached_node() {
          CREATE TABLE t (id INT, CHECK (guard(id)));
          ALTER FUNCTION guard(INT) OWNER TO app_reader;");
 
-    let table = database.table(None, "t").expect("t exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let check =
         table.check_constraints(&database).expect("check constraints").next().expect("check");
     let via_check =
@@ -241,10 +278,20 @@ fn the_owner_is_visible_through_a_check_cached_node() {
 #[test]
 fn a_dropped_function_reports_that_it_is_gone() {
     let database = db(DUMP);
-    let node = database.function(None, "f").expect("f exists").clone();
+    let node = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists")
+        .clone();
     let dropped = db(&format!("{DUMP} DROP FUNCTION f();"));
 
-    assert!(dropped.function(None, "f").is_none(), "the drop is applied");
+    assert!(
+        dropped
+            .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none(),
+        "the drop is applied"
+    );
     assert!(
         matches!(node.owner(&dropped), Err(LookupError::ObjectNotInDatabase { .. })),
         "got {:?}",
@@ -305,14 +352,22 @@ fn an_owner_is_resolved_against_the_roles_the_input_creates() {
 
     let created = parse(&format!("CREATE ROLE app_reader; {DUMP}")).expect("the role exists");
     assert_eq!(
-        created.function(None, "f").expect("f exists").owner(&created),
+        created
+            .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("f exists")
+            .owner(&created),
         Ok(Some("app_reader"))
     );
 
     let dumped = db(DUMP);
     assert!(dumped.role("app_reader").is_none(), "nothing created the role");
     assert_eq!(
-        dumped.function(None, "f").expect("f exists").owner(&dumped),
+        dumped
+            .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("f exists")
+            .owner(&dumped),
         Ok(Some("app_reader"))
     );
 }
@@ -378,7 +433,11 @@ fn owner_of<'db>(database: &'db ParserDB, function: &CreateFunction) -> Option<&
 #[test]
 fn the_name_outlives_the_node_it_was_asked_through() {
     let database = db(DUMP);
-    let node = database.function(None, "f").expect("f exists").clone();
+    let node = database
+        .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("f exists")
+        .clone();
 
     assert_eq!(owner_of(&database, &node), Some("app_reader"));
 }
@@ -398,8 +457,14 @@ fn a_definer_function_reassigned_away_from_the_table_owner_is_visible() {
              AS 'SELECT id FROM docs';
          ALTER FUNCTION read_docs() OWNER TO app_reader;");
 
-    let docs = database.table(None, "docs").expect("docs exists");
-    let reader = database.function(None, "read_docs").expect("read_docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
+    let reader = database
+        .function_by_target(TargetName::new("read_docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("read_docs exists");
 
     assert_eq!(docs.owner(&database), Ok(Some("app_owner")));
     assert_eq!(reader.security_mode(), FunctionSecurity::Definer);

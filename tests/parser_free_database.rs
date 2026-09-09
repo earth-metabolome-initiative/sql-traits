@@ -16,28 +16,12 @@ use sql_traits::{
     prelude::*,
     structs::TargetName,
     traits::{ColumnCollation, TypeMatch, grant::GrantRelation},
-    utils::identifier_resolution::stored_identifier_matches_lookup,
 };
 use sqlparser::ast::{
     Action, ConstraintReferenceMatchKind, CreatePolicyCommand, CreatePolicyType, Expr,
     FunctionCalledOnNull, FunctionDefinitionSetParam, FunctionSecurity, Grantee, Owner, Query,
     TriggerEvent, TriggerObjectKind, TriggerPeriod,
 };
-
-/// Whether a stored schema, absent for the default one, answers a written
-/// qualifier, absent for an unqualified name.
-fn schema_answers(stored: Option<&str>, stored_is_quoted: bool, written: Option<&str>) -> bool {
-    match (stored, written) {
-        (None, None) => true,
-        (Some(stored), None) => {
-            stored_identifier_matches_lookup(stored, stored_is_quoted, "public")
-        }
-        (None, Some(written)) => stored_identifier_matches_lookup("public", false, written),
-        (Some(stored), Some(written)) => {
-            stored_identifier_matches_lookup(stored, stored_is_quoted, written)
-        }
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 struct MemoryCatalog {
@@ -250,13 +234,6 @@ impl DatabaseLike for MemoryCatalog {
         self.functions.iter()
     }
 
-    fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table> {
-        self.tables.iter().find(|table| {
-            stored_identifier_matches_lookup(&table.name, table.name_is_quoted, table_name)
-                && schema_answers(table.schema.as_deref(), table.schema_is_quoted, schema)
-        })
-    }
-
     fn views(&self) -> impl Iterator<Item = &Self::View> {
         self.views.iter()
     }
@@ -265,33 +242,8 @@ impl DatabaseLike for MemoryCatalog {
         self.materialized_views.iter()
     }
 
-    fn view(&self, schema: Option<&str>, view_name: &str) -> Option<&Self::View> {
-        self.views.iter().find(|view| {
-            stored_identifier_matches_lookup(&view.name, false, view_name)
-                && schema_answers(view.schema.as_deref(), false, schema)
-        })
-    }
-
-    fn materialized_view(
-        &self,
-        schema: Option<&str>,
-        view_name: &str,
-    ) -> Option<&Self::MaterializedView> {
-        self.materialized_views.iter().find(|view| {
-            stored_identifier_matches_lookup(&view.name, false, view_name)
-                && schema_answers(view.schema.as_deref(), false, schema)
-        })
-    }
-
     fn table_id(&self, table: &Self::Table) -> Option<usize> {
         self.tables.iter().position(|candidate| candidate == table)
-    }
-
-    fn function(&self, schema: Option<&str>, name: &str) -> Option<&Self::Function> {
-        self.functions.iter().find(|function| {
-            stored_identifier_matches_lookup(&function.name, false, name)
-                && schema_answers(function.schema.as_deref(), false, schema)
-        })
     }
 
     fn policies(&self) -> impl Iterator<Item = &Self::Policy> {
@@ -1153,19 +1105,30 @@ fn the_inherited_resolver_walks_the_default_schema() -> Result<(), LookupError> 
     let catalog = catalog();
 
     let bare = catalog
-        .resolve_target_table(TargetName::new("docs", false))?
+        .resolve_target_table(TargetName::new("docs", false), IdentifierCase::AsWritten)?
         .expect("the default schema holds a table of that name");
     assert_eq!(bare.table_schema(), None);
 
     let qualified = catalog
-        .resolve_target_table(TargetName::new("docs", false).with_schema("app", false))?
+        .resolve_target_table(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )?
         .expect("the qualified name resolves in its own schema");
     assert_eq!(qualified.table_schema(), Some("app"));
 
     // `notes` sits in a schema the path does not carry, so an unqualified
     // reference to it resolves to nothing.
-    assert!(catalog.resolve_target_table(TargetName::new("notes", false))?.is_none());
-    assert!(catalog.resolve_target_table(TargetName::new("absent", false))?.is_none());
+    assert!(
+        catalog
+            .resolve_target_table(TargetName::new("notes", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
+    assert!(
+        catalog
+            .resolve_target_table(TargetName::new("absent", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
 
     Ok(())
 }
@@ -1192,8 +1155,21 @@ fn the_inherited_identity_lookup_compares_stored_parts() {
 
     // The written lookup keeps folding and keeps reading both spellings of the
     // default schema as one place.
-    assert!(catalog.table(Some("public"), "docs").is_some());
-    assert!(catalog.table(None, "DOCS").is_some());
+    assert!(
+        catalog
+            .table_by_target(
+                TargetName::new("docs", false).with_schema("public", false),
+                IdentifierCase::AsWritten
+            )
+            .expect("unambiguous lookup")
+            .is_some()
+    );
+    assert!(
+        catalog
+            .table_by_target(TargetName::new("DOCS", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 }
 
 /// The inherited function resolver reads a qualified reference in its own
@@ -1204,22 +1180,33 @@ fn the_inherited_function_resolver_walks_the_default_schema() -> Result<(), Look
     let catalog = catalog();
 
     let bare = catalog
-        .resolve_target_function(TargetName::new("touch", false))?
+        .resolve_target_function(TargetName::new("touch", false), IdentifierCase::AsWritten)?
         .expect("the default schema holds one");
     assert_eq!(bare.target_name().schema(), None);
 
     let qualified = catalog
-        .resolve_target_function(TargetName::new("touch", false).with_schema("app", false))?
+        .resolve_target_function(
+            TargetName::new("touch", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )?
         .expect("the qualified reference resolves");
     assert_eq!(qualified.target_name().schema(), Some("app"));
 
     // `audit` is not on the path, so nothing unqualified reaches into it.
-    assert!(catalog.resolve_target_function(TargetName::new("hidden", false))?.is_none());
-    assert!(catalog.resolve_target_function(TargetName::new("absent", false))?.is_none());
+    assert!(
+        catalog
+            .resolve_target_function(TargetName::new("hidden", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
+    assert!(
+        catalog
+            .resolve_target_function(TargetName::new("absent", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
 
     let ambiguous = TargetName::new("overloaded", false).with_schema("app", false);
     assert!(matches!(
-        catalog.resolve_target_function(ambiguous),
+        catalog.resolve_target_function(ambiguous, IdentifierCase::AsWritten),
         Err(LookupError::AmbiguousFunctionLookup { .. })
     ));
 
@@ -1242,8 +1229,19 @@ fn the_inherited_function_identity_lookup_compares_stored_parts() -> Result<(), 
     ));
 
     // The written lookup takes the qualifier apart from the name and folds it.
-    assert!(catalog.function(Some("APP"), "touch").is_some());
-    assert!(catalog.function(None, "hidden").is_none());
+    assert!(
+        catalog
+            .function_by_target(
+                TargetName::new("touch", false).with_schema("APP", false),
+                IdentifierCase::AsWritten
+            )?
+            .is_some()
+    );
+    assert!(
+        catalog
+            .function_by_target(TargetName::new("hidden", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
 
     Ok(())
 }
@@ -1254,10 +1252,103 @@ fn the_inherited_function_identity_lookup_compares_stored_parts() -> Result<(), 
 fn the_inherited_view_resolvers_answer_only_views() -> Result<(), LookupError> {
     let catalog = catalog();
 
-    assert!(catalog.resolve_target_view(TargetName::new("docs", false))?.is_none());
-    assert!(catalog.resolve_target_materialized_view(TargetName::new("docs", false))?.is_none());
+    assert!(
+        catalog
+            .resolve_target_view(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+            .is_none()
+    );
+    assert!(
+        catalog
+            .resolve_target_materialized_view(
+                TargetName::new("docs", false),
+                IdentifierCase::AsWritten
+            )?
+            .is_none()
+    );
     assert!(catalog.views().next().is_none());
     assert!(catalog.materialized_views().next().is_none());
+
+    Ok(())
+}
+
+/// The inherited resolvers take the comparison from the caller, which is the
+/// half of the contract a folding engine depends on and `GenericDB` answers
+/// through its index instead.
+#[test]
+fn the_inherited_resolvers_take_the_comparison_from_the_caller() -> Result<(), LookupError> {
+    let mut catalog = catalog();
+    let mut quoted = table(None, "Docs");
+    quoted.name_is_quoted = true;
+    catalog.tables = vec![quoted, table(None, "Notes")];
+    catalog.columns = vec![column(None, "Docs", "id"), column(None, "Notes", "id")];
+    catalog.functions = vec![function(None, "Touch", &[])];
+
+    let docs = || TargetName::new("docs", false);
+    assert!(catalog.resolve_target_table(docs(), IdentifierCase::AsWritten)?.is_none());
+    assert_eq!(
+        catalog.resolve_target_table(docs(), IdentifierCase::Folded)?.map(TableLike::table_name),
+        Some("Docs")
+    );
+    assert!(catalog.resolve_target_table(docs(), IdentifierCase::Exact)?.is_none());
+
+    // A stored name nobody quoted folds under PostgreSQL's rule and stands as
+    // written under an exact one.
+    let notes = || TargetName::new("notes", false);
+    assert!(catalog.resolve_target_table(notes(), IdentifierCase::AsWritten)?.is_some());
+    assert!(catalog.resolve_target_table(notes(), IdentifierCase::Exact)?.is_none());
+    assert!(
+        catalog
+            .resolve_target_table(TargetName::new("Notes", false), IdentifierCase::Exact)?
+            .is_some()
+    );
+
+    let touch = || TargetName::new("touch", false);
+    assert!(catalog.resolve_target_function(touch(), IdentifierCase::AsWritten)?.is_some());
+    assert!(catalog.resolve_target_function(touch(), IdentifierCase::Exact)?.is_none());
+
+    Ok(())
+}
+
+/// The inherited parts lookups consult no search path, so an unqualified name
+/// is the default schema's, and they carry the comparison too.
+#[test]
+fn the_inherited_parts_lookups_ignore_the_search_path() -> Result<(), LookupError> {
+    let catalog = catalog();
+
+    // `docs` sits in both the default schema and `app`, and the parts lookup
+    // answers only the one the target names.
+    assert_eq!(
+        catalog
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+            .and_then(TableLike::table_schema),
+        None
+    );
+    assert_eq!(
+        catalog
+            .table_by_target(
+                TargetName::new("docs", false).with_schema("APP", false),
+                IdentifierCase::Folded,
+            )?
+            .and_then(TableLike::table_schema),
+        Some("app")
+    );
+
+    assert!(
+        catalog
+            .function_by_target(
+                TargetName::new("touch", false).with_schema("app", false),
+                IdentifierCase::AsWritten,
+            )?
+            .is_some()
+    );
+    assert!(
+        catalog.view_by_target(TargetName::new("docs", false), IdentifierCase::Folded)?.is_none()
+    );
+    assert!(
+        catalog
+            .materialized_view_by_target(TargetName::new("docs", false), IdentifierCase::Exact)?
+            .is_none()
+    );
 
     Ok(())
 }
@@ -1286,7 +1377,12 @@ fn the_inherited_accessors_answer_from_the_catalog() -> Result<(), LookupError> 
     // relationship is not a root.
     assert_eq!(catalog.root_tables()?.count(), 0);
 
-    let docs = catalog.table(Some("app"), "docs").expect("the qualified lookup finds it");
+    let docs = catalog
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )?
+        .expect("the qualified lookup finds it");
     assert_eq!(docs.columns(&catalog)?.count(), 2);
     assert_eq!(docs.primary_key_columns(&catalog)?.count(), 1);
     let first_column = docs.columns(&catalog)?.next().expect("a column");
@@ -1308,7 +1404,12 @@ fn an_unresolvable_key_column_stops_the_ordinals() -> Result<(), LookupError> {
         column(Some("app"), "docs", "extra"),
     ];
 
-    let docs = catalog.table(Some("app"), "docs").expect("the qualified lookup finds it");
+    let docs = catalog
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )?
+        .expect("the qualified lookup finds it");
 
     assert_eq!(docs.column_id_by_name("id", &catalog)?, Some(1));
     assert_eq!(docs.column_name_by_id(2, &catalog)?, Some("extra"));
@@ -1334,7 +1435,13 @@ fn a_wholly_unresolvable_key_names_its_first_column() {
     catalog.tables = vec![docs];
     catalog.columns = vec![column(Some("app"), "docs", "body")];
 
-    let docs = catalog.table(Some("app"), "docs").expect("the qualified lookup finds it");
+    let docs = catalog
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the qualified lookup finds it");
 
     assert_eq!(
         docs.primary_key_column_ids(&catalog),

@@ -42,7 +42,9 @@ pub trait ViewLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE t (id INT); CREATE VIEW v AS SELECT id FROM t;",
     /// )?;
-    /// let view = db.view(None, "v").expect("the view is recorded");
+    /// let view = db
+    ///     .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)?
+    ///     .expect("the view is recorded");
     /// assert_eq!(view.view_name(), "v");
     /// # Ok(())
     /// # }
@@ -73,7 +75,9 @@ pub trait ViewLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "CREATE TABLE t (id INT); CREATE VIEW My_View AS SELECT id FROM t;",
     /// )?;
-    /// let view = db.view(None, "my_view").expect("an unquoted name folds down");
+    /// let view = db
+    ///     .view_by_target(TargetName::new("my_view", false), IdentifierCase::AsWritten)?
+    ///     .expect("an unquoted name folds down");
     /// assert_eq!(view.view_name(), "My_View");
     /// assert_eq!(view.stored_view_name(), "my_view");
     /// # Ok(())
@@ -132,8 +136,16 @@ pub trait ViewLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     ///      CREATE VIEW v AS SELECT id FROM t;
     ///      CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
     /// )?;
-    /// assert!(!db.view(None, "v").expect("plain view").is_materialized());
-    /// assert!(db.materialized_view(None, "m").expect("stored view").is_materialized());
+    /// assert!(
+    ///     !db.view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)?
+    ///         .expect("plain view")
+    ///         .is_materialized()
+    /// );
+    /// assert!(
+    ///     db.materialized_view_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)?
+    ///         .expect("stored view")
+    ///         .is_materialized()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -150,7 +162,9 @@ pub trait ViewLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE t (id INT); CREATE VIEW v AS SELECT id FROM t;",
     /// )?;
-    /// let view = db.view(None, "v").expect("the view is recorded");
+    /// let view = db
+    ///     .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)?
+    ///     .expect("the view is recorded");
     /// assert_eq!(view.definition().to_string(), "SELECT id FROM t");
     /// # Ok(())
     /// # }
@@ -173,7 +187,9 @@ pub trait ViewLike: Debug + Clone + Hash + Ord + Eq + Metadata + Send + Sync {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE t (a INT, b INT); CREATE VIEW v (x) AS SELECT a, b FROM t;",
     /// )?;
-    /// let view = db.view(None, "v").expect("the view is recorded");
+    /// let view = db
+    ///     .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)?
+    ///     .expect("the view is recorded");
     /// assert_eq!(view.declared_column_names(), &[("x".to_string(), false)]);
     /// # Ok(())
     /// # }

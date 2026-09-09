@@ -125,7 +125,12 @@ impl ParseOptions {
     /// for statement in statements {
     ///     input = input.apply_statement(statement)?;
     /// }
-    /// assert!(input.snapshot().table(None, "docs").is_some());
+    /// assert!(
+    ///     input
+    ///         .snapshot()
+    ///         .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+    ///         .is_some()
+    /// );
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```
     #[must_use]

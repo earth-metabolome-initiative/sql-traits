@@ -45,7 +45,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_keys: Vec<_> = host_table.foreign_keys(&db)?.collect();
     /// let named_fk = &foreign_keys[0];
     /// let unnamed_fk = &foreign_keys[1];
@@ -74,7 +76,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_keys: Vec<_> = host_table.foreign_keys(&db)?.collect();
     /// let cascade_fk = &foreign_keys[0];
     /// let normal_fk = &foreign_keys[1];
@@ -107,7 +111,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let fk_host_table = foreign_key.host_table(&db);
     /// assert_eq!(fk_host_table, host_table);
@@ -149,7 +155,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let referenced_table = foreign_key.referenced_table(&db)?;
     /// assert_eq!(referenced_table.table_name(), "referenced_table");
@@ -184,7 +192,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().unwrap();
     /// let target = foreign_key.referenced_table_name();
     /// assert_eq!(target.name(), "Docs");
@@ -211,7 +221,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().unwrap();
     /// let target = foreign_key.referenced_table_name();
     /// assert_eq!(target.name(), "referenced_table");
@@ -251,7 +263,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let host_column_names: Vec<&str> =
     ///     foreign_key.host_columns(&db)?.map(|col| col.column_name()).collect();
@@ -302,11 +316,15 @@ pub trait ForeignKeyLike:
     /// ",
     /// )?;
     ///
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let host_column = foreign_key.host_column(&db)?.expect("Should have a single host column");
     /// assert_eq!(host_column.column_name(), "id");
-    /// let composite_fk_table = db.table(None, "composite_fk_table").unwrap();
+    /// let composite_fk_table = db
+    ///     .table_by_target(TargetName::new("composite_fk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let composite_foreign_key =
     ///     composite_fk_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert!(
@@ -359,14 +377,18 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let host_columns = host_table.foreign_keys(&db)?.collect::<Vec<_>>();
     /// let [first_fk, second_fk] = host_columns.as_slice() else {
     ///     panic!("Expected two foreign keys");
     /// };
     /// assert!(first_fk.shares_host_tables(&db)?, "First foreign key should share host columns");
     /// assert!(second_fk.shares_host_tables(&db)?, "Second foreign key should share host columns");
-    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let parent_fk = parent_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert!(
     ///     !parent_fk.shares_host_tables(&db)?,
@@ -421,7 +443,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert_eq!(foreign_key.number_of_host_columns(&db)?, 2);
     /// # Ok(())
@@ -466,8 +490,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let single_fk_table = db.table(None, "single_fk_table").unwrap();
-    /// let composite_fk_table = db.table(None, "composite_fk_table").unwrap();
+    /// let single_fk_table = db
+    ///     .table_by_target(TargetName::new("single_fk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let composite_fk_table = db
+    ///     .table_by_target(TargetName::new("composite_fk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let single_fk = single_fk_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let composite_fk =
     ///     composite_fk_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
@@ -499,7 +527,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert_eq!(foreign_key.match_kind(&db), ConstraintReferenceMatchKind::Full);
     /// # Ok(())
@@ -528,8 +558,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let full_match_table = db.table(None, "full_match_table").unwrap();
-    /// let normal_table = db.table(None, "normal_table").unwrap();
+    /// let full_match_table = db
+    ///     .table_by_target(TargetName::new("full_match_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let normal_table = db
+    ///     .table_by_target(TargetName::new("normal_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let full_match_fk =
     ///     full_match_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let normal_fk = normal_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
@@ -576,8 +610,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let nullable_host_table = db.table(None, "nullable_host_table").unwrap();
-    /// let not_null_host_table = db.table(None, "not_null_host_table").unwrap();
+    /// let nullable_host_table = db
+    ///     .table_by_target(TargetName::new("nullable_host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let not_null_host_table = db
+    ///     .table_by_target(TargetName::new("not_null_host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let nullable_fk =
     ///     nullable_host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let not_null_fk =
@@ -645,9 +683,18 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let nullable_fk_table = db.table(None, "nullable_fk_table").unwrap();
-    /// let not_null_fk_table = db.table(None, "not_null_fk_table").unwrap();
-    /// let nullable_match_full_table = db.table(None, "nullable_match_full_table").unwrap();
+    /// let nullable_fk_table = db
+    ///     .table_by_target(TargetName::new("nullable_fk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let not_null_fk_table = db
+    ///     .table_by_target(TargetName::new("not_null_fk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let nullable_match_full_table = db
+    ///     .table_by_target(
+    ///         TargetName::new("nullable_match_full_table", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// let nullable_fk =
     ///     nullable_fk_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let not_null_fk =
@@ -700,7 +747,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let referenced_column_names: Vec<&str> =
     ///     foreign_key.referenced_columns(&db)?.map(|col| col.column_name()).collect();
@@ -752,12 +801,16 @@ pub trait ForeignKeyLike:
     /// ",
     /// )?;
     ///
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let referenced_column =
     ///     foreign_key.referenced_column(&db)?.expect("Should have a single referenced column");
     /// assert_eq!(referenced_column.column_name(), "id");
-    /// let composite_fk_table = db.table(None, "composite_fk_table").unwrap();
+    /// let composite_fk_table = db
+    ///     .table_by_target(TargetName::new("composite_fk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let composite_foreign_key =
     ///     composite_fk_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert!(
@@ -813,8 +866,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let self_ref_table = db.table(None, "self_ref_table").unwrap();
-    /// let normal_ref_table = db.table(None, "normal_ref_table").unwrap();
+    /// let self_ref_table = db
+    ///     .table_by_target(TargetName::new("self_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let normal_ref_table = db
+    ///     .table_by_target(TargetName::new("normal_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let self_ref_fk = self_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let normal_ref_fk =
     ///     normal_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
@@ -866,7 +923,8 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child").unwrap();
+    /// let child_table =
+    ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
     /// let foreign_keys: Vec<_> = child_table.foreign_keys(&db)?.collect();
     /// let parent_fk = foreign_keys
     ///     .iter()
@@ -880,7 +938,9 @@ pub trait ForeignKeyLike:
     /// assert!(parent_fk.references_ancestor_table(&db)?);
     /// assert!(grandparent_fk.references_ancestor_table(&db)?);
     ///
-    /// let child_other_table = db.table(None, "child_other").unwrap();
+    /// let child_other_table = db
+    ///     .table_by_target(TargetName::new("child_other", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let other_fk = child_other_table
     ///     .foreign_keys(&db)?
     ///     .find(|fk| fk.referenced_table(&db).is_ok_and(|t| t.table_name() == "other"))
@@ -928,8 +988,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let pk_ref_table = db.table(None, "pk_ref_table").unwrap();
-    /// let non_pk_ref_table = db.table(None, "non_pk_ref_table").unwrap();
+    /// let pk_ref_table = db
+    ///     .table_by_target(TargetName::new("pk_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let non_pk_ref_table = db
+    ///     .table_by_target(TargetName::new("non_pk_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let pk_ref_fk = pk_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let non_pk_ref_fk =
     ///     non_pk_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
@@ -992,8 +1056,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let pk_ref_table = db.table(None, "pk_ref_table").unwrap();
-    /// let non_pk_ref_table = db.table(None, "non_pk_ref_table").unwrap();
+    /// let pk_ref_table = db
+    ///     .table_by_target(TargetName::new("pk_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let non_pk_ref_table = db
+    ///     .table_by_target(TargetName::new("non_pk_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let pk_ref_fk = pk_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let [non_pk_ref_fk, another_non_pk_ref_fk] =
     ///     non_pk_ref_table.foreign_keys(&db)?.collect::<Vec<_>>()[..]
@@ -1064,8 +1132,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let pk_host_table = db.table(None, "pk_host_table").unwrap();
-    /// let non_pk_host_table = db.table(None, "non_pk_host_table").unwrap();
+    /// let pk_host_table = db
+    ///     .table_by_target(TargetName::new("pk_host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let non_pk_host_table = db
+    ///     .table_by_target(TargetName::new("non_pk_host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let pk_fk = pk_host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let non_pk_fk = non_pk_host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// assert!(pk_fk.is_host_primary_key(&db)?);
@@ -1124,8 +1196,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let composite_pk_table = db.table(None, "composite_pk_table").unwrap();
-    /// let single_pk_table = db.table(None, "single_pk_table").unwrap();
+    /// let composite_pk_table = db
+    ///     .table_by_target(TargetName::new("composite_pk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let single_pk_table = db
+    ///     .table_by_target(TargetName::new("single_pk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let composite_fk =
     ///     composite_pk_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let single_fk = single_pk_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
@@ -1174,8 +1250,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let full_ref_table = db.table(None, "full_ref_table").unwrap();
-    /// let other_key_ref_table = db.table(None, "other_key_ref_table").unwrap();
+    /// let full_ref_table = db
+    ///     .table_by_target(TargetName::new("full_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let other_key_ref_table = db
+    ///     .table_by_target(TargetName::new("other_key_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let full_fk = full_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let other_key_fk =
     ///     other_key_ref_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
@@ -1234,9 +1314,15 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let extension_table = db.table(None, "extension_table").unwrap();
-    /// let reference_table = db.table(None, "reference_table").unwrap();
-    /// let self_ref_table = db.table(None, "self_ref_table").unwrap();
+    /// let extension_table = db
+    ///     .table_by_target(TargetName::new("extension_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let reference_table = db
+    ///     .table_by_target(TargetName::new("reference_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let self_ref_table = db
+    ///     .table_by_target(TargetName::new("self_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let extension_fk =
     ///     extension_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let reference_fk =
@@ -1293,8 +1379,12 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
-    /// let singleton_table = db.table(None, "singleton_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let singleton_table = db
+    ///     .table_by_target(TargetName::new("singleton_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let fks: Vec<_> = host_table.foreign_keys(&db)?.collect();
     /// let fk1 = &fks[0];
     /// let fk2 = &fks[1];
@@ -1357,7 +1447,9 @@ pub trait ForeignKeyLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_key = host_table.foreign_keys(&db)?.next().expect("Should have a foreign key");
     /// let ref_id_col = host_table.column("ref_id", &db)?.expect("Should have ref_id column");
     /// let ref_name_col = host_table.column("ref_name", &db)?.expect("Should have ref_name column");
@@ -1371,7 +1463,9 @@ pub trait ForeignKeyLike:
     /// assert_eq!(referenced_name_col.column_name(), "name");
     ///
     /// // A column that is not part of the foreign key has no counterpart.
-    /// let unrelated = db.table(None, "referenced_table").unwrap();
+    /// let unrelated = db
+    ///     .table_by_target(TargetName::new("referenced_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let unrelated_col = unrelated.column("name", &db)?.expect("Should have name column");
     /// assert!(foreign_key.referenced_column_for_host_column(&db, unrelated_col)?.is_none());
     /// # Ok(())

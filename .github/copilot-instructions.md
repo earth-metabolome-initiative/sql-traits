@@ -43,8 +43,10 @@ use sql_traits::prelude::*;
 // 1. Create a DB model from SQL
 let db = ParserDB::try_from("CREATE TABLE users (id INT PRIMARY KEY);")?;
 
-// 2. Access schema via Traits
-let table = db.table(None, "users").unwrap();
+// 2. Access schema via Traits, stating the comparison the engine uses
+let table = db
+    .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?
+    .unwrap();
 let pk = table.primary_key_columns().next().unwrap();
 
 // 3. Trait methods provide intelligence

@@ -22,6 +22,7 @@ pub use sqlparser::{
 };
 
 use crate::{
+    structs::IdentifierCase,
     traits::{PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
     utils::{
         identifier_resolution::stored_identifier_matches_lookup,
@@ -68,6 +69,10 @@ pub struct GenericDB<P: SchemaProfile> {
     /// matched, ascending within a kind, so lookup answers and ambiguity
     /// reporting agree with scanning the list.
     relation_index: BTreeMap<RelationKey, Vec<RelationSlot>>,
+    /// Folded key to the stored keys reaching it, holding only the keys that
+    /// fold to something other than themselves, so an all-lowercase catalog
+    /// stores nothing here.
+    folded_relation_index: BTreeMap<RelationKey, Vec<RelationKey>>,
     /// List of columns in the database.
     columns: Vec<Stored<P::Column>>,
     /// List of indices in the database.
@@ -85,6 +90,9 @@ pub struct GenericDB<P: SchemaProfile> {
     /// slots of one key stay ascending and lookup answers agree with scanning
     /// the list.
     function_index: BTreeMap<RelationKey, Vec<usize>>,
+    /// Folded key to the stored function keys reaching it, on the terms of
+    /// [`Self::folded_relation_index`].
+    folded_function_index: BTreeMap<RelationKey, Vec<RelationKey>>,
     /// List of triggers created in the database.
     triggers: Vec<Stored<P::Trigger>>,
     /// List of policies created in the database.
@@ -130,6 +138,8 @@ impl<P: SchemaProfile> Debug for GenericDB<P> {
             .field("ingestion", &self.ingestion)
             .field("relation_index", &self.relation_index.len())
             .field("function_index", &self.function_index.len())
+            .field("folded_relation_index", &self.folded_relation_index.len())
+            .field("folded_function_index", &self.folded_function_index.len())
             .finish()
     }
 }
@@ -159,6 +169,8 @@ impl<P: SchemaProfile> Clone for GenericDB<P> {
             ingestion: self.ingestion.clone(),
             relation_index: self.relation_index.clone(),
             function_index: self.function_index.clone(),
+            folded_relation_index: self.folded_relation_index.clone(),
+            folded_function_index: self.folded_function_index.clone(),
         }
     }
 }
@@ -186,7 +198,9 @@ impl<P: SchemaProfile> GenericDB<P> {
     ///     CREATE TABLE test_table (id INT);
     ///     ",
     /// )?;
-    /// let table = db.table(None, "test_table").unwrap();
+    /// let table = db
+    ///     .table_by_target(TargetName::new("test_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let metadata = db.table_metadata(table).unwrap();
     /// assert_eq!(metadata.table_doc().and_then(|d| d.doc()), Some("This is a test table"));
     /// # Ok(())
@@ -222,7 +236,9 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE t (id INT); CREATE VIEW v AS SELECT id FROM t;",
     /// )?;
-    /// let view = db.view(None, "v").expect("the view is recorded");
+    /// let view = db
+    ///     .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)?
+    ///     .expect("the view is recorded");
     /// assert!(db.view_metadata(view).is_some());
     /// # Ok(())
     /// # }
@@ -230,7 +246,8 @@ impl<P: SchemaProfile> GenericDB<P> {
     pub fn view_metadata(&self, view: &P::View) -> Option<&Meta<P::View>> {
         self.views
             .binary_search_by(|(candidate, _)| {
-                stored_view_key(candidate.as_ref()).cmp(&stored_view_key(view))
+                stored_view_key(candidate.as_ref(), IdentifierCase::AsWritten)
+                    .cmp(&stored_view_key(view, IdentifierCase::AsWritten))
             })
             .ok()
             .map(|index| &self.views[index].1)
@@ -248,7 +265,9 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE t (id INT); CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
     /// )?;
-    /// let view = db.materialized_view(None, "m").expect("the view is recorded");
+    /// let view = db
+    ///     .materialized_view_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)?
+    ///     .expect("the view is recorded");
     /// assert!(db.materialized_view_metadata(view).is_some());
     /// # Ok(())
     /// # }
@@ -259,7 +278,8 @@ impl<P: SchemaProfile> GenericDB<P> {
     ) -> Option<&Meta<P::MaterializedView>> {
         self.materialized_views
             .binary_search_by(|(candidate, _)| {
-                stored_view_key(candidate.as_ref()).cmp(&stored_view_key(view))
+                stored_view_key(candidate.as_ref(), IdentifierCase::AsWritten)
+                    .cmp(&stored_view_key(view, IdentifierCase::AsWritten))
             })
             .ok()
             .map(|index| &self.materialized_views[index].1)
@@ -275,7 +295,8 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let column = table.column("id", &db)?.unwrap();
     /// let metadata = db.column_metadata(column).unwrap();
     /// assert_eq!(metadata.postgres_deterministic(), None);
@@ -299,7 +320,8 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT UNIQUE);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let index = table.unique_indices(&db)?.next().unwrap();
     /// // The metadata for unique indices in ParserDB is currently unit ()
     /// // (actually it might be struct depending on impl, let's just check existence)
@@ -324,7 +346,8 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT CHECK (id > 0));")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check = table.check_constraints(&db)?.next().unwrap();
     /// assert!(db.check_constraint_metadata(check).is_some());
     /// # Ok(())
@@ -355,7 +378,8 @@ impl<P: SchemaProfile> GenericDB<P> {
     ///     CREATE TABLE child (id INT PRIMARY KEY, parent_id INT REFERENCES parent(id));
     ///     ",
     /// )?;
-    /// let child = db.table(None, "child").unwrap();
+    /// let child =
+    ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
     /// let fk = child.foreign_keys(&db)?.next().unwrap();
     /// assert!(db.foreign_key_metadata(fk).is_some());
     /// # Ok(())
@@ -380,7 +404,8 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE t (id INT); CREATE INDEX my_idx ON t(id);",
     /// )?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let index = table.indices(&db)?.next().expect("index should exist");
     /// assert!(db.index_metadata(index).is_some());
     /// # Ok(())
@@ -408,7 +433,9 @@ impl<P: SchemaProfile> GenericDB<P> {
     ///
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE FUNCTION my_func() RETURNS INT AS 'SELECT 1';")?;
-    /// let func = db.function(None, "my_func").unwrap();
+    /// let func = db
+    ///     .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(db.function_metadata(func).is_some());
     /// # Ok(())
     /// # }

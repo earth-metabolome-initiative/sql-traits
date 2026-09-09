@@ -78,7 +78,9 @@ fn a_resolved_collation_survives_the_database_it_came_from() -> Result<(), Error
         let db = ParserDB::parse::<PostgreSqlDialect>(
             "CREATE TABLE t (name TEXT COLLATE \"und-x-icu\");",
         )?;
-        let table = db.table(None, "t").expect("table t was created");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+            .expect("table t was created");
         let column = table.column("name", &db)?.expect("column name was declared");
         let collation: ColumnCollation<'static> = column.collation(&db)?.into_owned();
         round_trip(&collation)

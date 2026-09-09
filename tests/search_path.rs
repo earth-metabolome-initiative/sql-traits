@@ -53,7 +53,13 @@ fn every_statement_kind_resolves_through_the_path() {
     let index = db.indexes().next().expect("the index exists");
     assert_eq!(IndexLike::table(index, &db).table_schema(), Some("app"));
 
-    let child = db.table(Some("app"), "child").expect("the child exists");
+    let child = db
+        .table_by_target(
+            TargetName::new("child", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the child exists");
     let foreign_key =
         child.foreign_keys(&db).expect("child is in this database").next().expect("one key");
     assert_eq!(foreign_key.referenced_table(&db).expect("resolves").table_schema(), Some("app"));
@@ -109,7 +115,13 @@ fn the_path_is_walked_in_order() {
          SET search_path TO b, a;
          CREATE TABLE b.child (d INT REFERENCES docs(id));",
     );
-    let child = db.table(Some("b"), "child").expect("the child exists");
+    let child = db
+        .table_by_target(
+            TargetName::new("child", false).with_schema("b", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the child exists");
     let foreign_key =
         child.foreign_keys(&db).expect("child is in this database").next().expect("one key");
 
@@ -164,11 +176,28 @@ const CREATED_ON_THE_PATH: &str = "CREATE SCHEMA app;
 fn a_bare_create_lands_in_the_schema_on_the_path() {
     let db = parse(CREATED_ON_THE_PATH);
 
-    let docs = db.table(Some("app"), "docs").expect("created in the schema on the path");
+    let docs = db
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("created in the schema on the path");
     assert_eq!(docs.table_name(), "docs");
-    assert!(db.table(None, "docs").is_none(), "no schema-less table was created");
+    assert!(
+        db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none(),
+        "no schema-less table was created"
+    );
 
-    let child = db.table(Some("app"), "child").expect("created in the schema on the path");
+    let child = db
+        .table_by_target(
+            TargetName::new("child", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("created in the schema on the path");
     let foreign_key =
         child.foreign_keys(&db).expect("child is in this database").next().expect("one key");
     assert_eq!(foreign_key.referenced_table(&db).expect("resolves").table_schema(), Some("app"));
@@ -195,8 +224,22 @@ fn two_schemas_may_hold_the_same_name() {
         ",
     );
 
-    assert!(db.table(Some("a"), "docs").is_some());
-    assert!(db.table(Some("b"), "docs").is_some());
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("a", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("b", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
     assert_eq!(db.tables().count(), 2, "the two names stayed apart");
 }
 
@@ -206,7 +249,13 @@ fn two_schemas_may_hold_the_same_name() {
 fn the_default_path_leaves_a_bare_create_bare() {
     for head in ["", "SET search_path TO public;", "SET search_path TO nope, public;"] {
         let db = parse(&format!("{head} CREATE TABLE docs (id INT);"));
-        assert_eq!(db.table(None, "docs").map(TableLike::table_schema), Some(None), "after {head}");
+        assert_eq!(
+            db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .map(TableLike::table_schema),
+            Some(None),
+            "after {head}"
+        );
     }
 }
 
@@ -238,8 +287,19 @@ fn a_temporary_table_is_left_off_the_path() {
              CREATE TABLE app.docs (id INT, extra INT);"
         ));
 
-        assert!(db.table(None, "docs").is_some(), "{temporary} was placed on the path");
-        let permanent = db.table(Some("app"), "docs").expect("the permanent table stands apart");
+        assert!(
+            db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_some(),
+            "{temporary} was placed on the path"
+        );
+        let permanent = db
+            .table_by_target(
+                TargetName::new("docs", false).with_schema("app", false),
+                IdentifierCase::AsWritten,
+            )
+            .expect("unambiguous lookup")
+            .expect("the permanent table stands apart");
         assert_eq!(permanent.columns(&db).expect("in this database").count(), 2);
     }
 }
@@ -253,7 +313,14 @@ fn the_walk_passes_a_schema_the_input_never_creates() {
          SET search_path TO nope, app;
          CREATE TABLE docs (id INT);",
     );
-    assert!(db.table(Some("app"), "docs").is_some());
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
 }
 
 /// When no entry names a schema the input creates, the refusal is the one a
@@ -285,7 +352,15 @@ fn an_emptied_path_is_refused() {
     // Naming the schema in full still says where it goes.
     let written =
         parse("CREATE SCHEMA app; SET search_path TO ''; CREATE TABLE app.docs (id INT);");
-    assert!(written.table(Some("app"), "docs").is_some());
+    assert!(
+        written
+            .table_by_target(
+                TargetName::new("docs", false).with_schema("app", false),
+                IdentifierCase::AsWritten
+            )
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 }
 
 /// A name with no parts has no SQL spelling: the dumbest thing a user can
@@ -340,8 +415,19 @@ fn resetting_the_path_returns_a_bare_create_to_bare() {
          RESET search_path;
          CREATE TABLE off_path (id INT);",
     );
-    assert!(db.table(Some("app"), "on_path").is_some());
-    assert!(db.table(None, "off_path").is_some());
+    assert!(
+        db.table_by_target(
+            TargetName::new("on_path", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.table_by_target(TargetName::new("off_path", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 }
 
 /// A name written out in full says where it goes, and the path does not argue.
@@ -353,8 +439,22 @@ fn a_written_schema_outranks_the_path() {
          SET search_path TO app;
          CREATE TABLE other.docs (id INT);",
     );
-    assert!(db.table(Some("other"), "docs").is_some());
-    assert!(db.table(Some("app"), "docs").is_none());
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("other", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_none()
+    );
 }
 
 /// The schema is settled before the name is read, so `IF NOT EXISTS` weighs the
@@ -368,7 +468,13 @@ fn if_not_exists_weighs_the_schema_the_path_selects() {
          CREATE TABLE IF NOT EXISTS docs (other INT);",
     );
     assert_eq!(db.tables().count(), 1, "the second statement named the first table");
-    let docs = db.table(Some("app"), "docs").expect("the first table");
+    let docs = db
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the first table");
     assert_eq!(docs.columns(&db).expect("in this database").count(), 1);
     assert!(docs.column("id", &db).is_ok(), "the first table was kept");
 }
@@ -399,13 +505,33 @@ fn a_quoted_schema_keeps_its_case() {
          SET search_path TO \"App\";
          CREATE TABLE docs (id INT);",
     );
-    let docs = db.table(Some("\"App\""), "docs").expect("created in the quoted schema");
+    let docs = db
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("App", true),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("created in the quoted schema");
     assert_eq!(docs.table_schema(), Some("App"));
     assert!(docs.table_schema_is_quoted());
-    assert!(db.table(Some("app"), "docs").is_none(), "the case was not folded away");
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_none(),
+        "the case was not folded away"
+    );
 
     let written = parse("CREATE SCHEMA \"App\"; CREATE TABLE \"App\".docs (id INT);");
-    let written_docs = written.table(Some("\"App\""), "docs").expect("written out in full");
+    let written_docs = written
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("App", true),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("written out in full");
     assert_eq!(docs.table_schema(), written_docs.table_schema());
     assert_eq!(docs.table_schema_is_quoted(), written_docs.table_schema_is_quoted());
 }
@@ -447,12 +573,36 @@ fn public_first_on_the_path_wins_instead() {
 #[test]
 fn the_default_schema_answers_both_spellings() {
     let bare = parse("SET search_path TO public; CREATE TABLE docs (id INT);");
-    assert!(bare.table(Some("public"), "docs").is_some());
-    assert!(bare.table(None, "docs").is_some());
+    assert!(
+        bare.table_by_target(
+            TargetName::new("docs", false).with_schema("public", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        bare.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 
     let written = parse("CREATE TABLE public.docs (id INT);");
-    assert!(written.table(Some("public"), "docs").is_some());
-    assert!(written.table(None, "docs").is_some());
+    assert!(
+        written
+            .table_by_target(
+                TargetName::new("docs", false).with_schema("public", false),
+                IdentifierCase::AsWritten
+            )
+            .expect("unambiguous lookup")
+            .is_some()
+    );
+    assert!(
+        written
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 }
 
 /// A bare table resides in `public`, so a path omitting `public` cannot reach
@@ -480,7 +630,13 @@ fn the_user_entry_is_walked_past() {
          CREATE TABLE docs (id INT);
          CREATE POLICY docs_sel ON docs USING (true);",
     );
-    let docs = db.table(Some("public"), "docs").expect("created in the default schema");
+    let docs = db
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("public", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("created in the default schema");
     assert_eq!(docs.table_schema(), None, "stored in the bare spelling");
     let policy = db.policies().next().expect("the policy exists");
     assert!(core::ptr::eq(policy.table(&db).expect("resolves"), docs));
@@ -497,7 +653,10 @@ fn statements_may_qualify_the_default_schema() {
          CREATE POLICY p ON public.docs USING (true);",
     );
 
-    let docs = db.table(None, "docs").expect("the table exists");
+    let docs = db
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the table exists");
     let policy = db.policies().next().expect("the policy exists");
     assert!(core::ptr::eq(policy.table(&db).expect("resolves"), docs));
 

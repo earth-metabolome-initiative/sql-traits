@@ -46,8 +46,19 @@ fn no_schema_and_public_are_distinct_identities() {
 
     // The written lookup keeps aliasing them, which is why it cannot answer an
     // identity.
-    assert!(db.table(None, "explicit").is_some());
-    assert!(db.table(Some("public"), "plain").is_some());
+    assert!(
+        db.table_by_target(TargetName::new("explicit", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
+    assert!(
+        db.table_by_target(
+            TargetName::new("plain", false).with_schema("public", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
 }
 
 /// The name is taken as stored, so a quote character stands for itself: it
@@ -142,8 +153,17 @@ fn the_index_answers_what_a_scan_answers() -> Result<(), LookupError> {
 
     // The written lookups keep working, so the new method is an addition
     // rather than a replacement.
-    assert!(db.table(Some("public"), "plain").is_some());
-    assert!(db.resolve_target_table(TargetName::new("plain", false))?.is_some());
+    assert!(
+        db.table_by_target(
+            TargetName::new("plain", false).with_schema("public", false),
+            IdentifierCase::AsWritten
+        )?
+        .is_some()
+    );
+    assert!(
+        db.resolve_target_table(TargetName::new("plain", false), IdentifierCase::AsWritten)?
+            .is_some()
+    );
 
     Ok(())
 }

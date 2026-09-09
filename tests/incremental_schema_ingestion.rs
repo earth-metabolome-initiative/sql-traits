@@ -2,7 +2,9 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use sql_traits::{
-    structs::{ColumnDefinition, ColumnScope, ParserDB, ParserDBIngestor},
+    structs::{
+        ColumnDefinition, ColumnScope, IdentifierCase, ParserDB, ParserDBIngestor, TargetName,
+    },
     traits::{ColumnLike, DatabaseLike, TableLike},
 };
 use sqlparser::{
@@ -57,7 +59,12 @@ fn snapshots_preserve_each_incremental_schema_state() {
         input = input.apply_statement(statement).expect("drop applies");
     }
     let dropped = input.snapshot();
-    assert!(dropped.view(None, "v").is_none());
+    assert!(
+        dropped
+            .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
 
     for statement in statements("CREATE VIEW v AS SELECT id + 1 AS id FROM a;") {
         input = input.apply_statement(statement).expect("second view applies");
@@ -125,7 +132,10 @@ fn postgres_catalog_and_created_collations_survive_incremental_statements() {
         .expect("table applies");
 
     let database = input.finish();
-    let table = database.table(None, "t").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let column =
         table.column("name", &database).expect("column lookup runs").expect("column exists");
     let ColumnCollation::Named(collation) =
@@ -152,7 +162,10 @@ fn finished_schema_resumes_ingestion() {
         .expect("alter applies after resumption");
 
     let database = input.finish();
-    let table = database.table(None, "t").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(table.column("id", &database).expect("column lookup runs").is_some());
     assert!(table.column("label", &database).expect("column lookup runs").is_some());
 }
@@ -191,7 +204,10 @@ fn resumed_ingestion_preserves_options_and_created_collations() {
 
     let database = input.finish();
     assert_eq!(database.table_grants().count(), 1);
-    let table = database.table(None, "u").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("u", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let column =
         table.column("name", &database).expect("column lookup runs").expect("column exists");
     let ColumnCollation::Named(collation) =
@@ -214,7 +230,10 @@ fn batch_parsed_database_resumes_ingestion() {
         .expect("alter applies after resumption");
 
     let database = input.finish();
-    let table = database.table(None, "t").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(table.column("label", &database).expect("column lookup runs").is_some());
 }
 
@@ -260,7 +279,10 @@ fn one_shot_parsed_database_resumes_with_options_and_collations() {
 
     let database = input.finish();
     assert_eq!(database.table_grants().count(), 1);
-    let table = database.table(None, "u").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("u", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let column =
         table.column("name", &database).expect("column lookup runs").expect("column exists");
     let ColumnCollation::Named(collation) =
@@ -284,10 +306,16 @@ fn snapshot_resumes_ingestion_independently() {
         .try_fold(input.snapshot().into_ingestor(), ParserDBIngestor::apply_statement)
         .expect("alter applies on the snapshot");
     let database = resumed.finish();
-    let table = database.table(None, "t").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(table.column("label", &database).expect("column lookup runs").is_some());
 
     let original = input.finish();
-    let table = original.table(None, "t").expect("table exists");
+    let table = original
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert!(table.column("label", &original).expect("column lookup runs").is_none());
 }

@@ -114,6 +114,7 @@ mod tests {
 
     use crate::{
         prelude::ParserDB,
+        structs::{IdentifierCase, TargetName},
         traits::{DatabaseLike, FunctionLike, TableLike},
     };
 
@@ -126,7 +127,10 @@ mod tests {
             CREATE TABLE t (id INT, CHECK (ping()));
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let t = db.table(None, "t").unwrap();
+        let t = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
@@ -142,7 +146,10 @@ mod tests {
             CREATE TABLE t (id INT, CHECK (ping() AND ping()));
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let t = db.table(None, "t").unwrap();
+        let t = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
@@ -160,7 +167,10 @@ mod tests {
             CREATE TABLE t (id INT, CHECK (outer_fn(inner_fn(id))));
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let t = db.table(None, "t").unwrap();
+        let t = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
@@ -181,7 +191,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let t = db.table(None, "t").unwrap();
+        let t = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
@@ -202,7 +215,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let t = db.table(None, "t").unwrap();
+        let t = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .unwrap();
         let check = t.check_constraints(&db).expect("check constraints").next().expect("check");
         let meta = db.check_constraint_metadata(check).expect("check meta");
         let names: Vec<&str> = meta.functions().map(FunctionLike::name).collect();
@@ -222,7 +238,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("schema parses");
-        let table = db.table(None, "t").expect("table exists");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table exists");
         let check =
             table.check_constraints(&db).expect("constraints resolve").next().expect("check");
         let metadata = db.check_constraint_metadata(check).expect("metadata resolves");
@@ -238,7 +257,10 @@ mod tests {
             "CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';",
         )
         .expect("schema parses");
-        let function = db.function(None, "ping").expect("function exists");
+        let function = db
+            .function_by_target(TargetName::new("ping", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function exists");
         let dynamic_name = ObjectName(vec![ObjectNamePart::Function(ObjectNamePartFunction {
             name: Ident::new("ping"),
             args: Vec::new(),

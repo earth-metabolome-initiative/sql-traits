@@ -193,7 +193,11 @@ fn open_world_accepts_the_revoke_pg_dump_emits_for_functions() {
         )
         .expect("schema parses");
 
-    assert!(db.function(None, "f").is_some());
+    assert!(
+        db.function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 }
 
 /// Under the closed world every access control reference resolves when it is

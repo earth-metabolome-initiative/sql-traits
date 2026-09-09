@@ -171,6 +171,7 @@ mod tests {
 
     use crate::{
         prelude::ParserDB,
+        structs::{IdentifierCase, TargetName},
         traits::{DatabaseLike, FunctionLike},
     };
 
@@ -180,7 +181,11 @@ mod tests {
             "CREATE FUNCTION ping() RETURNS BOOLEAN AS 'SELECT TRUE';",
         )
         .expect("schema parses");
-        let mut function = database.function(None, "ping").expect("function exists").clone();
+        let mut function = database
+            .function_by_target(TargetName::new("ping", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function exists")
+            .clone();
         function.name.0 = vec![ObjectNamePart::Function(ObjectNamePartFunction {
             name: Ident::with_quote('"', "IDENTIFIER"),
             args: Vec::new(),

@@ -20,7 +20,7 @@
 
 use sha2::{Digest, Sha256};
 use sql_traits::{
-    structs::{ParserDB, canonical_bytes_v1},
+    structs::{IdentifierCase, ParserDB, TargetName, canonical_bytes_v1},
     traits::{DatabaseLike, TableLike},
 };
 use sqlparser::dialect::GenericDialect;
@@ -340,6 +340,16 @@ const GOLDEN_VECTORS: &[GoldenVector] = &[
     },
 ];
 
+/// The name a golden vector writes for its table, read out of the text the
+/// vector carries so a quoted spelling stays quoted.
+fn target<'a>(schema: Option<&'a str>, name: &'a str) -> TargetName<'a> {
+    let target = TargetName::parse(name).expect("the vector names one identifier");
+    match schema {
+        Some(schema) => target.with_schema(schema, false),
+        None => target,
+    }
+}
+
 fn to_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
@@ -357,7 +367,8 @@ fn test_golden_vectors() {
         let db = ParserDB::parse::<GenericDialect>(v.sql)
             .unwrap_or_else(|e| panic!("[{}] parse failed: {e:?}", v.id));
         let table = db
-            .table(v.schema, v.table_name)
+            .table_by_target(target(v.schema, v.table_name), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .unwrap_or_else(|| panic!("[{}] table `{}` not found", v.id, v.table_name));
 
         let bytes = canonical_bytes_v1(table, &db)
@@ -433,8 +444,14 @@ fn test_golden_vectors() {
     let v19 = GOLDEN_VECTORS.iter().find(|v| v.id == "v19_nfc_decomposed").unwrap();
     let db18 = ParserDB::parse::<GenericDialect>(v18.sql).expect("v18 parse");
     let db19 = ParserDB::parse::<GenericDialect>(v19.sql).expect("v19 parse");
-    let t18 = db18.table(v18.schema, v18.table_name).expect("v18 lookup");
-    let t19 = db19.table(v19.schema, v19.table_name).expect("v19 lookup");
+    let t18 = db18
+        .table_by_target(target(v18.schema, v18.table_name), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("v18 lookup");
+    let t19 = db19
+        .table_by_target(target(v19.schema, v19.table_name), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("v19 lookup");
     let b18 = canonical_bytes_v1(t18, &db18).expect("v18 bytes");
     let b19 = canonical_bytes_v1(t19, &db19).expect("v19 bytes");
     assert_eq!(

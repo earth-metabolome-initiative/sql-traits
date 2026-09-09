@@ -42,7 +42,8 @@ fn database(sql: &str) -> ParserDB {
 
 fn column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .columns(database)
         .expect("table is in this database")
@@ -52,7 +53,8 @@ fn column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
 
 fn nullability(database: &ParserDB, table_name: &str) -> Vec<(String, bool)> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .columns(database)
         .expect("table is in this database")
@@ -67,7 +69,8 @@ fn nullability(database: &ParserDB, table_name: &str) -> Vec<(String, bool)> {
 
 fn defaults(database: &ParserDB, table_name: &str) -> Vec<(String, Option<String>)> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .columns(database)
         .expect("table is in this database")
@@ -98,7 +101,10 @@ fn a_copy_receives_the_columns_of_the_table_it_copies() {
 #[test]
 fn a_copy_receives_not_null_but_none_of_what_implied_it() {
     let database = database(&format!("{SOURCE} CREATE TABLE bare (LIKE src);"));
-    let copy = database.table(None, "bare").expect("table exists");
+    let copy = database
+        .table_by_target(TargetName::new("bare", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     // `keyed` and `counted` are not nullable because a primary key and an
     // identity each imply it, even though neither is copied.
@@ -123,7 +129,10 @@ fn a_copy_receives_not_null_but_none_of_what_implied_it() {
     assert_eq!(copy.indices(&database).expect("in database").count(), 0);
 
     // The original keeps everything it declared.
-    let source = database.table(None, "src").expect("table exists");
+    let source = database
+        .table_by_target(TargetName::new("src", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(source.primary_key_columns(&database).expect("in database").count(), 1);
     assert_eq!(source.check_constraints(&database).expect("in database").count(), 1);
 }
@@ -151,8 +160,14 @@ fn a_default_arrives_only_when_the_statement_asks_for_it() {
 fn a_copy_is_not_a_child() {
     let database = database(&format!("{SOURCE} CREATE TABLE bare (LIKE src);"));
 
-    let copy = database.table(None, "bare").expect("table exists");
-    let source = database.table(None, "src").expect("table exists");
+    let copy = database
+        .table_by_target(TargetName::new("bare", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
+    let source = database
+        .table_by_target(TargetName::new("src", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     // Copying records no edge in either direction, and every column the copy
     // holds is its own.
@@ -209,7 +224,10 @@ fn a_copy_and_an_inheritance_in_one_statement_each_contribute() {
 
     assert_eq!(column_names(&database, "combo"), ["p1", "l1", "l2"]);
 
-    let combo = database.table(None, "combo").expect("table exists");
+    let combo = database
+        .table_by_target(TargetName::new("combo", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(
         combo
             .local_columns(&database)
@@ -238,7 +256,8 @@ fn the_spelling_without_parentheses_copies_alike() {
     assert_eq!(nullability(&database, "c"), [("a".to_owned(), false), ("b".to_owned(), true)]);
     assert_eq!(
         database
-            .table(None, "c")
+            .table_by_target(TargetName::new("c", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .inherits_from(&database)
             .expect("in database")
@@ -254,7 +273,8 @@ fn a_table_that_copies_nothing_is_left_alone() {
     assert_eq!(column_names(&database, "plain"), ["a", "b"]);
     assert_eq!(
         database
-            .table(None, "plain")
+            .table_by_target(TargetName::new("plain", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .primary_key_columns(&database)
             .expect("in database")

@@ -9,11 +9,8 @@
 #![allow(clippy::expect_used)]
 
 use sql_traits::{
-    errors::LookupError,
-    prelude::*,
-    structs::TargetName,
-    traits::TableLike,
-    utils::identifier_resolution::{identifiers_match, stored_identifier_matches_lookup},
+    errors::LookupError, prelude::*, structs::TargetName, traits::TableLike,
+    utils::identifier_resolution::identifiers_match,
 };
 use sqlparser::{
     ast::{Ident, ObjectName, ObjectNamePart},
@@ -54,45 +51,6 @@ fn fixture_variants() -> Vec<(ParserDB, String)> {
         (parse(&sql), path_sql.to_string())
     })
     .collect()
-}
-
-fn lookup_matrix() -> Vec<(Option<&'static str>, &'static str)> {
-    let mut matrix = Vec::new();
-    for name in [
-        "bare_a",
-        "BARE_A",
-        "\"bare_a\"",
-        "explicit_b",
-        "EXPLICIT_B",
-        "\"explicit_b\"",
-        "Mixed",
-        "mixed",
-        "\"Mixed\"",
-        "lower_quoted_name",
-        "plain",
-        "PLAIN",
-        "\"plain\"",
-        "Keyed",
-        "\"Keyed\"",
-        "other",
-        "\"Odd Space\"",
-        "\"odd space\"",
-        "ghost",
-    ] {
-        for schema in [
-            None,
-            Some("public"),
-            Some("PUBLIC"),
-            Some("\"public\""),
-            Some("app"),
-            Some("APP"),
-            Some("\"app\""),
-            Some("app_2"),
-        ] {
-            matrix.push((schema, name));
-        }
-    }
-    matrix
 }
 
 fn target_matrix() -> Vec<TargetName<'static>> {
@@ -191,34 +149,6 @@ fn outcome(result: &Result<Option<&Table>, LookupError>) -> String {
     }
 }
 
-/// Pre-index scan of `DatabaseLike::table`.
-fn oracle_table<'a>(db: &'a ParserDB, schema: Option<&str>, name: &str) -> Option<&'a Table> {
-    let lookup = sql_traits::utils::identifier_resolution::parse_lookup_identifier(name);
-    db.tables().find(|table| {
-        identifiers_match(
-            table.table_name(),
-            table.table_name_is_quoted(),
-            lookup.value(),
-            lookup.is_quoted(),
-        ) && match (schema, table.table_schema()) {
-            (None, None) => true,
-            (Some(lookup_schema), Some(table_schema)) => {
-                stored_identifier_matches_lookup(
-                    table_schema,
-                    table.table_schema_is_quoted(),
-                    lookup_schema,
-                )
-            }
-            (Some(lookup_schema), None) => {
-                stored_identifier_matches_lookup("public", false, lookup_schema)
-            }
-            (None, Some(table_schema)) => {
-                identifiers_match(table_schema, table.table_schema_is_quoted(), "public", false)
-            }
-        }
-    })
-}
-
 /// Pre-index default of `DatabaseLike::resolve_target_table`.
 fn oracle_resolve<'a>(
     db: &'a ParserDB,
@@ -290,32 +220,93 @@ fn target_of_object_name(object_name: &ObjectName) -> TargetName<'_> {
 }
 
 #[test]
-fn table_lookup_matches_scan() {
+fn resolve_target_table_matches_scan() {
     for (db, path_sql) in fixture_variants() {
-        for (schema, name) in lookup_matrix() {
-            let indexed = db.table(schema, name);
-            let scanned = oracle_table(&db, schema, name);
+        for target in target_matrix() {
+            let shown = target.to_string();
+            let indexed = db.resolve_target_table(target.clone(), IdentifierCase::AsWritten);
+            let scanned = oracle_resolve(&db, &target);
             assert_eq!(
-                indexed.map(render),
-                scanned.map(render),
-                "table({schema:?}, {name:?}) on {path_sql:?}"
+                outcome(&indexed),
+                outcome(&scanned),
+                "resolve_target_table({shown}, IdentifierCase::AsWritten) on {path_sql:?}"
             );
         }
     }
 }
 
+/// Tables whose stored parts equal `schema_key` and the target's name under
+/// `case`, found by scanning.
+fn matching_tables<'a>(
+    db: &'a ParserDB,
+    target: &TargetName<'_>,
+    case: IdentifierCase,
+    schema_key: &str,
+) -> Vec<&'a Table> {
+    let name_key = case.compared_form(target.name(), target.name_is_quoted());
+    db.tables()
+        .filter(|table| {
+            let stored_schema = table.table_schema().map_or_else(
+                || String::from("public"),
+                |schema| case.compared_form(schema, table.table_schema_is_quoted()).into_owned(),
+            );
+            case.compared_form(table.table_name(), table.table_name_is_quoted()) == name_key
+                && stored_schema == schema_key
+        })
+        .collect()
+}
+
+/// Scan oracle for the search-path resolver under any comparison.
+fn oracle_resolve_with<'a>(
+    db: &'a ParserDB,
+    target: &TargetName<'_>,
+    case: IdentifierCase,
+) -> Result<Option<&'a Table>, LookupError> {
+    if let Some(schema) = target.schema() {
+        let schema_key = case.compared_form(schema, target.schema_is_quoted());
+        return resolve_candidates(target, &matching_tables(db, target, case, &schema_key));
+    }
+
+    for (entry_schema, entry_quoted) in db.search_path().collect::<Vec<_>>() {
+        let schema_key = case.compared_form(entry_schema, entry_quoted);
+        let candidates = matching_tables(db, target, case, &schema_key);
+        if !candidates.is_empty() {
+            return resolve_candidates(target, &candidates);
+        }
+    }
+    Ok(None)
+}
+
+/// Scan oracle for the parts lookup, which consults no search path.
+fn oracle_by_target_with<'a>(
+    db: &'a ParserDB,
+    target: &TargetName<'_>,
+    case: IdentifierCase,
+) -> Result<Option<&'a Table>, LookupError> {
+    let schema_key = target.schema().map_or_else(
+        || String::from("public"),
+        |schema| case.compared_form(schema, target.schema_is_quoted()).into_owned(),
+    );
+    resolve_candidates(target, &matching_tables(db, target, case, &schema_key))
+}
+
 #[test]
-fn resolve_target_table_matches_scan() {
+fn every_comparison_matches_scan() {
     for (db, path_sql) in fixture_variants() {
         for target in target_matrix() {
-            let shown = target.to_string();
-            let indexed = db.resolve_target_table(target.clone());
-            let scanned = oracle_resolve(&db, &target);
-            assert_eq!(
-                outcome(&indexed),
-                outcome(&scanned),
-                "resolve_target_table({shown}) on {path_sql:?}"
-            );
+            for case in [IdentifierCase::AsWritten, IdentifierCase::Folded, IdentifierCase::Exact] {
+                let shown = target.to_string();
+                assert_eq!(
+                    outcome(&db.resolve_target_table(target.clone(), case)),
+                    outcome(&oracle_resolve_with(&db, &target, case)),
+                    "resolve_target_table({shown}, {case:?}) on {path_sql:?}"
+                );
+                assert_eq!(
+                    outcome(&db.table_by_target(target.clone(), case)),
+                    outcome(&oracle_by_target_with(&db, &target, case)),
+                    "table_by_target({shown}, {case:?}) on {path_sql:?}"
+                );
+            }
         }
     }
 }

@@ -27,7 +27,9 @@ impl FunctionMetadata {
     ///      CREATE FUNCTION f() RETURNS INT AS 'SELECT 1';
     ///      ALTER FUNCTION f() OWNER TO app_reader;",
     /// )?;
-    /// let function = db.function(None, "f").expect("Function should exist");
+    /// let function = db
+    ///     .function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// let metadata = db.function_metadata(function).expect("Metadata should exist");
     /// assert_eq!(metadata.owner(), Some("app_reader"));
     /// # Ok(())

@@ -58,7 +58,8 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE mytable (id INT);")?;
-    /// let table = db.table(None, "mytable").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("mytable", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(table.table_name(), "mytable");
     /// # Ok(())
     /// # }
@@ -93,8 +94,18 @@ pub trait TableLike:
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "CREATE TABLE Docs (id INT); CREATE TABLE \"Docs2\" (id INT);",
     /// )?;
-    /// assert_eq!(db.table(None, "docs").unwrap().stored_table_name(), "docs");
-    /// assert_eq!(db.table(None, "\"Docs2\"").unwrap().stored_table_name(), "Docs2");
+    /// assert_eq!(
+    ///     db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .stored_table_name(),
+    ///     "docs"
+    /// );
+    /// assert_eq!(
+    ///     db.table_by_target(TargetName::new("Docs2", true), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .stored_table_name(),
+    ///     "Docs2"
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -117,9 +128,11 @@ pub trait TableLike:
     /// CREATE TABLE MyTable (id INT);
     /// ",
     /// )?;
-    /// let snake_case_table = db.table(None, "my_table").unwrap();
+    /// let snake_case_table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(snake_case_table.is_snake_case());
-    /// let non_snake_case_table = db.table(None, "MyTable").unwrap();
+    /// let non_snake_case_table =
+    ///     db.table_by_target(TargetName::new("MyTable", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(!non_snake_case_table.is_snake_case());
     /// # Ok(())
     /// # }
@@ -153,7 +166,8 @@ pub trait TableLike:
     /// CREATE TRIGGER my_trigger BEFORE INSERT ON my_table FOR EACH ROW EXECUTE FUNCTION my_func();
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let triggers: Vec<&str> = table.triggers(&db)?.map(|t| t.name()).collect();
     /// assert_eq!(triggers, vec!["my_trigger"]);
     /// # Ok(())
@@ -198,8 +212,11 @@ pub trait TableLike:
     ///     CREATE TABLE my_next_table (id INT);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
-    /// let table_next = db.table(None, "my_next_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let table_next = db
+    ///     .table_by_target(TargetName::new("my_next_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert_eq!(table.table_doc(&db)?, None); // No documentation available
     /// assert_eq!(table_next.table_doc(&db)?, Some("the next table to create"));
     /// # Ok(())
@@ -221,9 +238,15 @@ pub trait TableLike:
     /// CREATE TABLE my_schema.my_table_with_schema (id INT);
     /// CREATE TABLE my_table (id INT);",
     /// )?;
-    /// let table_no_schema = db.table(None, "my_table").unwrap();
+    /// let table_no_schema =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(table_no_schema.table_schema(), None);
-    /// let table_with_schema = db.table(Some("my_schema"), "my_table_with_schema").unwrap();
+    /// let table_with_schema = db
+    ///     .table_by_target(
+    ///         TargetName::new("my_table_with_schema", false).with_schema("my_schema", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// assert_eq!(table_with_schema.table_schema(), Some("my_schema"));
     /// # Ok(())
     /// # }
@@ -261,14 +284,31 @@ pub trait TableLike:
     /// CREATE TABLE v (id INT);",
     /// )?;
     /// assert_eq!(
-    ///     db.table(Some("my_schema"), "t").unwrap().stored_table_schema().as_deref(),
+    ///     db.table_by_target(
+    ///         TargetName::new("t", false).with_schema("my_schema", false),
+    ///         IdentifierCase::AsWritten
+    ///     )?
+    ///     .unwrap()
+    ///     .stored_table_schema()
+    ///     .as_deref(),
     ///     Some("my_schema")
     /// );
     /// assert_eq!(
-    ///     db.table(Some("\"Other\""), "u").unwrap().stored_table_schema().as_deref(),
+    ///     db.table_by_target(
+    ///         TargetName::new("u", false).with_schema("Other", true),
+    ///         IdentifierCase::AsWritten
+    ///     )?
+    ///     .unwrap()
+    ///     .stored_table_schema()
+    ///     .as_deref(),
     ///     Some("Other")
     /// );
-    /// assert_eq!(db.table(None, "v").unwrap().stored_table_schema(), None);
+    /// assert_eq!(
+    ///     db.table_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .stored_table_schema(),
+    ///     None
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -299,7 +339,9 @@ pub trait TableLike:
     /// CREATE TABLE table3 (score DECIMAL);
     /// ",
     /// )?;
-    /// let table2 = db.table(None, "table2").expect("Table 'table2' should exist");
+    /// let table2 = db
+    ///     .table_by_target(TargetName::new("table2", false), IdentifierCase::AsWritten)?
+    ///     .expect("Table 'table2' should exist");
     /// assert_eq!(table2.table_id(&db), Some(1));
     /// # Ok(())
     /// # }
@@ -334,7 +376,8 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(table.require_in_database(&db).is_ok());
     /// # Ok(())
     /// # }
@@ -365,7 +408,8 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let column_names: Vec<&str> = table.columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(column_names, vec!["id", "name"]);
     /// # Ok(())
@@ -404,7 +448,9 @@ pub trait TableLike:
     ///     "CREATE TABLE docs (id INT, owner_id TEXT);
     ///      CREATE TABLE secret_docs (classification TEXT) INHERITS (docs);",
     /// )?;
-    /// let child = db.table(None, "secret_docs").unwrap();
+    /// let child = db
+    ///     .table_by_target(TargetName::new("secret_docs", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let all: Vec<&str> = child.columns(&db)?.map(|column| column.column_name()).collect();
     /// assert_eq!(all, vec!["id", "owner_id", "classification"]);
     /// let own: Vec<&str> = child.local_columns(&db)?.map(|column| column.column_name()).collect();
@@ -448,15 +494,19 @@ pub trait TableLike:
     ///      CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
     ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     /// )?;
-    /// let child = db.table(None, "secret_docs").unwrap();
+    /// let child = db
+    ///     .table_by_target(TargetName::new("secret_docs", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let parents: Vec<&str> = child.inherits_from(&db)?.map(|p| p.table_name()).collect();
     /// assert_eq!(parents, vec!["docs"]);
     ///
-    /// let parent = db.table(None, "docs").unwrap();
+    /// let parent =
+    ///     db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(parent.inherits_from(&db)?.count(), 0);
     ///
     /// // A partition belongs to its root, it does not inherit from it.
-    /// let part = db.table(None, "evt_low").unwrap();
+    /// let part =
+    ///     db.table_by_target(TargetName::new("evt_low", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(part.inherits_from(&db)?.count(), 0);
     /// # Ok(())
     /// # }
@@ -495,12 +545,19 @@ pub trait TableLike:
     ///      CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
     ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     /// )?;
-    /// let parent = db.table(None, "docs").unwrap();
+    /// let parent =
+    ///     db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?.unwrap();
     /// let children: Vec<&str> = parent.inheritors(&db)?.map(|c| c.table_name()).collect();
     /// assert_eq!(children, vec!["secret_docs"]);
     ///
     /// // A root has partitions, not inheritors.
-    /// assert_eq!(db.table(None, "evt").unwrap().inheritors(&db)?.count(), 0);
+    /// assert_eq!(
+    ///     db.table_by_target(TargetName::new("evt", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .inheritors(&db)?
+    ///         .count(),
+    ///     0
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -551,9 +608,15 @@ pub trait TableLike:
     ///     "CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
     ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     /// )?;
-    /// let part = db.table(None, "evt_low").unwrap();
+    /// let part =
+    ///     db.table_by_target(TargetName::new("evt_low", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(part.partition_root(&db)?.map(|root| root.table_name()), Some("evt"));
-    /// assert!(db.table(None, "evt").unwrap().partition_root(&db)?.is_none());
+    /// assert!(
+    ///     db.table_by_target(TargetName::new("evt", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .partition_root(&db)?
+    ///         .is_none()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -576,8 +639,18 @@ pub trait TableLike:
     ///     "CREATE TABLE evt (id INT, region TEXT) PARTITION BY LIST (region);
     ///      CREATE TABLE docs (id INT);",
     /// )?;
-    /// assert_eq!(db.table(None, "evt").unwrap().partition_strategy(), Some(PartitionStrategy::List));
-    /// assert_eq!(db.table(None, "docs").unwrap().partition_strategy(), None);
+    /// assert_eq!(
+    ///     db.table_by_target(TargetName::new("evt", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .partition_strategy(),
+    ///     Some(PartitionStrategy::List)
+    /// );
+    /// assert_eq!(
+    ///     db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .partition_strategy(),
+    ///     None
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -607,7 +680,8 @@ pub trait TableLike:
     ///     "CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
     ///      CREATE TABLE evt_low PARTITION OF evt FOR VALUES FROM (1) TO (9);",
     /// )?;
-    /// let root = db.table(None, "evt").unwrap();
+    /// let root =
+    ///     db.table_by_target(TargetName::new("evt", false), IdentifierCase::AsWritten)?.unwrap();
     /// let parts: Vec<&str> = root.partitions(&db)?.map(|p| p.table_name()).collect();
     /// assert_eq!(parts, vec!["evt_low"]);
     /// # Ok(())
@@ -665,10 +739,15 @@ pub trait TableLike:
     ///     "CREATE TABLE evt (id INT) PARTITION BY RANGE (id);
     ///      CREATE TABLE docs (id INT);",
     /// )?;
-    /// let root = db.table(None, "evt").unwrap();
+    /// let root =
+    ///     db.table_by_target(TargetName::new("evt", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(root.is_partitioned());
     /// assert_eq!(root.partitions(&db)?.count(), 0);
-    /// assert!(!db.table(None, "docs").unwrap().is_partitioned());
+    /// assert!(
+    ///     !db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .is_partitioned()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -710,8 +789,12 @@ pub trait TableLike:
     /// ",
     /// )?;
     ///
-    /// let users = db.table(None, "users").expect("users table should exist");
-    /// let users_archive = db.table(None, "users_archive").expect("users_archive table should exist");
+    /// let users = db
+    ///     .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?
+    ///     .expect("users table should exist");
+    /// let users_archive = db
+    ///     .table_by_target(TargetName::new("users_archive", false), IdentifierCase::AsWritten)?
+    ///     .expect("users_archive table should exist");
     ///
     /// // Different table names produce different fingerprints.
     /// assert_ne!(users.schema_fingerprint(&db)?, users_archive.schema_fingerprint(&db)?);
@@ -719,7 +802,8 @@ pub trait TableLike:
     /// // Same SQL produces the same fingerprint (deterministic).
     /// let db2 =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);")?;
-    /// let users2 = db2.table(None, "users").unwrap();
+    /// let users2 =
+    ///     db2.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(users.schema_fingerprint(&db)?, users2.schema_fingerprint(&db2)?);
     /// # Ok(())
     /// # }
@@ -756,9 +840,12 @@ pub trait TableLike:
     /// ",
     /// )?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(table.has_generated_columns(&db)?);
-    /// let other_table = db.table(None, "my_other_table").unwrap();
+    /// let other_table = db
+    ///     .table_by_target(TargetName::new("my_other_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!other_table.has_generated_columns(&db)?);
     /// # Ok(())
     /// # }
@@ -788,7 +875,8 @@ pub trait TableLike:
     ///
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(table.number_of_columns(&db)?, 3);
     /// # Ok(())
     /// # }
@@ -816,7 +904,8 @@ pub trait TableLike:
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// assert_eq!(id_column.column_name(), "id");
     /// let non_existent_column = table.column("non_existent", &db)?;
@@ -843,7 +932,9 @@ pub trait TableLike:
     ///     );
     ///     "#,
     /// )?;
-    /// let table = db.table(None, "t").expect("Table should exist");
+    /// let table = db
+    ///     .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+    ///     .expect("Table should exist");
     ///
     /// assert!(table.column("foo", &db)?.is_some());
     /// assert!(table.column("\"foo\"", &db)?.is_some());
@@ -889,7 +980,8 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (\"ID\" INT, id INT);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     ///
     /// assert_eq!(table.column_id_by_name("\"ID\"", &db)?, Some(0));
     /// assert_eq!(table.column_id_by_name("ID", &db)?, Some(1));
@@ -933,7 +1025,8 @@ pub trait TableLike:
     ///
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     ///
     /// let name_column = table.column_by_id(1, &db)?.expect("Column at position 1 should exist");
     /// assert_eq!(name_column.column_name(), "name");
@@ -974,7 +1067,8 @@ pub trait TableLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT, name TEXT);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     ///
     /// assert_eq!(table.column_name_by_id(1, &db)?, Some("name"));
     /// assert_eq!(table.column_name_by_id(2, &db)?, None);
@@ -1018,8 +1112,10 @@ pub trait TableLike:
     /// CREATE TABLE table2 (id INT, description TEXT);
     /// ",
     /// )?;
-    /// let table1 = db.table(None, "table1").unwrap();
-    /// let table2 = db.table(None, "table2").unwrap();
+    /// let table1 =
+    ///     db.table_by_target(TargetName::new("table1", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let table2 =
+    ///     db.table_by_target(TargetName::new("table2", false), IdentifierCase::AsWritten)?.unwrap();
     /// let table1_id = table1.column("id", &db)?.expect("Column 'id' should exist in table1");
     /// let table2_id = table2.column("id", &db)?.expect("Column 'id' should exist in table2");
     /// assert!(table1.has_column(table1_id, &db)?);
@@ -1063,15 +1159,23 @@ pub trait TableLike:
     /// CREATE TABLE my_no_pk_table (id INT, name TEXT);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let pk_columns: Vec<&str> =
     ///     table.primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(pk_columns, vec!["id"]);
-    /// let composite_pk_table = db.table(None, "my_composite_pk_table").unwrap();
+    /// let composite_pk_table = db
+    ///     .table_by_target(
+    ///         TargetName::new("my_composite_pk_table", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// let composite_pk_columns: Vec<&str> =
     ///     composite_pk_table.primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(composite_pk_columns, vec!["id1", "id2"]);
-    /// let no_pk_table = db.table(None, "my_no_pk_table").unwrap();
+    /// let no_pk_table = db
+    ///     .table_by_target(TargetName::new("my_no_pk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let no_pk_columns: Vec<&str> =
     ///     no_pk_table.primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(no_pk_columns, Vec::<&str>::new());
@@ -1115,10 +1219,13 @@ pub trait TableLike:
     /// CREATE TABLE keyless (a INT);
     /// ",
     /// )?;
-    /// let composite = db.table(None, "composite").unwrap();
+    /// let composite = db
+    ///     .table_by_target(TargetName::new("composite", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert_eq!(composite.primary_key_column_ids(&db)?, vec![2, 0]);
     ///
-    /// let keyless = db.table(None, "keyless").unwrap();
+    /// let keyless =
+    ///     db.table_by_target(TargetName::new("keyless", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(keyless.primary_key_column_ids(&db)?, Vec::<usize>::new());
     /// # Ok(())
     /// # }
@@ -1193,11 +1300,14 @@ pub trait TableLike:
     /// CREATE TABLE composite_pk (id1 INT, id2 INT, PRIMARY KEY (id1, id2));
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let pk_column = table.primary_key_column(&db)?.unwrap();
     /// assert_eq!(pk_column.column_name(), "id");
     ///
-    /// let composite_table = db.table(None, "composite_pk").unwrap();
+    /// let composite_table = db
+    ///     .table_by_target(TargetName::new("composite_pk", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(composite_table.primary_key_column(&db)?.is_none());
     /// # Ok(())
     /// # }
@@ -1241,9 +1351,12 @@ pub trait TableLike:
     /// CREATE TABLE my_no_gen_pk_table (id INT PRIMARY KEY, name TEXT);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(table.has_surrogate_primary_key(&db)?);
-    /// let no_gen_pk_table = db.table(None, "my_no_gen_pk_table").unwrap();
+    /// let no_gen_pk_table = db
+    ///     .table_by_target(TargetName::new("my_no_gen_pk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!no_gen_pk_table.has_surrogate_primary_key(&db)?);
     /// # Ok(())
     /// # }
@@ -1277,10 +1390,16 @@ pub trait TableLike:
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 BIGSERIAL, name TEXT, PRIMARY KEY (id1, id2));
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let pk_types = table.primary_key_type(&db)?;
     /// assert_eq!(pk_types, vec!["INT"]);
-    /// let composite_pk_table = db.table(None, "my_composite_pk_table").unwrap();
+    /// let composite_pk_table = db
+    ///     .table_by_target(
+    ///         TargetName::new("my_composite_pk_table", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// let composite_pk_types = composite_pk_table.primary_key_type(&db)?;
     /// assert_eq!(composite_pk_types, vec!["INT", "BIGINT"]);
     /// # Ok(())
@@ -1320,7 +1439,8 @@ pub trait TableLike:
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// assert!(table.is_primary_key_column(&db, id_column)?);
@@ -1332,7 +1452,8 @@ pub trait TableLike:
     /// CREATE TABLE pair (a INT, b INT, c INT, PRIMARY KEY (a, b));
     /// ",
     /// )?;
-    /// let pair = db.table(None, "pair").unwrap();
+    /// let pair =
+    ///     db.table_by_target(TargetName::new("pair", false), IdentifierCase::AsWritten)?.unwrap();
     /// for name in ["a", "b"] {
     ///     let column = pair.column(name, &db)?.expect("column exists");
     ///     assert!(pair.is_primary_key_column(&db, column)?);
@@ -1374,9 +1495,12 @@ pub trait TableLike:
     /// CREATE TABLE my_no_pk_table (id INT, name TEXT);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(table.has_primary_key(&db)?);
-    /// let no_pk_table = db.table(None, "my_no_pk_table").unwrap();
+    /// let no_pk_table = db
+    ///     .table_by_target(TargetName::new("my_no_pk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!no_pk_table.has_primary_key(&db)?);
     /// # Ok(())
     /// # }
@@ -1408,7 +1532,8 @@ pub trait TableLike:
     /// CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, age INT);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let non_pk_columns: Vec<&str> =
     ///     table.non_primary_key_columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(non_pk_columns, vec!["name", "age"]);
@@ -1451,9 +1576,12 @@ pub trait TableLike:
     /// CREATE TABLE my_pk_only_table (id INT PRIMARY KEY);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(table.has_non_primary_key_columns(&db)?);
-    /// let pk_only_table = db.table(None, "my_pk_only_table").unwrap();
+    /// let pk_only_table = db
+    ///     .table_by_target(TargetName::new("my_pk_only_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!pk_only_table.has_non_primary_key_columns(&db)?);
     /// # Ok(())
     /// # }
@@ -1484,9 +1612,15 @@ pub trait TableLike:
     /// CREATE TABLE my_composite_pk_table (id1 INT, id2 INT, name TEXT, PRIMARY KEY (id1, id2));
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(!table.has_composite_primary_key(&db)?);
-    /// let composite_pk_table = db.table(None, "my_composite_pk_table").unwrap();
+    /// let composite_pk_table = db
+    ///     .table_by_target(
+    ///         TargetName::new("my_composite_pk_table", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// assert!(composite_pk_table.has_composite_primary_key(&db)?);
     /// # Ok(())
     /// # }
@@ -1518,7 +1652,8 @@ pub trait TableLike:
     /// CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT, CHECK (length(name) > 0));
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> =
     ///     table.check_constraints(&db)?.map(|cc| cc.expression(&db).to_string()).collect();
     /// assert_eq!(check_constraints, vec!["id > 0", "length(name) > 0"]);
@@ -1555,7 +1690,8 @@ pub trait TableLike:
     /// CREATE TABLE my_table (id INT CHECK (TRUE), name TEXT, CHECK (length(name) > 0));
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let non_tautological_ccs: Vec<_> = table
     ///     .non_tautological_check_constraints(&db)?
     ///     .map(|cc| cc.expression(&db).to_string())
@@ -1604,9 +1740,13 @@ pub trait TableLike:
     /// CREATE TABLE my_table_without_cc (id INT, name TEXT);
     /// ",
     /// )?;
-    /// let table_with_cc = db.table(None, "my_table_with_cc").unwrap();
+    /// let table_with_cc = db
+    ///     .table_by_target(TargetName::new("my_table_with_cc", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(table_with_cc.has_check_constraints(&db)?);
-    /// let table_without_cc = db.table(None, "my_table_without_cc").unwrap();
+    /// let table_without_cc = db
+    ///     .table_by_target(TargetName::new("my_table_without_cc", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!table_without_cc.has_check_constraints(&db)?);
     /// # Ok(())
     /// # }
@@ -1640,11 +1780,19 @@ pub trait TableLike:
     /// CREATE TABLE my_table_with_only_tautological_cc (id INT CHECK (TRUE), name TEXT);
     /// ",
     /// )?;
-    /// let table_with_non_tautological_cc =
-    ///     db.table(None, "my_table_with_non_tautological_cc").unwrap();
+    /// let table_with_non_tautological_cc = db
+    ///     .table_by_target(
+    ///         TargetName::new("my_table_with_non_tautological_cc", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// assert!(table_with_non_tautological_cc.has_non_tautological_check_constraints(&db)?);
-    /// let table_with_only_tautological_cc =
-    ///     db.table(None, "my_table_with_only_tautological_cc").unwrap();
+    /// let table_with_only_tautological_cc = db
+    ///     .table_by_target(
+    ///         TargetName::new("my_table_with_only_tautological_cc", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// assert!(!table_with_only_tautological_cc.has_non_tautological_check_constraints(&db)?);
     /// # Ok(())
     /// # }
@@ -1684,11 +1832,17 @@ pub trait TableLike:
     /// CREATE TABLE another_table (id INT PRIMARY KEY, value INT CHECK (TRUE));
     /// ",
     /// )?;
-    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(parent_table.has_non_tautological_check_constraints_in_hierarchy(&db)?);
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(child_table.has_non_tautological_check_constraints_in_hierarchy(&db)?);
-    /// let another_table = db.table(None, "another_table").unwrap();
+    /// let another_table = db
+    ///     .table_by_target(TargetName::new("another_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!another_table.has_non_tautological_check_constraints_in_hierarchy(&db)?);
     /// # Ok(())
     /// # }
@@ -1734,7 +1888,8 @@ pub trait TableLike:
     /// CREATE INDEX my_index ON my_table (name);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let indices: Vec<_> = table.indices(&db)?.collect();
     /// assert_eq!(indices.len(), 1);
     /// # Ok(())
@@ -1769,7 +1924,8 @@ pub trait TableLike:
     /// CREATE TABLE my_table (id INT UNIQUE, name TEXT, UNIQUE (name));
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let unique_indices: Vec<_> = table
     ///     .unique_indices(&db)?
     ///     .map(|ui| ui.columns(&db).map(|iter| iter.map(|col| col.column_name()).collect::<Vec<_>>()))
@@ -1806,7 +1962,9 @@ pub trait TableLike:
     /// CREATE TABLE host_table (id INT, name TEXT, FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let foreign_keys = host_table.foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(foreign_keys.len(), 1);
     /// # Ok(())
@@ -1843,11 +2001,20 @@ pub trait TableLike:
     /// CREATE TABLE host_table_without_fk (id INT, name TEXT);
     /// ",
     /// )?;
-    /// let referenced_table = db.table(None, "referenced_table").unwrap();
+    /// let referenced_table = db
+    ///     .table_by_target(TargetName::new("referenced_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!referenced_table.has_foreign_keys(&db)?);
-    /// let host_table_with_fk = db.table(None, "host_table_with_fk").unwrap();
+    /// let host_table_with_fk = db
+    ///     .table_by_target(TargetName::new("host_table_with_fk", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(host_table_with_fk.has_foreign_keys(&db)?);
-    /// let host_table_without_fk = db.table(None, "host_table_without_fk").unwrap();
+    /// let host_table_without_fk = db
+    ///     .table_by_target(
+    ///         TargetName::new("host_table_without_fk", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// assert!(!host_table_without_fk.has_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
@@ -1883,9 +2050,13 @@ pub trait TableLike:
     /// CREATE TABLE self_ref_table (id INT PRIMARY KEY, parent_id INT REFERENCES self_ref_table(id));
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(child_table.has_non_self_referential_foreign_keys(&db)?);
-    /// let self_ref_table = db.table(None, "self_ref_table").unwrap();
+    /// let self_ref_table = db
+    ///     .table_by_target(TargetName::new("self_ref_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!self_ref_table.has_non_self_referential_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
@@ -1942,8 +2113,12 @@ pub trait TableLike:
     /// ",
     /// )?;
     ///
-    /// let host_table = db.table(None, "host_table").unwrap();
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let fks_to_ancestors = host_table.foreign_keys_to_ancestors_of(&db, child_table)?;
     /// assert_eq!(fks_to_ancestors.count(), 2);
     /// # Ok(())
@@ -2000,7 +2175,9 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table2(id));
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let referenced_tables = host_table.referenced_tables(&db)?;
     /// assert_eq!(referenced_tables.len(), 2);
     /// # Ok(())
@@ -2055,7 +2232,9 @@ pub trait TableLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let non_self_refs = host_table.non_self_referenced_tables(&db)?;
     /// assert_eq!(non_self_refs.len(), 1);
     /// assert_eq!(non_self_refs[0].table_name(), "referenced_table");
@@ -2099,7 +2278,9 @@ pub trait TableLike:
     /// CREATE TABLE host_table (id INT PRIMARY KEY REFERENCES referenced_table(id), name TEXT);
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let extension_fks = host_table.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(extension_fks.len(), 1);
     /// # Ok(())
@@ -2154,7 +2335,9 @@ pub trait TableLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let extended_tables = host_table.extended_tables(&db)?;
     /// assert_eq!(extended_tables.count(), 1);
     /// # Ok(())
@@ -2203,11 +2386,17 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let root_table = child_table.extension_root_table(&db)?.unwrap();
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert_eq!(root_table, grandparent_table);
-    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let parent_root_table = parent_table.extension_root_table(&db)?.unwrap();
     /// assert_eq!(parent_root_table, grandparent_table);
     /// let grandparent_root_table = grandparent_table.extension_root_table(&db)?;
@@ -2254,7 +2443,9 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let extending_tables = parent_table.extending_tables(&db)?;
     /// assert_eq!(extending_tables.count(), 1);
     /// # Ok(())
@@ -2304,9 +2495,13 @@ pub trait TableLike:
     /// CREATE TABLE child_table (id INT PRIMARY KEY REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(parent_table.is_extended(&db)?);
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!child_table.is_extended(&db)?);
     /// # Ok(())
     /// # }
@@ -2349,10 +2544,18 @@ pub trait TableLike:
     /// );
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let father_table = db.table(None, "father_table").unwrap();
-    /// let mother_table = db.table(None, "mother_table").unwrap();
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let father_table = db
+    ///     .table_by_target(TargetName::new("father_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let mother_table = db
+    ///     .table_by_target(TargetName::new("mother_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let extension_fks = child_table.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// let [father_extension_fk, mother_extension_fk] = extension_fks.as_slice() else {
     ///     panic!("Expected two extension foreign keys");
@@ -2422,10 +2625,18 @@ pub trait TableLike:
     /// );
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let father_table = db.table(None, "father_table").unwrap();
-    /// let mother_table = db.table(None, "mother_table").unwrap();
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let father_table = db
+    ///     .table_by_target(TargetName::new("father_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let mother_table = db
+    ///     .table_by_target(TargetName::new("mother_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let extended_table_to_father = child_table.extended_table_to(&db, father_table)?;
     /// assert_eq!(extended_table_to_father, Some(father_table));
     /// let extended_table_to_mother = child_table.extended_table_to(&db, mother_table)?;
@@ -2479,7 +2690,9 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let ancestral_tables = child_table.ancestral_extended_tables(&db)?;
     /// assert_eq!(ancestral_tables.len(), 2);
     /// # Ok(())
@@ -2537,9 +2750,15 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
-    /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let ancestral_tables = child_table.ancestral_extended_tables_topological(&db)?;
     /// assert_eq!(ancestral_tables, vec![grandparent_table, parent_table]);
     /// # Ok(())
@@ -2601,7 +2820,9 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
     /// let referenced_tables = host_table.referenced_tables_via_column(&db, id_column)?;
     /// assert_eq!(referenced_tables.len(), 1);
@@ -2661,8 +2882,12 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(child_table.is_extension(&db)?);
     /// assert!(!parent_table.is_extension(&db)?);
     /// # Ok(())
@@ -2701,8 +2926,12 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let parent_table = db.table(None, "parent_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(child_table.is_descendant_of(&db, parent_table)?);
     /// assert!(!parent_table.is_descendant_of(&db, child_table)?);
     /// # Ok(())
@@ -2747,10 +2976,18 @@ pub trait TableLike:
     /// CREATE TABLE unrelated_table (id INT PRIMARY KEY, name TEXT);
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
-    /// let unrelated_table = db.table(None, "unrelated_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let unrelated_table = db
+    ///     .table_by_target(TargetName::new("unrelated_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(
     ///     child_table.shares_ancestors_with(&db, parent_table)?,
     ///     "Child should share ancestors with parent"
@@ -2806,7 +3043,9 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let singleton_fks = host_table.singleton_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(singleton_fks.len(), 1);
     /// # Ok(())
@@ -2859,7 +3098,9 @@ pub trait TableLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let non_self_referential_singleton_fks =
     ///     host_table.non_self_referential_singleton_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(non_self_referential_singleton_fks.len(), 1);
@@ -2911,7 +3152,9 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES referenced_table(id));
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(host_table.has_singleton_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
@@ -2951,9 +3194,13 @@ pub trait TableLike:
     /// );
     /// ",
     /// )?;
-    /// let referenced_table = db.table(None, "referenced_table").unwrap();
+    /// let referenced_table = db
+    ///     .table_by_target(TargetName::new("referenced_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!referenced_table.has_non_self_referential_singleton_foreign_keys(&db)?);
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(host_table.has_non_self_referential_singleton_foreign_keys(&db)?);
     /// # Ok(())
     /// # }
@@ -2995,9 +3242,15 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(child_table.depends_on(&db, parent_table)?);
     /// assert!(child_table.depends_on(&db, grandparent_table)?);
     /// assert!(!parent_table.depends_on(&db, child_table)?);
@@ -3061,9 +3314,15 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(child_table.refers_to(&db, parent_table)?);
     /// assert!(!child_table.refers_to(&db, grandparent_table)?);
     /// assert!(!parent_table.refers_to(&db, child_table)?);
@@ -3120,7 +3379,9 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let dependent_tables: Vec<&str> =
     ///     grandparent_table.dependent_tables(&db)?.map(|t| t.table_name()).collect();
     /// assert_eq!(dependent_tables, vec!["child_table", "parent_table"]);
@@ -3172,8 +3433,12 @@ pub trait TableLike:
     ///     FOREIGN KEY (id) REFERENCES parent_table(id));
     /// ",
     /// )?;
-    /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let child_table = db.table(None, "child_table").unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(parent_table.has_dependent_tables(&db)?);
     /// assert!(!child_table.has_dependent_tables(&db)?);
     /// # Ok(())
@@ -3217,11 +3482,21 @@ pub trait TableLike:
     /// CREATE TABLE unrelated_table (id INT PRIMARY KEY, name TEXT);
     /// ",
     /// )?;
-    /// let child_table1 = db.table(None, "child_table1").unwrap();
-    /// let child_table2 = db.table(None, "child_table2").unwrap();
-    /// let parent_table = db.table(None, "parent_table").unwrap();
-    /// let grandparent_table = db.table(None, "grandparent_table").unwrap();
-    /// let unrelated_table = db.table(None, "unrelated_table").unwrap();
+    /// let child_table1 = db
+    ///     .table_by_target(TargetName::new("child_table1", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let child_table2 = db
+    ///     .table_by_target(TargetName::new("child_table2", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let parent_table = db
+    ///     .table_by_target(TargetName::new("parent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let grandparent_table = db
+    ///     .table_by_target(TargetName::new("grandparent_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let unrelated_table = db
+    ///     .table_by_target(TargetName::new("unrelated_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[child_table2])?, Some(parent_table));
     /// assert_eq!(child_table1.most_recent_common_ancestor(&db, &[parent_table])?, Some(parent_table));
     /// assert_eq!(
@@ -3313,10 +3588,16 @@ pub trait TableLike:
     /// );
     /// ",
     /// )?;
-    /// let root = db.table(None, "root").unwrap();
-    /// let child_table = db.table(None, "child_table").unwrap();
-    /// let my_table = db.table(None, "my_table").unwrap();
-    /// let spouse_table = db.table(None, "spouse_table").unwrap();
+    /// let root =
+    ///     db.table_by_target(TargetName::new("root", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let child_table = db
+    ///     .table_by_target(TargetName::new("child_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let my_table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let spouse_table = db
+    ///     .table_by_target(TargetName::new("spouse_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert_eq!(my_table.spouses(&db)?.next(), Some(spouse_table));
     /// assert_eq!(spouse_table.spouses(&db)?.next(), Some(my_table));
     /// assert!(root.spouses(&db)?.next().is_none());
@@ -3380,8 +3661,14 @@ pub trait TableLike:
     ///      CREATE TABLE no_snake_prefix_table (user_id INT, username TEXT);",
     /// )?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
-    /// let no_snake_prefix_table = db.table(None, "no_snake_prefix_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let no_snake_prefix_table = db
+    ///     .table_by_target(
+    ///         TargetName::new("no_snake_prefix_table", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     ///
     /// assert!(table.has_common_column_name_snake_prefix(&db)?);
     /// assert!(!no_snake_prefix_table.has_common_column_name_snake_prefix(&db)?);
@@ -3424,9 +3711,14 @@ pub trait TableLike:
     ///      CREATE TABLE another_table (user_id INT, username TEXT, email TEXT);",
     /// )?;
     ///
-    /// let my_table = db.table(None, "my_table").unwrap();
-    /// let other_table = db.table(None, "other_table").unwrap();
-    /// let another_table = db.table(None, "another_table").unwrap();
+    /// let my_table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let other_table = db
+    ///     .table_by_target(TargetName::new("other_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let another_table = db
+    ///     .table_by_target(TargetName::new("another_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     ///
     /// assert_eq!(my_table.common_column_name_snake_prefix(&db)?, Some("user_"));
     /// assert_eq!(other_table.common_column_name_snake_prefix(&db)?, None);
@@ -3470,8 +3762,11 @@ pub trait TableLike:
     ///      CREATE TABLE other_table (userid INT, group_id INT, id_team INT);",
     /// )?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
-    /// let other_table = db.table(None, "other_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let other_table = db
+    ///     .table_by_target(TargetName::new("other_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     ///
     /// assert!(table.has_common_column_name_snake_suffix(&db)?);
     /// assert!(!other_table.has_common_column_name_snake_suffix(&db)?);
@@ -3514,9 +3809,14 @@ pub trait TableLike:
     ///      CREATE TABLE another_table (id INT, name TEXT);",
     /// )?;
     ///
-    /// let my_table = db.table(None, "my_table").unwrap();
-    /// let other_table = db.table(None, "other_table").unwrap();
-    /// let another_table = db.table(None, "another_table").unwrap();
+    /// let my_table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let other_table = db
+    ///     .table_by_target(TargetName::new("other_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let another_table = db
+    ///     .table_by_target(TargetName::new("another_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     ///
     /// assert_eq!(my_table.common_column_name_snake_suffix(&db)?, Some("_id"));
     /// assert_eq!(other_table.common_column_name_snake_suffix(&db)?, None);
@@ -3560,9 +3860,12 @@ pub trait TableLike:
     /// CREATE TABLE my_other_table (id INT);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert!(table.has_row_level_security(&db)?);
-    /// let other_table = db.table(None, "my_other_table").unwrap();
+    /// let other_table = db
+    ///     .table_by_target(TargetName::new("my_other_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!other_table.has_row_level_security(&db)?);
     /// # Ok(())
     /// # }
@@ -3601,15 +3904,21 @@ pub trait TableLike:
     /// CREATE TABLE no_rls_table (id INT);
     /// ",
     /// )?;
-    /// let forced = db.table(None, "forced_table").unwrap();
+    /// let forced = db
+    ///     .table_by_target(TargetName::new("forced_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(forced.has_row_level_security(&db)?);
     /// assert!(forced.has_forced_row_level_security(&db)?);
     ///
-    /// let normal_rls = db.table(None, "normal_rls_table").unwrap();
+    /// let normal_rls = db
+    ///     .table_by_target(TargetName::new("normal_rls_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(normal_rls.has_row_level_security(&db)?);
     /// assert!(!normal_rls.has_forced_row_level_security(&db)?);
     ///
-    /// let no_rls = db.table(None, "no_rls_table").unwrap();
+    /// let no_rls = db
+    ///     .table_by_target(TargetName::new("no_rls_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// assert!(!no_rls.has_row_level_security(&db)?);
     /// assert!(!no_rls.has_forced_row_level_security(&db)?);
     /// # Ok(())
@@ -3656,10 +3965,12 @@ pub trait TableLike:
     /// CREATE TABLE notes (id INT);
     /// ",
     /// )?;
-    /// let docs = db.table(None, "docs").unwrap();
+    /// let docs =
+    ///     db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(docs.owner(&db)?, Some("app_owner"));
     ///
-    /// let notes = db.table(None, "notes").unwrap();
+    /// let notes =
+    ///     db.table_by_target(TargetName::new("notes", false), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(notes.owner(&db)?, None);
     /// # Ok(())
     /// # }
@@ -3696,7 +4007,8 @@ pub trait TableLike:
     /// ",
     /// )?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let mut policies: Vec<_> = table.policies(&db)?.collect();
     /// policies.sort_by(|a, b| a.name().cmp(b.name()));
     ///
@@ -3709,7 +4021,9 @@ pub trait TableLike:
     /// assert_eq!(policies[1].command(), CreatePolicyCommand::Insert);
     /// assert_eq!(policies[2].command(), CreatePolicyCommand::Select);
     ///
-    /// let other_table = db.table(None, "other_table").unwrap();
+    /// let other_table = db
+    ///     .table_by_target(TargetName::new("other_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let other_policies: Vec<_> = other_table.policies(&db)?.collect();
     /// assert_eq!(other_policies.len(), 1);
     /// assert_eq!(other_policies[0].name(), "other_policy");
@@ -3759,7 +4073,8 @@ pub trait TableLike:
     /// GRANT DELETE ON other_table TO admin;
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let grants: Vec<_> = table.grants(&db)?.collect();
     /// assert_eq!(grants.len(), 2);
     /// # Ok(())
@@ -3807,7 +4122,8 @@ pub trait TableLike:
     /// GRANT INSERT ON my_table TO writer;
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let reader = db.role("reader").unwrap();
     /// let writer = db.role("writer").unwrap();
     ///
@@ -3850,7 +4166,8 @@ pub trait TableLike:
     /// GRANT INSERT ON my_table TO writer;
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let writer = db.role("writer").unwrap();
     ///
     /// assert!(table.can_insert(writer, &db)?);
@@ -3891,7 +4208,8 @@ pub trait TableLike:
     /// GRANT UPDATE ON my_table TO updater;
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let updater = db.role("updater").unwrap();
     ///
     /// assert!(table.can_update(updater, &db)?);
@@ -3932,7 +4250,8 @@ pub trait TableLike:
     /// GRANT DELETE ON my_table TO deleter;
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let deleter = db.role("deleter").unwrap();
     ///
     /// assert!(table.can_delete(deleter, &db)?);
@@ -3979,7 +4298,8 @@ pub trait TableLike:
     /// GRANT INSERT ON my_table TO writer;
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let reader = db.role("reader").unwrap();
     /// let writer = db.role("writer").unwrap();
     ///
@@ -4019,7 +4339,8 @@ pub trait TableLike:
     /// GRANT TRUNCATE ON my_table TO truncator;
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let truncator = db.role("truncator").unwrap();
     ///
     /// assert!(table.can_truncate(truncator, &db)?);
@@ -4247,7 +4568,10 @@ mod tests {
     use sqlparser::dialect::GenericDialect;
 
     use super::*;
-    use crate::prelude::*;
+    use crate::{
+        prelude::*,
+        structs::{IdentifierCase, TargetName},
+    };
 
     mod identifier_resolution {
         use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
@@ -4264,20 +4588,52 @@ mod tests {
         fn test_table_lookup_unquoted_identifier_is_case_insensitive() {
             let db = parse_postgres("CREATE TABLE Foo (id INT);").expect("Failed to parse SQL");
 
-            assert!(db.table(None, "foo").is_some());
-            assert!(db.table(None, "FOO").is_some());
-            assert!(db.table(None, "\"foo\"").is_some());
-            assert!(db.table(None, "\"Foo\"").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("foo", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("FOO", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("foo", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("Foo", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
         fn test_table_lookup_quoted_identifier_is_case_sensitive() {
             let db = parse_postgres("CREATE TABLE \"Foo\" (id INT);").expect("Failed to parse SQL");
 
-            assert!(db.table(None, "\"Foo\"").is_some());
-            assert!(db.table(None, "\"foo\"").is_none());
-            assert!(db.table(None, "foo").is_none());
-            assert!(db.table(None, "FOO").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("Foo", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("foo", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("foo", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("FOO", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
@@ -4291,7 +4647,10 @@ mod tests {
                 ",
             )
             .expect("Failed to parse SQL");
-            let table = db.table(None, "t").expect("Table 't' should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table 't' should exist");
 
             // Unquoted column created as Foo resolves as lowercase identifier.
             assert!(table.column("foo", &db).expect("column lookup").is_some());
@@ -4320,7 +4679,10 @@ mod tests {
                 );
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-            let table = db.table(None, "users").expect("Table not found");
+            let table = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table not found");
 
             let table_ref = &table;
 
@@ -4376,8 +4738,14 @@ mod tests {
                 CREATE TABLE child (id INT PRIMARY KEY, parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-            let parent = db.table(None, "parent").expect("Parent not found");
-            let child = db.table(None, "child").expect("Child not found");
+            let parent = db
+                .table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Parent not found");
+            let child = db
+                .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Child not found");
 
             let parent_ref = &parent;
 
@@ -4429,7 +4797,10 @@ mod tests {
                 );
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-            let table = db.table(None, "users").expect("Table not found");
+            let table = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table not found");
 
             for (expected_id, column) in table.columns(&db).expect("columns").enumerate() {
                 assert_eq!(column.column_id(&db).expect("column_id"), Some(expected_id));
@@ -4457,8 +4828,14 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql).expect("parse B");
 
-            let table_a = db_a.table(None, "users").unwrap();
-            let table_b = db_b.table(None, "users").unwrap();
+            let table_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap();
+            let table_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap();
 
             assert_eq!(table_a.schema_fingerprint(&db_a), table_b.schema_fingerprint(&db_b));
         }
@@ -4471,10 +4848,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -4487,10 +4872,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -4503,10 +4896,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -4519,10 +4920,15 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let fp_users =
-                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp_users = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
             let fp_archive = db
-                .table(None, "users_archive")
+                .table_by_target(TargetName::new("users_archive", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&db)
                 .expect("fingerprint");
@@ -4538,10 +4944,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b);
         }
@@ -4550,7 +4964,12 @@ mod tests {
         fn test_truncation_fingerprint128() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             let full = fp.fingerprint256();
             let truncated = fp.fingerprint128();
@@ -4561,7 +4980,12 @@ mod tests {
         fn test_truncation_fingerprint64() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             let full = fp.fingerprint256();
             let expected = u64::from_be_bytes(full[..8].try_into().unwrap());
@@ -4573,10 +4997,18 @@ mod tests {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let fp_a =
-                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
-            let fp_b =
-                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp_a = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
+            let fp_b = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             assert!(fp_a.is_comparable_to(&fp_b));
         }
@@ -4585,7 +5017,12 @@ mod tests {
         fn test_hex_length() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             let hex = fp.to_hex();
             assert_eq!(hex.len(), 64);
@@ -4596,7 +5033,12 @@ mod tests {
         fn test_version() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             assert_eq!(fp.canonicalization_version(), 1);
         }
@@ -4605,7 +5047,12 @@ mod tests {
         fn test_golden_vector() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             // Pin the hex digest so any encoding change is caught.
             let hex = fp.to_hex();
@@ -4619,7 +5066,12 @@ mod tests {
         fn test_display_format() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             let display = format!("{fp}");
             // Format: "<algorithm>:v<canonicalization_version>:p<profile_id>:
@@ -4642,12 +5094,20 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
             let fp_a = db
-                .table(Some("schema_a"), "users")
+                .table_by_target(
+                    TargetName::new("users", false).with_schema("schema_a", false),
+                    IdentifierCase::AsWritten,
+                )
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&db)
                 .expect("fingerprint");
             let fp_b = db
-                .table(Some("schema_b"), "users")
+                .table_by_target(
+                    TargetName::new("users", false).with_schema("schema_b", false),
+                    IdentifierCase::AsWritten,
+                )
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&db)
                 .expect("fingerprint");
@@ -4665,10 +5125,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "t").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "t").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_eq!(fp_a, fp_b);
         }
@@ -4677,7 +5145,12 @@ mod tests {
         fn test_no_primary_key() {
             let sql = "CREATE TABLE t (id INT, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "t").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             // Should produce a valid fingerprint with 64 hex chars.
             assert_eq!(fp.to_hex().len(), 64);
@@ -4691,10 +5164,18 @@ mod tests {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let fp_a =
-                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
-            let fp_b =
-                db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp_a = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
+            let fp_b = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             assert_eq!(fp_a, fp_b);
 
@@ -4741,7 +5222,12 @@ mod tests {
 
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             let mut buf: Vec<u8> = Vec::new();
             buf.extend_from_slice(b"SFP1");
@@ -4802,12 +5288,14 @@ mod tests {
             let db_plain = ParserDB::parse::<GenericDialect>(sql_plain).expect("parse plain");
 
             let fp_serial = db_serial
-                .table(None, "users")
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&db_serial)
                 .expect("fingerprint");
             let fp_plain = db_plain
-                .table(None, "users")
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&db_plain)
                 .expect("fingerprint");
@@ -4888,7 +5376,12 @@ mod tests {
 
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let fp = db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+            let fp = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db)
+                .expect("fingerprint");
 
             assert_eq!(fp.algorithm_id(), AlgorithmId::Sha2_256);
             assert_eq!(fp.canonicalization_version(), 1);
@@ -4905,7 +5398,10 @@ mod tests {
 
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-            let table = db.table(None, "users").unwrap();
+            let table = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap();
 
             let fp_result: Result<SchemaFingerprint, FingerprintError> =
                 table.schema_fingerprint(&db);
@@ -4926,10 +5422,18 @@ mod tests {
             let db_ab = ParserDB::parse::<GenericDialect>(sql_ab).expect("parse ab");
             let db_ba = ParserDB::parse::<GenericDialect>(sql_ba).expect("parse ba");
 
-            let fp_ab =
-                db_ab.table(None, "t").unwrap().schema_fingerprint(&db_ab).expect("fingerprint");
-            let fp_ba =
-                db_ba.table(None, "t").unwrap().schema_fingerprint(&db_ba).expect("fingerprint");
+            let fp_ab = db_ab
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_ab)
+                .expect("fingerprint");
+            let fp_ba = db_ba
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_ba)
+                .expect("fingerprint");
 
             assert_ne!(fp_ab, fp_ba, "composite-PK declaration order must affect the fingerprint");
         }
@@ -4973,10 +5477,18 @@ mod tests {
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
             for name in ["t1", "t2", "t3"] {
-                let fp_a =
-                    db_a.table(None, name).unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-                let fp_b =
-                    db_b.table(None, name).unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+                let fp_a = db_a
+                    .table_by_target(TargetName::new(name, false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .unwrap()
+                    .schema_fingerprint(&db_a)
+                    .expect("fingerprint");
+                let fp_b = db_b
+                    .table_by_target(TargetName::new(name, false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .unwrap()
+                    .schema_fingerprint(&db_b)
+                    .expect("fingerprint");
                 assert_eq!(fp_a, fp_b, "fingerprint for `{name}` must be source-order-invariant");
             }
         }
@@ -4990,10 +5502,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b, "adding a column must change the fingerprint");
         }
@@ -5007,10 +5527,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b, "dropping a column must change the fingerprint");
         }
@@ -5026,10 +5554,18 @@ mod tests {
             let db_a = ParserDB::parse::<GenericDialect>(sql_a).expect("parse A");
             let db_b = ParserDB::parse::<GenericDialect>(sql_b).expect("parse B");
 
-            let fp_a =
-                db_a.table(None, "users").unwrap().schema_fingerprint(&db_a).expect("fingerprint");
-            let fp_b =
-                db_b.table(None, "users").unwrap().schema_fingerprint(&db_b).expect("fingerprint");
+            let fp_a = db_a
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_a)
+                .expect("fingerprint");
+            let fp_b = db_b
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .schema_fingerprint(&db_b)
+                .expect("fingerprint");
 
             assert_ne!(fp_a, fp_b, "renaming a column must change the fingerprint");
         }
@@ -5049,12 +5585,14 @@ mod tests {
             let db_qtd = ParserDB::parse::<GenericDialect>(sql_qtd).expect("parse quoted");
 
             let fp_unq = db_unq
-                .table(None, "users")
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&db_unq)
                 .expect("fingerprint");
             let fp_qtd = db_qtd
-                .table(None, "users")
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&db_qtd)
                 .expect("fingerprint");
@@ -5078,20 +5616,33 @@ mod tests {
             let baseline = {
                 let db = ParserDB::parse::<GenericDialect>(sql).expect("baseline parse");
                 (
-                    db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint"),
-                    db.table(None, "products")
+                    db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                        .expect("unambiguous lookup")
                         .unwrap()
                         .schema_fingerprint(&db)
                         .expect("fingerprint"),
+                    db.table_by_target(
+                        TargetName::new("products", false),
+                        IdentifierCase::AsWritten,
+                    )
+                    .expect("unambiguous lookup")
+                    .unwrap()
+                    .schema_fingerprint(&db)
+                    .expect("fingerprint"),
                 )
             };
 
             for i in 0..1000 {
                 let db = ParserDB::parse::<GenericDialect>(sql).expect("iter parse");
-                let users_fp =
-                    db.table(None, "users").unwrap().schema_fingerprint(&db).expect("fingerprint");
+                let users_fp = db
+                    .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .unwrap()
+                    .schema_fingerprint(&db)
+                    .expect("fingerprint");
                 let products_fp = db
-                    .table(None, "products")
+                    .table_by_target(TargetName::new("products", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
                     .unwrap()
                     .schema_fingerprint(&db)
                     .expect("fingerprint");
@@ -5201,7 +5752,8 @@ mod tests {
             let baseline_db =
                 ParserDB::parse::<GenericDialect>(baseline_sql).expect("baseline parse");
             let baseline_fp = baseline_db
-                .table(None, "users")
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .unwrap()
                 .schema_fingerprint(&baseline_db)
                 .expect("baseline fingerprint");
@@ -5209,8 +5761,13 @@ mod tests {
             for (field, sql, schema, name) in mutations {
                 let db = ParserDB::parse::<GenericDialect>(sql)
                     .unwrap_or_else(|e| panic!("[{field}] parse failed: {e:?}"));
+                let target = match schema {
+                    Some(schema) => TargetName::new(name, false).with_schema(schema, false),
+                    None => TargetName::new(name, false),
+                };
                 let fp = db
-                    .table(*schema, name)
+                    .table_by_target(target, IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
                     .unwrap_or_else(|| panic!("[{field}] table `{name}` not found"))
                     .schema_fingerprint(&db)
                     .expect("fingerprint");
@@ -5253,7 +5810,7 @@ mod tests {
         use sqlparser::dialect::GenericDialect;
 
         use crate::{
-            structs::ParserDB,
+            structs::{IdentifierCase, ParserDB, TargetName},
             traits::{DatabaseLike, TableLike},
         };
 
@@ -5266,7 +5823,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Table should be removed
-            assert!(db.table(None, "my_table").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
             assert_eq!(db.tables().count(), 0);
         }
 
@@ -5279,7 +5840,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Table should be removed
-            assert!(db.table(None, "my_table").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
@@ -5337,10 +5902,18 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("CASCADE should allow drop");
 
             // Parent should be removed
-            assert!(db.table(None, "parent").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
 
             // Child should still exist
-            assert!(db.table(None, "child").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -5353,7 +5926,11 @@ mod tests {
                 .expect("Self-referential table should be droppable");
 
             // Table should be removed
-            assert!(db.table(None, "tree").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("tree", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
@@ -5369,7 +5946,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Table should be removed
-            assert!(db.table(None, "my_table").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
 
             // No tables, columns, indices should remain
             assert_eq!(db.tables().count(), 0);
@@ -5386,11 +5967,23 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // table2 should be removed
-            assert!(db.table(None, "table2").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("table2", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
 
             // table1 and table3 should still exist
-            assert!(db.table(None, "table1").is_some());
-            assert!(db.table(None, "table3").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("table1", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("table3", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
             assert_eq!(db.tables().count(), 2);
         }
 
@@ -5404,7 +5997,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Table should exist with new schema
-            let table = db.table(None, "my_table").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.columns(&db).expect("columns").count(), 2);
         }
 
@@ -5415,7 +6011,11 @@ mod tests {
                 DROP TABLE foo;
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-            assert!(db.table(None, "foo").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("foo", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
@@ -5444,8 +6044,15 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            assert!(db.table(None, "old_name").is_none());
-            let table = db.table(None, "new_name").expect("new_name should exist");
+            assert!(
+                db.table_by_target(TargetName::new("old_name", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            let table = db
+                .table_by_target(TargetName::new("new_name", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("new_name should exist");
             assert_eq!(table.table_name(), "new_name");
         }
 
@@ -5470,10 +6077,26 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            assert!(db.table(None, "table_a").is_none());
-            assert!(db.table(None, "table_b").is_none());
-            assert!(db.table(None, "new_a").is_some());
-            assert!(db.table(None, "new_b").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("table_a", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("table_b", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("new_a", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("new_b", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -5484,7 +6107,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            let table = db.table(None, "new_name").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("new_name", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.columns(&db).expect("columns").count(), 2);
         }
 
@@ -5556,8 +6182,15 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            assert!(db.table(None, "old_name").is_none());
-            let table = db.table(None, "new_name").expect("new_name should exist");
+            assert!(
+                db.table_by_target(TargetName::new("old_name", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            let table = db
+                .table_by_target(TargetName::new("new_name", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("new_name should exist");
             assert_eq!(table.table_name(), "new_name");
         }
 
@@ -5581,8 +6214,16 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            assert!(db.table(None, "existing").is_some());
-            assert!(db.table(None, "other").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("existing", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("other", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]

@@ -41,8 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         ")?;
 
-    // Retrieve a table by name
-    let users_table = db.table(None, "users").expect("Table not found");
+    // Retrieve a table by the name a statement writes for it, compared the way
+    // the engine compares it
+    let users_table = db
+        .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?
+        .expect("Table not found");
 
     assert_eq!(users_table.table_name(), "users");
 

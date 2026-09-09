@@ -54,7 +54,7 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (a INT, b INT, CHECK (a < b));")?;
-    /// let t = db.table(None, "t").unwrap();
+    /// let t = db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check = t.check_constraints(&db)?.next().unwrap();
     /// let meta = db.check_constraint_metadata(check).unwrap();
     /// let names: Vec<&str> = meta.columns().map(|c| c.column_name()).collect();
@@ -81,7 +81,7 @@ impl<U: CheckConstraintLike> CheckMetadata<U> {
     ///     CREATE TABLE t (id INT, CHECK (is_valid(id)));
     ///     ",
     /// )?;
-    /// let t = db.table(None, "t").unwrap();
+    /// let t = db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check = t.check_constraints(&db)?.next().unwrap();
     /// let meta = db.check_constraint_metadata(check).unwrap();
     /// let names: Vec<&str> = meta.functions().map(|f| f.name()).collect();

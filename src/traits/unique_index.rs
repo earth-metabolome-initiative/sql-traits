@@ -26,7 +26,8 @@ pub trait UniqueIndexLike: IndexLike {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, UNIQUE (name));",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let unique_indices: Vec<_> = table.unique_indices(&db)?.collect();
     /// let primary_key_flags: Vec<bool> =
     ///     unique_indices.iter().map(|ui| ui.is_primary_key(&db)).collect::<Result<Vec<_>, _>>()?;

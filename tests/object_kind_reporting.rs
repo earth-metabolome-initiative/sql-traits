@@ -49,7 +49,10 @@ fn unique_index_over<'db>(
     table_name: &str,
     expression: &str,
 ) -> &'db <ParserDB as DatabaseLike>::UniqueIndex {
-    let table = database.table(None, table_name).expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     table
         .unique_indices(database)
         .expect("table is in this database")
@@ -69,7 +72,10 @@ fn check_constraint_over<'db>(
     table_name: &str,
     expression: &str,
 ) -> &'db <ParserDB as DatabaseLike>::CheckConstraint {
-    let table = database.table(None, table_name).expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     table
         .check_constraints(database)
         .expect("table is in this database")
@@ -80,7 +86,10 @@ fn check_constraint_over<'db>(
 #[test]
 fn a_column_reports_its_absent_table() {
     let (host, other) = databases();
-    let table = host.table(None, "anon").expect("anon exists");
+    let table = host
+        .table_by_target(TargetName::new("anon", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("anon exists");
     let column = table
         .column("name", &host)
         .expect("anon is in the host database")

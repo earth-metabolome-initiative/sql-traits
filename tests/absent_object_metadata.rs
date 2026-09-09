@@ -80,7 +80,10 @@ fn every_table_metadata_accessor_reports_the_absent_table() {
 #[test]
 fn the_renamed_table_itself_still_answers() {
     let (_, database) = parse_with_create_table(RENAMED);
-    let table = database.table(None, "t2").expect("t2 exists after the rename");
+    let table = database
+        .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t2 exists after the rename");
 
     assert_eq!(
         table.columns(&database).expect("t2 is in this database").count(),
@@ -114,7 +117,10 @@ fn a_foreign_key_reporting_an_absent_target_does_not_abort() {
     let elsewhere = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE unrelated (id INTEGER);")
         .expect("schema builds");
 
-    let parent = with_parent.table(None, "parent").expect("parent exists");
+    let parent = with_parent
+        .table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("parent exists");
     let foreign_key = parent
         .foreign_keys(&with_parent)
         .expect("parent is in its own database")
@@ -137,7 +143,10 @@ fn a_foreign_key_naming_an_undeclared_column_does_not_abort() {
     let narrowed = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE parent (absent INTEGER);")
         .expect("schema builds");
 
-    let parent = declared.table(None, "parent").expect("parent exists");
+    let parent = declared
+        .table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("parent exists");
     let foreign_key = parent
         .foreign_keys(&declared)
         .expect("parent is in its own database")
@@ -195,7 +204,10 @@ fn a_maintenance_body_over_an_absent_table_reports_the_lookup() {
 fn a_body_that_is_not_a_maintenance_body_stays_distinguishable() {
     let (_, database) =
         parse_with_create_table("CREATE TABLE t (id INTEGER PRIMARY KEY, edited_at TIMESTAMP);");
-    let table = database.table(None, "t").expect("t exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
 
     assert_eq!(
         parse_maintenance_body("BEGIN RAISE NOTICE 'hello'; END;", table, &database),
@@ -236,8 +248,14 @@ fn the_identity_scanning_accessors_still_answer_a_live_receiver() {
          CREATE TABLE child (id INTEGER PRIMARY KEY REFERENCES parent(id));",
     )
     .expect("schema builds");
-    let parent = database.table(None, "parent").expect("parent exists");
-    let child = database.table(None, "child").expect("child exists");
+    let parent = database
+        .table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("parent exists");
+    let child = database
+        .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("child exists");
 
     assert_eq!(
         parent

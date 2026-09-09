@@ -23,7 +23,8 @@ fn parse(sql: &str) -> Result<ParserDB, Error> {
 
 fn column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .columns(database)
         .expect("table is in this database")
@@ -57,7 +58,10 @@ fn adding_a_column_declares_it() {
     .expect("t exists");
 
     assert_eq!(column_names(&database, "t"), ["id", "a", "x"]);
-    let table = database.table(None, "t").expect("t exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let added =
         table.column("x", &database).expect("t is in this database").expect("x is declared");
     assert!(!added.is_nullable(&database).expect("x is in this database"));
@@ -83,7 +87,10 @@ fn adding_a_column_that_exists_is_refused_unless_tolerated() {
     )
     .expect("IF NOT EXISTS asks for the statement to be tolerated");
     assert_eq!(column_names(&tolerated, "t"), ["id", "a"]);
-    let table = tolerated.table(None, "t").expect("t exists");
+    let table = tolerated
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let untouched =
         table.column("a", &tolerated).expect("t is in this database").expect("a is declared");
     assert_eq!(
@@ -173,7 +180,8 @@ fn things_on_the_table_go_with_the_column() {
 
     let unique_rules = |database: &ParserDB| {
         database
-            .table(None, "t")
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("t exists")
             .unique_indices(database)
             .expect("t is in this database")
@@ -191,7 +199,10 @@ fn things_on_the_table_go_with_the_column() {
          ALTER TABLE t DROP COLUMN a;",
     )
     .expect("a check rule on the table goes with the column");
-    let table = checked.table(None, "t").expect("t exists");
+    let table = checked
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     assert_eq!(table.check_constraints(&checked).expect("t is in this database").count(), 0);
 
     let self_referential = parse(
@@ -199,7 +210,10 @@ fn things_on_the_table_go_with_the_column() {
          ALTER TABLE t DROP COLUMN parent;",
     )
     .expect("the table's own foreign key goes with the column");
-    let table = self_referential.table(None, "t").expect("t exists");
+    let table = self_referential
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     assert_eq!(table.foreign_keys(&self_referential).expect("t is in this database").count(), 0);
 
     // A constraint reaches a table inline on a sibling column as well as
@@ -211,7 +225,10 @@ fn things_on_the_table_go_with_the_column() {
          ALTER TABLE t DROP COLUMN a;",
     )
     .expect("an inline foreign key on a sibling column goes with the column");
-    let table = inline.table(None, "t").expect("t exists");
+    let table = inline
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     assert_eq!(table.foreign_keys(&inline).expect("t is in this database").count(), 0);
     // A foreign key left naming the dropped column would have been refused as
     // the alteration was read, so surviving the parse is the proof.
@@ -221,7 +238,10 @@ fn things_on_the_table_go_with_the_column() {
          ALTER TABLE t DROP COLUMN a;",
     )
     .expect("an inline check rule mentioning the column goes with it");
-    let table = inline_check.table(None, "t").expect("t exists");
+    let table = inline_check
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     assert_eq!(table.check_constraints(&inline_check).expect("t is in this database").count(), 0);
 }
 
@@ -257,7 +277,10 @@ fn cascade_takes_the_things_outside_the_table() {
          ALTER TABLE parent DROP COLUMN key CASCADE;",
     )
     .expect("CASCADE takes the child's foreign key");
-    let child = referencing.table(None, "child").expect("child exists");
+    let child = referencing
+        .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("child exists");
     assert_eq!(child.foreign_keys(&referencing).expect("child is in this database").count(), 0);
     assert_eq!(column_names(&referencing, "parent"), ["id"]);
 
@@ -397,7 +420,10 @@ fn renaming_a_column_rewrites_every_mention() {
     .expect("a is declared");
 
     assert_eq!(column_names(&database, "t"), ["id", "renamed", "b"]);
-    let table = database.table(None, "t").expect("t exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
 
     let check = table
         .check_constraints(&database)
@@ -448,7 +474,10 @@ fn renaming_a_referenced_column_follows_into_the_referencing_table() {
 
     assert_eq!(column_names(&database, "parent"), ["id", "renamed"]);
 
-    let child = database.table(None, "child").expect("child exists");
+    let child = database
+        .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("child exists");
     let foreign_key = child
         .foreign_keys(&database)
         .expect("child is in this database")
@@ -473,7 +502,10 @@ fn a_self_referential_foreign_key_follows_a_column_rename() {
     .expect("id is declared");
 
     assert_eq!(column_names(&database, "t"), ["key", "parent"]);
-    let table = database.table(None, "t").expect("t exists");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let foreign_key =
         table.foreign_keys(&database).expect("t is in this database").next().expect("one key");
     assert_eq!(
@@ -583,7 +615,10 @@ fn altering_a_column_changes_what_it_declares() {
          ALTER TABLE t ALTER COLUMN a SET NOT NULL;",
     )
     .expect("a is declared");
-    let table = not_null.table(None, "t").expect("t exists");
+    let table = not_null
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let column =
         table.column("a", &not_null).expect("t is in this database").expect("a is declared");
     assert!(!column.is_nullable(&not_null).expect("a is in this database"));
@@ -593,7 +628,10 @@ fn altering_a_column_changes_what_it_declares() {
          ALTER TABLE t ALTER COLUMN a DROP NOT NULL;",
     )
     .expect("a is declared");
-    let table = nullable.table(None, "t").expect("t exists");
+    let table = nullable
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let column =
         table.column("a", &nullable).expect("t is in this database").expect("a is declared");
     assert!(column.is_nullable(&nullable).expect("a is in this database"));
@@ -603,7 +641,10 @@ fn altering_a_column_changes_what_it_declares() {
          ALTER TABLE t ALTER COLUMN a SET DEFAULT 7;",
     )
     .expect("a is declared");
-    let table = defaulted.table(None, "t").expect("t exists");
+    let table = defaulted
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let column =
         table.column("a", &defaulted).expect("t is in this database").expect("a is declared");
     assert_eq!(column.default_value().as_deref(), Some("7"));
@@ -613,7 +654,10 @@ fn altering_a_column_changes_what_it_declares() {
          ALTER TABLE t ALTER COLUMN a DROP DEFAULT;",
     )
     .expect("a is declared");
-    let table = undefaulted.table(None, "t").expect("t exists");
+    let table = undefaulted
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let column =
         table.column("a", &undefaulted).expect("t is in this database").expect("a is declared");
     assert_eq!(column.default_value(), None);
@@ -623,7 +667,10 @@ fn altering_a_column_changes_what_it_declares() {
          ALTER TABLE t ALTER COLUMN a SET DATA TYPE TEXT;",
     )
     .expect("a is declared");
-    let table = retyped.table(None, "t").expect("t exists");
+    let table = retyped
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let column =
         table.column("a", &retyped).expect("t is in this database").expect("a is declared");
     assert_eq!(column.data_type(&retyped).to_string(), "TEXT");
@@ -652,7 +699,10 @@ fn the_mysql_spellings_restate_the_declaration() {
     )
     .expect("a is declared");
     assert_eq!(column_names(&changed, "t"), ["id", "b"]);
-    let table = changed.table(None, "t").expect("t exists");
+    let table = changed
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let column =
         table.column("b", &changed).expect("t is in this database").expect("b is declared");
     assert_eq!(column.data_type(&changed).to_string(), "TEXT");
@@ -664,7 +714,10 @@ fn the_mysql_spellings_restate_the_declaration() {
     )
     .expect("a is declared");
     assert_eq!(column_names(&modified, "t"), ["id", "a"]);
-    let table = modified.table(None, "t").expect("t exists");
+    let table = modified
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     let column =
         table.column("a", &modified).expect("t is in this database").expect("a is declared");
     assert_eq!(column.data_type(&modified).to_string(), "TEXT");

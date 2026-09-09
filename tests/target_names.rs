@@ -38,7 +38,9 @@ fn policy_target_reads_back_unqualified_while_resolving_through_the_search_path(
 
     // The catalog resolves the very name the policy wrote, without the caller
     // reassembling the parts or reaching for the concrete parser node.
-    let resolved = db.resolve_target_table(target).expect("the name is unambiguous");
+    let resolved = db
+        .resolve_target_table(target, IdentifierCase::AsWritten)
+        .expect("the name is unambiguous");
     assert_eq!(
         resolved.expect("the search path finds it").table_schema(),
         Some("app"),
@@ -155,7 +157,10 @@ fn foreign_key_reference_preserves_quoting_and_qualification() {
          CREATE TABLE app.\"Docs\" (id INT PRIMARY KEY);
          CREATE TABLE notes (doc_id INT, FOREIGN KEY (doc_id) REFERENCES app.\"Docs\"(id));",
     );
-    let notes = db.table(None, "notes").expect("the host table exists");
+    let notes = db
+        .table_by_target(TargetName::new("notes", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the host table exists");
     let foreign_key =
         notes.foreign_keys(&db).expect("the host table is known").next().expect("one key");
 
@@ -173,7 +178,10 @@ fn foreign_key_reference_reads_back_unqualified() {
         "CREATE TABLE docs (id INT PRIMARY KEY);
          CREATE TABLE notes (doc_id INT, FOREIGN KEY (doc_id) REFERENCES docs(id));",
     );
-    let notes = db.table(None, "notes").expect("the host table exists");
+    let notes = db
+        .table_by_target(TargetName::new("notes", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the host table exists");
     let foreign_key =
         notes.foreign_keys(&db).expect("the host table is known").next().expect("one key");
 
@@ -286,7 +294,7 @@ fn policy_targets_by_schema<DB: DatabaseLike>(database: &DB) -> Vec<(String, Opt
         .map(|policy| {
             let target = policy.target_table_name();
             let schema = database
-                .resolve_target_table(target.clone())
+                .resolve_target_table(target.clone(), IdentifierCase::AsWritten)
                 .expect("the target is unambiguous")
                 .and_then(|table| table.table_schema().map(ToString::to_string));
             (target.to_string(), schema)

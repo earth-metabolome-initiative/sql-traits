@@ -94,7 +94,10 @@ fn a_grant_to_everyone_applies_to_every_role() {
     for (label, db) in [("keyword spelling", &keyword), ("reserved-word spelling", &reserved)] {
         let grant = db.table_grants().next().expect("the grant exists");
         let reader = db.role("reader").expect("the role exists");
-        let table = db.table(None, "docs").expect("the table exists");
+        let table = db
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("the table exists");
 
         assert!(grant.applies_to_public(), "{label}");
         assert!(
@@ -166,7 +169,10 @@ fn a_named_unique_constraint_reports_its_name() {
              CONSTRAINT \"UqName\" UNIQUE (name));",
     )
     .expect("schema builds");
-    let table = db.table(None, "users").expect("the table exists");
+    let table = db
+        .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the table exists");
     let names: Vec<_> = table
         .unique_indices(&db)
         .expect("unique indices")
@@ -182,7 +188,10 @@ fn a_named_unique_constraint_reports_its_name() {
 fn a_mysql_unique_key_reports_its_index_name() {
     let db = ParserDB::parse::<MySqlDialect>("CREATE TABLE users (id INT, UNIQUE KEY uq_id (id));")
         .expect("schema builds");
-    let table = db.table(None, "users").expect("the table exists");
+    let table = db
+        .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the table exists");
     let unique = table.unique_indices(&db).expect("unique indices").next().expect("one");
 
     assert_eq!(IndexLike::name(unique), Some("uq_id"));
@@ -194,7 +203,10 @@ fn a_mysql_unique_key_reports_its_index_name() {
 fn an_unnamed_unique_constraint_is_anonymous() {
     let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE users (id INT, UNIQUE (id));")
         .expect("schema builds");
-    let table = db.table(None, "users").expect("the table exists");
+    let table = db
+        .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the table exists");
 
     for unique in table.unique_indices(&db).expect("unique indices") {
         assert_eq!(IndexLike::name(unique), None);
@@ -211,7 +223,13 @@ fn a_unique_constraint_never_reports_a_qualifier() {
          CREATE TABLE app.users (id INT, CONSTRAINT uq_id UNIQUE (id));",
     )
     .expect("schema builds");
-    let table = db.table(Some("app"), "users").expect("the table exists");
+    let table = db
+        .table_by_target(
+            TargetName::new("users", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the table exists");
 
     for unique in table.unique_indices(&db).expect("unique indices") {
         assert_eq!(IndexLike::schema(unique), None);

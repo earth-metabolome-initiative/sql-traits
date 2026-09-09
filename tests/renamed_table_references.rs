@@ -80,7 +80,10 @@ fn a_child_foreign_key_follows_the_rename_of_its_parent() {
     // Parsing at all proves the target resolves, since a dangling reference is
     // refused as it is read. What is worth pinning here is the new name.
 
-    let child = database.table(None, "child").expect("child was created");
+    let child = database
+        .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("child was created");
     let foreign_key =
         child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
     assert_eq!(
@@ -107,7 +110,10 @@ fn a_table_constraint_foreign_key_follows_the_rename() {
     )
     .expect("parent exists when the child and the rename land");
 
-    let child = database.table(None, "child").expect("child was created");
+    let child = database
+        .table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("child was created");
     let foreign_key =
         child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
     assert_eq!(foreign_key.referenced_table_name().name(), "parent2");
@@ -123,7 +129,10 @@ fn a_self_referential_foreign_key_follows_the_rename() {
     )
     .expect("the self reference resolves against the renamed table");
 
-    let table = database.table(None, "t2").expect("t2 exists after the rename");
+    let table = database
+        .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t2 exists after the rename");
     let foreign_key =
         table.foreign_keys(&database).expect("t2 is in this database").next().expect("one key");
     assert_eq!(foreign_key.referenced_table_name().name(), "t2");
@@ -156,7 +165,13 @@ fn a_qualified_table_carries_its_references_within_the_schema() {
     )
     .expect("s.parent exists");
 
-    let child = database.table(Some("s"), "child").expect("s.child was created");
+    let child = database
+        .table_by_target(
+            TargetName::new("child", false).with_schema("s", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("s.child was created");
     let foreign_key =
         child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
     assert_eq!(foreign_key.referenced_table_name().name(), "parent2");
@@ -178,9 +193,21 @@ fn a_rename_across_schemas_requalifies_its_references() {
     )
     .expect("a.parent exists");
 
-    let parent = database.table(Some("b"), "parent").expect("the table moved to b");
+    let parent = database
+        .table_by_target(
+            TargetName::new("parent", false).with_schema("b", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the table moved to b");
     assert_eq!(parent.table_schema(), Some("b"));
-    let child = database.table(Some("a"), "child").expect("a.child stayed put");
+    let child = database
+        .table_by_target(
+            TargetName::new("child", false).with_schema("a", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("a.child stayed put");
     let foreign_key =
         child.foreign_keys(&database).expect("child is in this database").next().expect("one key");
     let target = foreign_key.referenced_table_name();
@@ -249,7 +276,10 @@ fn row_level_security_survives_the_rename() {
     )
     .expect("t exists");
 
-    let table = database.table(None, "t2").expect("t2 exists after the rename");
+    let table = database
+        .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t2 exists after the rename");
     assert!(table.has_row_level_security(&database).expect("t2 is in this database"));
     assert!(table.has_forced_row_level_security(&database).expect("t2 is in this database"));
 }

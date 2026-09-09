@@ -33,7 +33,10 @@ const DUMP: &str = "CREATE TABLE docs (id uuid PRIMARY KEY);
 #[test]
 fn an_owner_to_statement_names_the_owning_role() {
     let database = db(DUMP);
-    let docs = database.table(None, "docs").expect("docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
 
     assert_eq!(docs.owner(&database), Ok(Some("app_owner")));
     assert_eq!(docs.has_row_level_security(&database), Ok(true));
@@ -49,7 +52,10 @@ fn an_owner_to_statement_names_the_owning_role() {
 #[test]
 fn a_table_nobody_altered_names_no_owner() {
     let database = db("CREATE TABLE docs (id uuid PRIMARY KEY);");
-    let docs = database.table(None, "docs").expect("docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
 
     assert_eq!(docs.owner(&database), Ok(None));
 }
@@ -59,7 +65,10 @@ fn ownership_moves_to_the_role_named_last() {
     let database = db("CREATE TABLE docs (id uuid PRIMARY KEY);
          ALTER TABLE docs OWNER TO first;
          ALTER TABLE docs OWNER TO second;");
-    let docs = database.table(None, "docs").expect("docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
 
     assert_eq!(docs.owner(&database), Ok(Some("second")));
 }
@@ -75,7 +84,10 @@ fn a_session_dependent_owner_leaves_no_role_named() {
              ALTER TABLE docs OWNER TO app_owner;
              ALTER TABLE docs OWNER TO {spelling};"
         ));
-        let docs = database.table(None, "docs").expect("docs exists");
+        let docs = database
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("docs exists");
 
         assert_eq!(docs.owner(&database), Ok(None), "{spelling} left a stale owner behind");
     }
@@ -89,7 +101,10 @@ fn owner_preserves_role_identity() {
             "CREATE TABLE docs (id uuid PRIMARY KEY);
              ALTER TABLE docs OWNER TO {spelling};"
         ));
-        let docs = database.table(None, "docs").expect("docs exists");
+        let docs = database
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("docs exists");
 
         assert_eq!(docs.owner(&database), Ok(Some(expected)));
     }
@@ -101,7 +116,10 @@ fn owner_preserves_role_identity() {
          ALTER TABLE docs OWNER TO ACTOR;",
     )
     .expect("schema builds");
-    let docs = database.table(None, "docs").expect("docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
     let owner = docs.owner(&database).expect("docs is in this database").expect("owner exists");
     let role = database.role(owner).expect("owner resolves");
 
@@ -115,7 +133,10 @@ fn owner_preserves_role_identity() {
          ALTER TABLE docs OWNER TO App_Owner;",
     )
     .expect("schema builds");
-    let docs = database.table(None, "docs").expect("docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
     let owner = docs.owner(&database).expect("docs is in this database").expect("owner exists");
     let role = database.role(owner).expect("owner resolves");
 
@@ -131,7 +152,10 @@ fn the_owner_follows_a_renamed_table() {
     let database = db("CREATE TABLE docs (id uuid PRIMARY KEY);
          ALTER TABLE docs OWNER TO app_owner;
          ALTER TABLE docs RENAME TO papers;");
-    let papers = database.table(None, "papers").expect("the rename is applied");
+    let papers = database
+        .table_by_target(TargetName::new("papers", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the rename is applied");
 
     assert_eq!(papers.owner(&database), Ok(Some("app_owner")));
 }
@@ -143,7 +167,10 @@ fn the_owner_survives_a_column_change() {
          ALTER TABLE docs OWNER TO app_owner;
          ALTER TABLE docs ALTER COLUMN size TYPE BIGINT;
          ALTER TABLE docs ADD COLUMN title TEXT;");
-    let docs = database.table(None, "docs").expect("docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
 
     assert_eq!(docs.columns(&database).expect("docs is in this database").count(), 3);
     assert_eq!(docs.owner(&database), Ok(Some("app_owner")));
@@ -158,10 +185,21 @@ fn each_table_answers_for_itself() {
          ALTER TABLE docs OWNER TO app_owner;");
 
     assert_eq!(
-        database.table(None, "docs").expect("docs exists").owner(&database),
+        database
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("docs exists")
+            .owner(&database),
         Ok(Some("app_owner"))
     );
-    assert_eq!(database.table(None, "notes").expect("notes exists").owner(&database), Ok(None));
+    assert_eq!(
+        database
+            .table_by_target(TargetName::new("notes", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("notes exists")
+            .owner(&database),
+        Ok(None)
+    );
 }
 
 /// An owner is recorded against a table that exists, so naming an absent one is
@@ -203,14 +241,22 @@ fn an_owner_is_resolved_against_the_roles_the_input_creates() {
 
     let created = parse(&format!("CREATE ROLE app_owner; {DUMP}")).expect("the role exists");
     assert_eq!(
-        created.table(None, "docs").expect("docs exists").owner(&created),
+        created
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("docs exists")
+            .owner(&created),
         Ok(Some("app_owner"))
     );
 
     let dumped = db(DUMP);
     assert!(dumped.role("app_owner").is_none(), "nothing created the role");
     assert_eq!(
-        dumped.table(None, "docs").expect("docs exists").owner(&dumped),
+        dumped
+            .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("docs exists")
+            .owner(&dumped),
         Ok(Some("app_owner"))
     );
 }
@@ -280,7 +326,11 @@ fn owner_of<'db>(database: &'db ParserDB, table: &CreateTable) -> Option<&'db st
 #[test]
 fn the_name_outlives_the_node_it_was_asked_through() {
     let database = db(DUMP);
-    let node = database.table(None, "docs").expect("docs exists").clone();
+    let node = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists")
+        .clone();
 
     assert_eq!(owner_of(&database, &node), Some("app_owner"));
 }
@@ -299,7 +349,13 @@ fn a_pg_dump_of_a_guarded_table_is_read_whole() {
          ALTER TABLE ONLY public.docs
              ADD CONSTRAINT docs_pkey PRIMARY KEY (id);
          ALTER TABLE public.docs ENABLE ROW LEVEL SECURITY;");
-    let docs = database.table(Some("public"), "docs").expect("public.docs exists");
+    let docs = database
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("public", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("public.docs exists");
 
     assert_eq!(docs.owner(&database), Ok(Some("app_owner")));
     assert_eq!(docs.has_row_level_security(&database), Ok(true));
@@ -321,7 +377,10 @@ fn a_pg_dump_of_a_guarded_table_is_read_whole() {
 #[test]
 fn a_reference_to_a_table_answers_the_same() {
     let database = db(DUMP);
-    let docs = database.table(None, "docs").expect("docs exists");
+    let docs = database
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
 
     assert_eq!(
         <&CreateTable as TableLike>::owner(&docs, &database),

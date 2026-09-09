@@ -25,7 +25,8 @@ fn database(sql: &str) -> ParserDB {
 
 fn accepts_nothing(database: &ParserDB, table_name: &str, column_name: &str) -> bool {
     !database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .column(column_name, database)
         .expect("lookup succeeds")
@@ -91,7 +92,8 @@ fn a_key_added_later_reaches_a_grandchild_too() {
     // Only the parent holds the key.
     assert_eq!(
         database
-            .table(None, "chi")
+            .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .primary_key_columns(&database)
             .expect("in database")
@@ -112,7 +114,8 @@ fn the_requirement_outlives_the_key_that_implied_it() {
 
     assert_eq!(
         database
-            .table(None, "par")
+            .table_by_target(TargetName::new("par", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .primary_key_columns(&database)
             .expect("in database")
@@ -126,7 +129,10 @@ fn the_requirement_outlives_the_key_that_implied_it() {
 #[test]
 fn every_column_of_a_multi_column_key_belongs_to_it() {
     let database = database("CREATE TABLE pair (a INT, b INT, c INT, PRIMARY KEY (a, b));");
-    let pair = database.table(None, "pair").expect("table exists");
+    let pair = database
+        .table_by_target(TargetName::new("pair", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     for name in ["a", "b"] {
         let column = pair.column(name, &database).expect("lookup").expect("column exists");
@@ -144,7 +150,10 @@ fn a_table_with_no_key_has_no_key_columns() {
     // The predicate used to answer `true` for any column of a keyless table,
     // which an emptiness guard beside it was covering up.
     let database = database("CREATE TABLE plain (a INT, b INT);");
-    let plain = database.table(None, "plain").expect("table exists");
+    let plain = database
+        .table_by_target(TargetName::new("plain", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     for name in ["a", "b"] {
         let column = plain.column(name, &database).expect("lookup").expect("column exists");
@@ -174,7 +183,8 @@ fn a_partition_requires_what_its_root_requires() {
     // Unlike an inheritor, a partition receives the key itself as well.
     assert_eq!(
         database
-            .table(None, "part")
+            .table_by_target(TargetName::new("part", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .primary_key_columns(&database)
             .expect("in database")

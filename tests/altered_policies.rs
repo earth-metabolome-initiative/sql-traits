@@ -145,7 +145,8 @@ fn the_policy_altered_is_the_one_on_the_table_the_statement_names() {
 
     let expression = |table: &str| {
         database
-            .table(None, table)
+            .table_by_target(TargetName::new(table, false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("the table exists")
             .policies(&database)
             .expect("the table is in this database")
@@ -253,7 +254,10 @@ fn a_column_dependency_follows_the_replaced_expression() {
         "ALTER POLICY docs_sel ON docs USING (id IS NOT NULL);
          ALTER TABLE docs DROP COLUMN owner_id;",
     );
-    let docs = dropped.table(None, "docs").expect("docs exists");
+    let docs = dropped
+        .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("docs exists");
     assert_eq!(
         docs.columns(&dropped)
             .expect("docs is in this database")

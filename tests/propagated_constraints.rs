@@ -34,7 +34,11 @@ fn database(sql: &str) -> ParserDB {
 /// declaration the model keeps.
 fn constraint_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(
+            TargetName::parse(table_name).expect("one identifier"),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
         .expect("table exists")
         .constraints
         .iter()
@@ -53,7 +57,11 @@ fn constraint_names(database: &ParserDB, table_name: &str) -> Vec<String> {
 
 fn unique_index_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(
+            TargetName::parse(table_name).expect("one identifier"),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
         .expect("table exists")
         .unique_indices(database)
         .expect("table is in this database")
@@ -63,7 +71,11 @@ fn unique_index_names(database: &ParserDB, table_name: &str) -> Vec<String> {
 
 fn primary_key_width(database: &ParserDB, table_name: &str) -> usize {
     database
-        .table(None, table_name)
+        .table_by_target(
+            TargetName::parse(table_name).expect("one identifier"),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
         .expect("table exists")
         .primary_key_columns(database)
         .expect("table is in this database")
@@ -72,7 +84,11 @@ fn primary_key_width(database: &ParserDB, table_name: &str) -> usize {
 
 fn column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
     database
-        .table(None, table_name)
+        .table_by_target(
+            TargetName::parse(table_name).expect("one identifier"),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
         .expect("table exists")
         .columns(database)
         .expect("table is in this database")
@@ -82,7 +98,11 @@ fn column_names(database: &ParserDB, table_name: &str) -> Vec<String> {
 
 fn is_nullable(database: &ParserDB, table_name: &str, column_name: &str) -> bool {
     database
-        .table(None, table_name)
+        .table_by_target(
+            TargetName::parse(table_name).expect("one identifier"),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
         .expect("table exists")
         .column(column_name, database)
         .expect("lookup succeeds")
@@ -149,7 +169,8 @@ fn a_key_added_to_a_root_reaches_its_partitions_under_a_name_of_their_own() {
     assert_eq!(unique_index_names(&database, "part"), ["part_pkey", "part_id_code_key"]);
     assert_eq!(
         database
-            .table(None, "part")
+            .table_by_target(TargetName::new("part", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .foreign_keys(&database)
             .expect("in database")
@@ -519,7 +540,11 @@ fn a_constraint_the_table_does_not_hold_is_reported_unless_excused() {
 /// written on a column along with the ones in the constraint list.
 fn check_count(database: &ParserDB, table_name: &str) -> usize {
     database
-        .table(None, table_name)
+        .table_by_target(
+            TargetName::parse(table_name).expect("one identifier"),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
         .expect("table exists")
         .check_constraints(database)
         .expect("table is in this database")
@@ -698,7 +723,10 @@ fn the_no_inherit_flag_is_read_from_the_check() {
     let database = database(
         "CREATE TABLE par (id INT, CONSTRAINT own CHECK (id > 0) NO INHERIT, CHECK (id < 9));",
     );
-    let table = database.table(None, "par").expect("table exists");
+    let table = database
+        .table_by_target(TargetName::new("par", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let flags: Vec<bool> = table
         .check_constraints(&database)
         .expect("table is in this database")
