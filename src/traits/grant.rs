@@ -535,8 +535,10 @@ pub trait TableGrantLike:
     /// GRANT SELECT ON table1 TO app_user;
     /// ",
     /// )?;
-    /// let table1 = db.table(None, "table1").unwrap();
-    /// let table2 = db.table(None, "table2").unwrap();
+    /// let table1 =
+    ///     db.table_by_target(TargetName::new("table1", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let table2 =
+    ///     db.table_by_target(TargetName::new("table2", false), IdentifierCase::AsWritten)?.unwrap();
     /// let grant = db.table_grants().next().unwrap();
     /// assert!(grant.applies_to_table(table1, &db));
     /// assert!(!grant.applies_to_table(table2, &db));
@@ -613,7 +615,8 @@ pub trait ColumnGrantLike:
     /// ",
     /// )?;
     /// let grant = db.column_grants().next().unwrap();
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let columns: Vec<_> = grant.columns(table, &db)?.collect();
     /// assert_eq!(columns.len(), 2);
     /// # Ok(())
@@ -714,7 +717,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        structs::ParserDB,
+        structs::{IdentifierCase, ParserDB, TargetName},
         traits::{DatabaseLike, TableLike},
     };
 
@@ -746,7 +749,10 @@ mod tests {
         let grantees: Vec<_> = <&_ as GrantLike>::grantees(&grant_ref, &db).collect();
         assert_eq!(grantees.len(), 1);
 
-        let table = db.table(None, "my_table").expect("Table not found");
+        let table = db
+            .table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table not found");
         assert!(<&_ as TableGrantLike>::applies_to_table(&grant_ref, table, &db));
         let tables: Vec<_> = <&_ as TableGrantLike>::tables(&grant_ref, &db).collect();
         assert_eq!(tables.len(), 1);

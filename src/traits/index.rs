@@ -99,7 +99,7 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// use sqlparser::ast::Expr;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);")?;
-    /// let table = db.table(None, "users").unwrap();
+    /// let table = db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
     /// let index = table.indices(&db)?.next().unwrap();
     /// let expr = index.expression(&db)?;
     /// let inner = match expr {
@@ -125,7 +125,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
     /// )?;
-    /// let table = db.table(None, "users").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
     /// let index = table.indices(&db)?.next().unwrap();
     /// assert_eq!(IndexLike::table(index, &db).table_name(), "users");
     /// # Ok(())
@@ -152,7 +153,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
     /// )?;
-    /// let table = db.table(None, "users").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
     /// let index = table.indices(&db)?.next().unwrap();
     /// assert!(index.is_simple(&db)?);
     /// # Ok(())
@@ -184,7 +186,8 @@ pub trait IndexLike: Metadata + Ord + Eq + Debug + Clone + Send + Sync {
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE users (id int, name text); CREATE INDEX idx_name ON users (name);",
     /// )?;
-    /// let table = db.table(None, "users").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
     /// let index = table.indices(&db)?.next().unwrap();
     /// let columns: Vec<_> = index.columns(&db)?.collect();
     /// assert_eq!(columns.len(), 1);

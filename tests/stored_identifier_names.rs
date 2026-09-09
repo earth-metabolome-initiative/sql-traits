@@ -18,7 +18,13 @@ fn db() -> ParserDB {
 #[test]
 fn unquoted_identifiers_fold_to_lowercase() {
     let db = db();
-    let table = db.table(Some("my_schema"), "docs").expect("table exists");
+    let table = db
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("my_schema", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     assert_eq!(table.table_name(), "Docs");
     assert_eq!(table.stored_table_name(), "docs");
@@ -35,7 +41,13 @@ fn unquoted_identifiers_fold_to_lowercase() {
 #[test]
 fn quoted_identifiers_keep_their_case() {
     let db = db();
-    let table = db.table(Some("\"Other\""), "\"Docs\"").expect("table exists");
+    let table = db
+        .table_by_target(
+            TargetName::new("Docs", true).with_schema("Other", true),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     assert_eq!(table.stored_table_name(), "Docs");
     assert_eq!(table.stored_table_schema().as_deref(), Some("Other"));
@@ -44,7 +56,10 @@ fn quoted_identifiers_keep_their_case() {
 #[test]
 fn a_table_without_a_schema_stores_no_schema_name() {
     let db = db();
-    let table = db.table(None, "plain").expect("table exists");
+    let table = db
+        .table_by_target(TargetName::new("plain", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
 
     assert_eq!(table.table_schema(), None);
     assert_eq!(table.stored_table_schema(), None);

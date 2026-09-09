@@ -143,7 +143,8 @@ impl ColumnCollation<'_> {
     ///     let db = ParserDB::parse::<PostgreSqlDialect>(
     ///         "CREATE TABLE t (name TEXT COLLATE \"und-x-icu\");",
     ///     )?;
-    ///     let table = db.table(None, "t").unwrap();
+    ///     let table =
+    ///         db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     ///     let column = table.column("name", &db)?.unwrap();
     ///     column.collation(&db)?.into_owned()
     /// };
@@ -188,7 +189,8 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let columns: Vec<&str> = table.columns(&db)?.map(|col| col.column_name()).collect();
     /// assert_eq!(columns, vec!["id", "name"]);
     /// # Ok(())
@@ -222,7 +224,8 @@ pub trait ColumnLike:
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
     /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (ID INT, \"Name\" TEXT);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let stored: Vec<_> = table.columns(&db)?.map(|col| col.stored_column_name()).collect();
     /// assert_eq!(stored, vec!["id", "Name"]);
     /// # Ok(())
@@ -258,7 +261,8 @@ pub trait ColumnLike:
     ///     name TEXT
     /// );",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let column_name = table.column("name", &db)?.expect("Column 'name' should exist");
     /// assert_eq!(column.column_doc(&db)?, Some("the id of the table_row"));
@@ -285,7 +289,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT, name TEXT, score REAL);",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
@@ -308,7 +313,9 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE measurements (id BIGINT, value NUMERIC(20, 4), label VARCHAR(255));",
     /// )?;
-    /// let table = db.table(None, "measurements").unwrap();
+    /// let table = db
+    ///     .table_by_target(TargetName::new("measurements", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let id = table.column("id", &db)?.unwrap();
     /// let value = table.column("value", &db)?.unwrap();
     /// let label = table.column("label", &db)?.unwrap();
@@ -347,7 +354,8 @@ pub trait ColumnLike:
     ///     CREATE TABLE t (name TEXT COLLATE ci);
     ///     ",
     /// )?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let column = table.column("name", &db)?.unwrap();
     /// let ColumnCollation::Named(collation) = column.collation(&db)? else {
     ///     panic!("expected a named collation");
@@ -381,8 +389,10 @@ pub trait ColumnLike:
     ///     "CREATE TABLE parent (id SERIAL PRIMARY KEY, name TEXT, age INT, bigg_id BIGSERIAL);
     ///     CREATE TABLE child (parent_id INT PRIMARY KEY REFERENCES parent(id), other TEXT);",
     /// )?;
-    /// let table = db.table(None, "parent").unwrap();
-    /// let child_table = db.table(None, "child").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let child_table =
+    ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
@@ -423,7 +433,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT PRIMARY KEY, name TEXT, age INT);",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
@@ -463,7 +474,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id SERIAL PRIMARY KEY, name TEXT, age INT);",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
@@ -487,7 +499,7 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, serial_id SERIAL, bigg_id BIGSERIAL, small_id SMALLSERIAL, name TEXT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let serial_id_column = table.column("serial_id", &db)?.expect("Column 'serial_id' should exist");
     /// let bigg_id_column = table.column("bigg_id", &db)?.expect("Column 'bigg_id' should exist");
@@ -526,7 +538,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT, name TEXT, description VARCHAR, note CLOB);",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let description_column =
@@ -560,7 +573,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT NOT NULL, name TEXT, optional_field INT);",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let optional_column =
@@ -587,7 +601,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT DEFAULT 0, name TEXT, created_at TIMESTAMP DEFAULT NOW());",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let created_at_column =
@@ -619,7 +634,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT DEFAULT 0, name TEXT, created_at TIMESTAMP DEFAULT NOW());",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let created_at_column =
@@ -648,7 +664,8 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let column_table = ColumnLike::table(id_column, &db);
     /// assert_eq!(column_table.table_name(), "my_table");
@@ -680,7 +697,8 @@ pub trait ColumnLike:
     ///
     /// let db =
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
@@ -727,7 +745,9 @@ pub trait ColumnLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
     /// let id_fks = id_column.foreign_keys(&db)?.collect::<Vec<_>>();
@@ -790,9 +810,12 @@ pub trait ColumnLike:
     /// );
     /// ",
     /// )?;
-    /// let parent_table = db.table(None, "parent").unwrap();
-    /// let child_table = db.table(None, "child").unwrap();
-    /// let other_table = db.table(None, "other").unwrap();
+    /// let parent_table =
+    ///     db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let child_table =
+    ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let other_table =
+    ///     db.table_by_target(TargetName::new("other", false), IdentifierCase::AsWritten)?.unwrap();
     /// let child_id_column = other_table.column("child_id", &db)?.unwrap();
     /// assert!(
     ///     child_id_column.references_table_pk_or_descendant(&db, parent_table)?,
@@ -858,8 +881,10 @@ pub trait ColumnLike:
     /// );
     /// ",
     /// )?;
-    /// let parent_table = db.table(None, "parent").unwrap();
-    /// let child_table = db.table(None, "child").unwrap();
+    /// let parent_table =
+    ///     db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let child_table =
+    ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
     /// let parent_id_column =
     ///     child_table.column("parent_id", &db)?.expect("Column 'parent_id' should exist");
     /// let ext_fks = parent_id_column.extension_foreign_keys(&db)?.collect::<Vec<_>>();
@@ -918,7 +943,9 @@ pub trait ColumnLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let id_column = host_table.column("id", &db)?.unwrap();
     /// let name_column = host_table.column("name", &db)?.unwrap();
     /// assert!(id_column.is_part_of_foreign_key(&db)?, "id column should be a foreign key");
@@ -962,7 +989,9 @@ pub trait ColumnLike:
     /// );
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
     /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
     /// let id_fks = id_column.non_composite_foreign_keys(&db)?.collect::<Vec<_>>();
@@ -1036,23 +1065,37 @@ pub trait ColumnLike:
     /// CREATE TABLE serial_table_two (id SERIAL PRIMARY KEY, name TEXT);
     /// ",
     /// )?;
-    /// let host_table = db.table(None, "host_table").unwrap();
+    /// let host_table = db
+    ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let compatible_table = db.table(None, "compatible_table").unwrap();
-    /// let serial_table_one = db.table(None, "serial_table_one").unwrap();
+    /// let compatible_table = db
+    ///     .table_by_target(TargetName::new("compatible_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
+    /// let serial_table_one = db
+    ///     .table_by_target(TargetName::new("serial_table_one", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let serial_id_column = serial_table_one.column("id", &db)?.expect("Column 'id' should exist");
-    /// let serial_table_two = db.table(None, "serial_table_two").unwrap();
+    /// let serial_table_two = db
+    ///     .table_by_target(TargetName::new("serial_table_two", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let serial_id_column_two =
     ///     serial_table_two.column("id", &db)?.expect("Column 'id' should exist");
     /// let compatible_id_column =
     ///     compatible_table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let incompatible_table = db.table(None, "incompatible_table").unwrap();
+    /// let incompatible_table = db
+    ///     .table_by_target(TargetName::new("incompatible_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let incompatible_id_column =
     ///     incompatible_table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let another_host_table = db.table(None, "another_host_table").unwrap();
+    /// let another_host_table = db
+    ///     .table_by_target(TargetName::new("another_host_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let another_id_column =
     ///     another_host_table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let non_fk_table = db.table(None, "non_fk_table").unwrap();
+    /// let non_fk_table = db
+    ///     .table_by_target(TargetName::new("non_fk_table", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let non_fk_id_column = non_fk_table.column("id", &db)?.expect("Column 'id' should exist");
     /// assert!(
     ///     id_column.is_compatible_with(&db, compatible_id_column)?,
@@ -1158,7 +1201,7 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));")?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
     /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
     ///
@@ -1209,7 +1252,8 @@ pub trait ColumnLike:
     ///     "CREATE TABLE my_table (id INT, name TEXT);CREATE INDEX idx_name ON my_table(name);",
     /// )?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     ///
@@ -1259,7 +1303,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
     /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
     /// assert!(age_column.has_check_constraints(&db)?, "age column should have check constraints");
@@ -1297,7 +1342,7 @@ pub trait ColumnLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
     /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
     /// let age_non_tauto = age_column.non_tautological_check_constraints(&db)?.collect::<Vec<_>>();
@@ -1346,7 +1391,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT);",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
     /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
     /// assert!(
@@ -1389,7 +1435,7 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT PRIMARY KEY, other TEXT, age INT, score INT, UNIQUE (age, score));")?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
     /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
     /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
@@ -1566,7 +1612,10 @@ mod tests {
         fn test_all_methods() {
             let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT DEFAULT 'val');";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-            let table = db.table(None, "users").expect("Table not found");
+            let table = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table not found");
             let column =
                 table.column("name", &db).expect("table lookup").expect("Column not found");
 
@@ -1596,7 +1645,10 @@ mod tests {
         fn test_all_methods() {
             let sql = "CREATE TABLE products (id INT PRIMARY KEY, price INT DEFAULT 0);";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-            let table = db.table(None, "products").expect("Table not found");
+            let table = db
+                .table_by_target(TargetName::new("products", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table not found");
             let column =
                 table.column("price", &db).expect("table lookup").expect("Column not found");
 
@@ -1631,7 +1683,10 @@ mod tests {
         #[test]
         fn textual_for_text_and_varchar() {
             let db = make_db("CREATE TABLE t (a TEXT, b VARCHAR, c CHAR);");
-            let t = db.table(None, "t").unwrap();
+            let t = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap();
             for col_name in &["a", "b", "c"] {
                 let col = t.column(col_name, &db).unwrap().unwrap();
                 assert!(col.is_textual(&db), "{col_name} should be textual");
@@ -1642,7 +1697,10 @@ mod tests {
         fn textual_for_newly_classified_string_types() {
             let db =
                 make_db("CREATE TABLE t (a TINYTEXT, b LONGTEXT, c CLOB, d NVARCHAR, e STRING);");
-            let t = db.table(None, "t").unwrap();
+            let t = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap();
             for col_name in &["a", "b", "c", "d", "e"] {
                 let col = t.column(col_name, &db).unwrap().unwrap();
                 assert!(col.is_textual(&db), "{col_name} should be textual");
@@ -1652,7 +1710,10 @@ mod tests {
         #[test]
         fn not_textual_for_int_bytea_interval() {
             let db = make_db("CREATE TABLE t (a INT, b BYTEA, c INTERVAL);");
-            let t = db.table(None, "t").unwrap();
+            let t = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap();
             for col_name in &["a", "b", "c"] {
                 let col = t.column(col_name, &db).unwrap().unwrap();
                 assert!(!col.is_textual(&db), "{col_name} should not be textual");

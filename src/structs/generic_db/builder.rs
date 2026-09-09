@@ -10,14 +10,15 @@ use alloc::{
 use crate::{
     errors::LookupError,
     structs::{
-        GenericDB, Meta, SchemaProfile,
+        GenericDB, IdentifierCase, Meta, SchemaProfile,
         generic_db::{RelationSlot, Stored},
     },
     traits::{FunctionLike, PolicyLike, RoleLike, SchemaLike, TableLike, TriggerLike},
     utils::{
         identifier_resolution::identifiers_match,
         object_name::{
-            render_table_candidate, stored_function_key, stored_table_key, stored_view_key,
+            RelationKey, render_table_candidate, stored_function_key, stored_table_key,
+            stored_view_key,
         },
     },
 };
@@ -680,12 +681,14 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             views,
             materialized_views,
             relation_index: _,
+            folded_relation_index: _,
             columns,
             indices,
             unique_indices,
             foreign_keys,
             functions,
             function_index: _,
+            folded_function_index: _,
             triggers,
             policies,
             check_constraints,
@@ -748,10 +751,12 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             .sort_unstable_by(|(left, _), (right, _)| left.stored_name().cmp(&right.stored_name()));
         self.schemas.sort_unstable_by(|(a, _), (b, _)| a.name().cmp(b.name()));
         self.views.sort_unstable_by(|(a, _), (b, _)| {
-            stored_view_key(a.as_ref()).cmp(&stored_view_key(b.as_ref()))
+            stored_view_key(a.as_ref(), IdentifierCase::AsWritten)
+                .cmp(&stored_view_key(b.as_ref(), IdentifierCase::AsWritten))
         });
         self.materialized_views.sort_unstable_by(|(a, _), (b, _)| {
-            stored_view_key(a.as_ref()).cmp(&stored_view_key(b.as_ref()))
+            stored_view_key(a.as_ref(), IdentifierCase::AsWritten)
+                .cmp(&stored_view_key(b.as_ref(), IdentifierCase::AsWritten))
         });
         // Grants are not sorted as their order may be significant
 
@@ -761,19 +766,19 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
         let mut relation_index: BTreeMap<_, Vec<RelationSlot>> = BTreeMap::new();
         for (position, (table, _)) in self.tables.iter().enumerate() {
             relation_index
-                .entry(stored_table_key(table.as_ref()))
+                .entry(stored_table_key(table.as_ref(), IdentifierCase::AsWritten))
                 .or_default()
                 .push(RelationSlot::Table(position));
         }
         for (position, (view, _)) in self.views.iter().enumerate() {
             relation_index
-                .entry(stored_view_key(view.as_ref()))
+                .entry(stored_view_key(view.as_ref(), IdentifierCase::AsWritten))
                 .or_default()
                 .push(RelationSlot::View(position));
         }
         for (position, (view, _)) in self.materialized_views.iter().enumerate() {
             relation_index
-                .entry(stored_view_key(view.as_ref()))
+                .entry(stored_view_key(view.as_ref(), IdentifierCase::AsWritten))
                 .or_default()
                 .push(RelationSlot::MaterializedView(position));
         }
@@ -783,10 +788,13 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
         let mut function_index: BTreeMap<_, Vec<usize>> = BTreeMap::new();
         for (position, (function, _)) in self.functions.iter().enumerate() {
             function_index
-                .entry(stored_function_key(function.as_ref()))
+                .entry(stored_function_key(function.as_ref(), IdentifierCase::AsWritten))
                 .or_default()
                 .push(position);
         }
+
+        let folded_relation_index = folded_key_index(relation_index.keys());
+        let folded_function_index = folded_key_index(function_index.keys());
 
         GenericDB {
             dialect: self.dialect,
@@ -796,12 +804,14 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             views: self.views,
             materialized_views: self.materialized_views,
             relation_index,
+            folded_relation_index,
             columns: self.columns,
             indices: self.indices,
             unique_indices: self.unique_indices,
             foreign_keys: self.foreign_keys,
             functions: self.functions,
             function_index,
+            folded_function_index,
             triggers: self.triggers,
             policies: self.policies,
             check_constraints: self.check_constraints,
@@ -813,6 +823,21 @@ impl<P: SchemaProfile> GenericDBBuilder<P> {
             ingestion,
         }
     }
+}
+
+/// Indexes the stored keys a folded lookup reaches, skipping every key that
+/// already equals its folded form.
+fn folded_key_index<'a>(
+    keys: impl Iterator<Item = &'a RelationKey>,
+) -> BTreeMap<RelationKey, Vec<RelationKey>> {
+    let mut folded: BTreeMap<RelationKey, Vec<RelationKey>> = BTreeMap::new();
+    for key in keys {
+        let folded_key = key.folded();
+        if folded_key != *key {
+            folded.entry(folded_key).or_default().push(key.clone());
+        }
+    }
+    folded
 }
 
 impl<P: SchemaProfile> From<GenericDBBuilder<P>> for GenericDB<P> {

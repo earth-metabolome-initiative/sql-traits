@@ -14,7 +14,7 @@ use sqlparser::ast::{
 
 use crate::{
     errors::LookupError,
-    structs::{ParserDB, TargetName},
+    structs::{IdentifierCase, ParserDB, TargetName},
     traits::{
         ColumnGrantLike, ColumnLike, DatabaseLike, GrantLike, Metadata, RoleLike, TableGrantLike,
         TableLike, ViewLike, grant::GrantRelation,
@@ -733,11 +733,13 @@ fn resolve_relation_name<'a>(
         return Some(GrantRelation::Table(table));
     }
     let target = target_name_from_object_name(name)?;
-    if let Some(view) = database.resolve_target_view(target.clone()).ok().flatten() {
+    if let Some(view) =
+        database.resolve_target_view(target.clone(), IdentifierCase::AsWritten).ok().flatten()
+    {
         return Some(GrantRelation::View(view));
     }
     database
-        .resolve_target_materialized_view(target)
+        .resolve_target_materialized_view(target, IdentifierCase::AsWritten)
         .ok()
         .flatten()
         .map(GrantRelation::MaterializedView)

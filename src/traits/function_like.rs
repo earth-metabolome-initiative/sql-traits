@@ -117,8 +117,12 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION greet(name TEXT) RETURNS TEXT AS 'SELECT \"Hello, \" || name;';
     /// ",
     /// )?;
-    /// let add_fn = db.function(None, "add").expect("Function should exist");
-    /// let greet_fn = db.function(None, "greet").expect("Function should exist");
+    /// let add_fn = db
+    ///     .function_by_target(TargetName::new("add", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
+    /// let greet_fn = db
+    ///     .function_by_target(TargetName::new("greet", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(add_fn.normalized_argument_type_names(&db), vec!["INT", "INT"]);
     /// assert_eq!(greet_fn.normalized_argument_type_names(&db), vec!["TEXT"]);
     /// # Ok(())
@@ -160,7 +164,9 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION unnamed(INT) RETURNS BOOL LANGUAGE sql AS 'SELECT true';
     /// ",
     /// )?;
-    /// let is_member = db.function(None, "is_member").expect("Function should exist");
+    /// let is_member = db
+    ///     .function_by_target(TargetName::new("is_member", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// let names: Vec<_> = is_member.argument_names(&db).collect();
     /// assert_eq!(names[0].as_ref().map(|name| name.name()), Some("doc_id"));
     /// assert_eq!(names[1].as_ref().map(|name| name.name()), Some("Role"));
@@ -171,7 +177,9 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// assert_eq!(stored[0].as_deref(), Some("doc_id"));
     /// assert_eq!(stored[1].as_deref(), Some("Role"));
     ///
-    /// let unnamed = db.function(None, "unnamed").expect("Function should exist");
+    /// let unnamed = db
+    ///     .function_by_target(TargetName::new("unnamed", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(unnamed.argument_names(&db).collect::<Vec<_>>(), vec![None]);
     /// # Ok(())
     /// # }
@@ -213,10 +221,18 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION identities() RETURNS SETOF UUID AS 'SELECT id FROM users;';
     /// ",
     /// )?;
-    /// let add_one_fn = db.function(None, "add_one").expect("Function should exist");
-    /// let greet_fn = db.function(None, "greet").expect("Function should exist");
-    /// let do_nothing_fn = db.function(None, "do_nothing").expect("Function should exist");
-    /// let identities_fn = db.function(None, "identities").expect("Function should exist");
+    /// let add_one_fn = db
+    ///     .function_by_target(TargetName::new("add_one", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
+    /// let greet_fn = db
+    ///     .function_by_target(TargetName::new("greet", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
+    /// let do_nothing_fn = db
+    ///     .function_by_target(TargetName::new("do_nothing", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
+    /// let identities_fn = db
+    ///     .function_by_target(TargetName::new("identities", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(do_nothing_fn.return_type_name(&db), None);
     /// assert_eq!(add_one_fn.return_type_name(&db).as_deref(), Some("INT"));
     /// assert_eq!(greet_fn.return_type_name(&db).as_deref(), Some("TEXT"));
@@ -249,8 +265,12 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION many_rows() RETURNS TABLE(id UUID) AS 'SELECT id FROM users;';
     /// ",
     /// )?;
-    /// let returns_set =
-    ///     |name: &str| db.function(None, name).expect("Function should exist").returns_set();
+    /// let returns_set = |name: &str| {
+    ///     db.function_by_target(TargetName::new(name, false), IdentifierCase::AsWritten)
+    ///         .expect("unambiguous lookup")
+    ///         .expect("Function should exist")
+    ///         .returns_set()
+    /// };
     /// assert!(!returns_set("one_value"));
     /// assert!(returns_set("many_values"));
     /// // A declared row shape is a set: PostgreSQL records it with
@@ -282,13 +302,17 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION two() RETURNS INT LANGUAGE plpgsql AS 'BEGIN RETURN 2; END';
     /// ",
     /// )?;
-    /// let one = db.function(None, "one").expect("Function should exist");
+    /// let one = db
+    ///     .function_by_target(TargetName::new("one", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(one.language(), Some("SQL"));
     /// // The server folds the identifier, and `sql` is what it looks up.
     /// assert_eq!(one.stored_language().as_deref(), Some("sql"));
     /// assert!(!one.language_is_quoted());
     ///
-    /// let two = db.function(None, "two").expect("Function should exist");
+    /// let two = db
+    ///     .function_by_target(TargetName::new("two", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(two.stored_language().as_deref(), Some("plpgsql"));
     /// # Ok(())
     /// # }
@@ -359,11 +383,15 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION quoted(a INT) RETURNS INT LANGUAGE sql AS 'SELECT a';
     /// ",
     /// )?;
-    /// let added = db.function(None, "added").expect("Function should exist");
+    /// let added = db
+    ///     .function_by_target(TargetName::new("added", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(added.body(), None);
     /// assert_eq!(added.body_expression().map(ToString::to_string).as_deref(), Some("a + b"));
     ///
-    /// let quoted = db.function(None, "quoted").expect("Function should exist");
+    /// let quoted = db
+    ///     .function_by_target(TargetName::new("quoted", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(quoted.body(), Some("SELECT a"));
     /// assert_eq!(quoted.body_expression(), None);
     /// # Ok(())
@@ -402,7 +430,12 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// ALTER FUNCTION altered() SECURITY DEFINER;
     /// ",
     /// )?;
-    /// let mode = |name: &str| db.function(None, name).expect("Function should exist").security_mode();
+    /// let mode = |name: &str| {
+    ///     db.function_by_target(TargetName::new(name, false), IdentifierCase::AsWritten)
+    ///         .expect("unambiguous lookup")
+    ///         .expect("Function should exist")
+    ///         .security_mode()
+    /// };
     /// assert_eq!(mode("as_owner"), FunctionSecurity::Definer);
     /// assert_eq!(mode("as_caller"), FunctionSecurity::Invoker);
     /// // PostgreSQL defaults an unstated clause to SECURITY INVOKER.
@@ -454,11 +487,15 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION untouched() RETURNS INT LANGUAGE sql SECURITY DEFINER AS 'SELECT 1';
     /// ",
     /// )?;
-    /// let reassigned = db.function(None, "reassigned").expect("Function should exist");
+    /// let reassigned = db
+    ///     .function_by_target(TargetName::new("reassigned", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(reassigned.owner(&db)?, Some("app_reader"));
     ///
     /// // Nobody reassigned this one, so the schema names no owner for it.
-    /// let untouched = db.function(None, "untouched").expect("Function should exist");
+    /// let untouched = db
+    ///     .function_by_target(TargetName::new("untouched", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(untouched.owner(&db)?, None);
     /// # Ok(())
     /// # }
@@ -481,10 +518,18 @@ pub trait FunctionLike: Metadata + Debug + Clone + Hash + Ord + Eq + Send + Sync
     /// CREATE FUNCTION identities() RETURNS SETOF UUID AS 'SELECT id FROM users;';
     /// ",
     /// )?;
-    /// let add_one_fn = db.function(None, "add_one").expect("Function should exist");
-    /// let greet_fn = db.function(None, "greet").expect("Function should exist");
-    /// let do_nothing_fn = db.function(None, "do_nothing").expect("Function should exist");
-    /// let identities_fn = db.function(None, "identities").expect("Function should exist");
+    /// let add_one_fn = db
+    ///     .function_by_target(TargetName::new("add_one", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
+    /// let greet_fn = db
+    ///     .function_by_target(TargetName::new("greet", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
+    /// let do_nothing_fn = db
+    ///     .function_by_target(TargetName::new("do_nothing", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
+    /// let identities_fn = db
+    ///     .function_by_target(TargetName::new("identities", false), IdentifierCase::AsWritten)?
+    ///     .expect("Function should exist");
     /// assert_eq!(do_nothing_fn.normalized_return_type_name(&db), None);
     /// assert_eq!(add_one_fn.normalized_return_type_name(&db).as_deref(), Some("INT"));
     /// assert_eq!(greet_fn.normalized_return_type_name(&db).as_deref(), Some("TEXT"));
@@ -520,7 +565,10 @@ mod tests {
             CREATE FUNCTION unquoted_fn() RETURNS INT AS 'SELECT 1';
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
-        let f = db.function(None, "unquoted_fn").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("unquoted_fn", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         // `name_is_quoted` default returns false for parser-derived
         // functions whose impl chooses not to override.
@@ -541,7 +589,11 @@ mod tests {
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
         // Function should be removed
-        assert!(db.function(None, "my_func").is_none());
+        assert!(
+            db.function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_none()
+        );
         assert_eq!(db.functions().filter(|f| f.name() == "my_func").count(), 0);
     }
 
@@ -553,7 +605,14 @@ mod tests {
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Should not error with IF EXISTS");
 
         // Should succeed without error even though function doesn't exist
-        assert!(db.function(None, "non_existent_func").is_none());
+        assert!(
+            db.function_by_target(
+                TargetName::new("non_existent_func", false),
+                IdentifierCase::AsWritten
+            )
+            .expect("unambiguous lookup")
+            .is_none()
+        );
     }
 
     #[test]
@@ -583,12 +642,30 @@ mod tests {
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
         // func1 and func3 should be removed
-        assert!(db.function(None, "func1").is_none());
-        assert!(db.function(None, "func3").is_none());
+        assert!(
+            db.function_by_target(TargetName::new("func1", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_none()
+        );
+        assert!(
+            db.function_by_target(TargetName::new("func3", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_none()
+        );
 
         // func2 should still exist
-        assert!(db.function(None, "func2").is_some());
-        assert_eq!(db.function(None, "func2").unwrap().name(), "func2");
+        assert!(
+            db.function_by_target(TargetName::new("func2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_some()
+        );
+        assert_eq!(
+            db.function_by_target(TargetName::new("func2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap()
+                .name(),
+            "func2"
+        );
     }
 
     #[test]
@@ -601,7 +678,10 @@ mod tests {
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
         // Should have the recreated function
-        let func = db.function(None, "my_func").expect("Function should exist");
+        let func = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Function should exist");
         assert_eq!(func.name(), "my_func");
 
         // Should have the new return type
@@ -690,10 +770,18 @@ mod tests {
             .expect("Should succeed dropping unreferenced function");
 
         // Function should be gone
-        assert!(db.function(None, "unused_func").is_none());
+        assert!(
+            db.function_by_target(TargetName::new("unused_func", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_none()
+        );
 
         // Table should still exist
-        assert!(db.table(None, "t").is_some());
+        assert!(
+            db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_some()
+        );
     }
 
     #[test]
@@ -710,10 +798,18 @@ mod tests {
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Should succeed");
 
         // helper_func should still exist
-        assert!(db.function(None, "helper_func").is_some());
+        assert!(
+            db.function_by_target(TargetName::new("helper_func", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_some()
+        );
 
         // other_func should be gone
-        assert!(db.function(None, "other_func").is_none());
+        assert!(
+            db.function_by_target(TargetName::new("other_func", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_none()
+        );
     }
 
     #[test]
@@ -723,7 +819,10 @@ mod tests {
             ALTER FUNCTION my_func() SECURITY DEFINER;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_func").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Definer);
     }
@@ -735,7 +834,10 @@ mod tests {
             ALTER FUNCTION my_func() SECURITY INVOKER;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_func").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Invoker);
     }
@@ -748,7 +850,10 @@ mod tests {
             ALTER FUNCTION my_func() EXTERNAL SECURITY DEFINER;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_func").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Definer);
     }
@@ -762,7 +867,10 @@ mod tests {
             ALTER FUNCTION my_func() SECURITY INVOKER SECURITY DEFINER;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_func").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Definer);
     }
@@ -825,7 +933,10 @@ mod tests {
             ALTER FUNCTION missing_func() RENAME TO other_func;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_func").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Invoker);
     }
@@ -839,7 +950,10 @@ mod tests {
             CREATE OR REPLACE FUNCTION my_func() RETURNS INT AS 'SELECT 1;';
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_func").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Invoker);
     }
@@ -852,7 +966,13 @@ mod tests {
             CREATE TRIGGER my_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION my_trigger_func();
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_trigger_func").expect("function should exist");
+        let f = db
+            .function_by_target(
+                TargetName::new("my_trigger_func", false),
+                IdentifierCase::AsWritten,
+            )
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Definer);
     }
@@ -866,7 +986,10 @@ mod tests {
             ALTER FUNCTION my_func SECURITY DEFINER;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let f = db.function(None, "my_func").expect("function should exist");
+        let f = db
+            .function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("function should exist");
 
         assert_eq!(f.security_mode(), FunctionSecurity::Definer);
     }
@@ -884,7 +1007,10 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-        let table = db.table(None, "t").expect("table should exist");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table should exist");
         let policy = table.policies(&db).expect("policies").next().expect("policy should exist");
         let via_policy = policy
             .using_functions(&db)
@@ -894,7 +1020,10 @@ mod tests {
 
         assert_eq!(via_policy.security_mode(), FunctionSecurity::Definer);
         assert_eq!(
-            db.function(None, "f").expect("function should exist").security_mode(),
+            db.function_by_target(TargetName::new("f", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("function should exist")
+                .security_mode(),
             FunctionSecurity::Definer
         );
     }
@@ -910,7 +1039,10 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-        let table = db.table(None, "t").expect("table should exist");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table should exist");
         let check = table.check_constraints(&db).expect("check constraints").next().expect("check");
         let via_check = check
             .functions(&db)
@@ -933,7 +1065,10 @@ mod tests {
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-        let table = db.table(None, "t").expect("table should exist");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table should exist");
         let policy = table.policies(&db).expect("policies").next().expect("policy should exist");
         let via_using =
             policy.using_functions(&db).expect("using functions").next().expect("function");
@@ -961,7 +1096,12 @@ mod tests {
                 STRICT AS 'SELECT true';
         ";
         let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
-        let behavior = |name| db.function(None, name).expect("function").null_input_behavior();
+        let behavior = |name| {
+            db.function_by_target(TargetName::new(name, false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("function")
+                .null_input_behavior()
+        };
 
         assert_eq!(behavior("default_behavior"), FunctionCalledOnNull::CalledOnNullInput);
         assert_eq!(behavior("called_on_null"), FunctionCalledOnNull::CalledOnNullInput);

@@ -40,7 +40,8 @@ pub trait PolicyLike:
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let policy = table.policies(&db)?.next().unwrap();
     /// assert_eq!(policy.name(), "my_policy");
     /// # Ok(())
@@ -74,7 +75,12 @@ pub trait PolicyLike:
     /// CREATE POLICY my_policy ON app.\"MyTable\" USING (id > 0);
     /// ",
     /// )?;
-    /// let table = db.table(Some("app"), "\"MyTable\"").unwrap();
+    /// let table = db
+    ///     .table_by_target(
+    ///         TargetName::new("MyTable", true).with_schema("app", false),
+    ///         IdentifierCase::AsWritten,
+    ///     )?
+    ///     .unwrap();
     /// let policy = table.policies(&db)?.next().unwrap();
     /// assert_eq!(policy.table(&db)?, table);
     /// # Ok(())
@@ -182,7 +188,8 @@ pub trait PolicyLike:
     /// CREATE POLICY all_policy ON my_table USING (true);
     /// ";
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     ///
     /// let select_policy = table.policies(&db)?.find(|p| p.name() == "select_policy").unwrap();
     /// assert_eq!(select_policy.command(), CreatePolicyCommand::Select);
@@ -217,7 +224,8 @@ pub trait PolicyLike:
     /// CREATE POLICY implicit_policy ON my_table USING (id > 0);
     /// ";
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     ///
     /// let policy = table.policies(&db)?.find(|p| p.name() == "restrictive_policy").unwrap();
     /// assert_eq!(policy.policy_type(), CreatePolicyType::Restrictive);
@@ -250,7 +258,8 @@ pub trait PolicyLike:
     /// CREATE POLICY public_policy ON my_table TO PUBLIC USING (true);
     /// ";
     /// let db = ParserDB::parse::<GenericDialect>(sql)?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     ///
     /// let policy = table.policies(&db)?.find(|p| p.name() == "my_policy").unwrap();
     /// // Logic to verify roles (roles() returns iterator)
@@ -291,7 +300,8 @@ pub trait PolicyLike:
     /// CREATE POLICY quoted ON docs TO \"PUBLIC\" USING (true);
     /// ",
     /// )?;
-    /// let table = db.table(None, "docs").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?.unwrap();
     /// let policy = |name: &str| table.policies(&db).unwrap().find(|p| p.name() == name).unwrap();
     ///
     /// assert!(policy("spelled").applies_to_public());
@@ -318,7 +328,8 @@ pub trait PolicyLike:
     /// CREATE POLICY my_policy ON my_table USING (id > 0);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let policy = table.policies(&db)?.next().unwrap();
     /// assert!(policy.using_expression(&db).is_some());
     /// # Ok(())
@@ -348,7 +359,8 @@ pub trait PolicyLike:
     /// CREATE POLICY my_policy ON my_table USING (my_func());
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let policy = table.policies(&db)?.next().unwrap();
     /// let functions: Vec<_> = policy.using_functions(&db)?.collect();
     /// assert_eq!(functions.len(), 1);
@@ -375,7 +387,8 @@ pub trait PolicyLike:
     /// CREATE POLICY my_policy ON my_table WITH CHECK (id < 10);
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let policy = table.policies(&db)?.next().unwrap();
     /// assert!(policy.check_expression(&db).is_some());
     /// # Ok(())
@@ -405,7 +418,8 @@ pub trait PolicyLike:
     /// CREATE POLICY my_policy ON my_table WITH CHECK (check_func());
     /// ",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let policy = table.policies(&db)?.next().unwrap();
     /// let functions: Vec<_> = policy.check_functions(&db)?.collect();
     /// assert_eq!(functions.len(), 1);
@@ -500,7 +514,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        structs::ParserDB,
+        structs::{IdentifierCase, ParserDB, TargetName},
         traits::{DatabaseLike, FunctionLike, TableLike},
     };
 
@@ -517,7 +531,10 @@ mod tests {
                 WITH CHECK (id < 10 AND check_func());
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "my_table").expect("Table not found");
+        let table = db
+            .table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table not found");
         let policy = table.policies(&db).expect("policies").next().expect("Policy not found");
 
         // Use reference to policy
@@ -567,7 +584,10 @@ mod tests {
             CREATE POLICY implicit_policy ON my_table USING (id > 0);
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "my_table").expect("Table not found");
+        let table = db
+            .table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table not found");
 
         let policy_type = |name: &str| {
             table
@@ -591,7 +611,10 @@ mod tests {
             ALTER POLICY old_policy ON my_table RENAME TO new_policy;
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "my_table").expect("Table not found");
+        let table = db
+            .table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table not found");
         let policies: Vec<_> = table.policies(&db).expect("policies").collect();
 
         assert_eq!(policies.len(), 1);

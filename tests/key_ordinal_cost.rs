@@ -32,10 +32,18 @@ fn the_key_ordinal_cost_does_not_grow_with_the_key_width() -> Result<(), Error> 
         CREATE TABLE width_four (a INT, b INT, c INT, d INT, PRIMARY KEY (c, a, d, b));
         ",
     )?;
-    let width_one = db.table(None, "width_one").expect("table width_one was created");
-    let width_two = db.table(None, "width_two").expect("table width_two was created");
-    let width_three = db.table(None, "width_three").expect("table width_three was created");
-    let width_four = db.table(None, "width_four").expect("table width_four was created");
+    let width_one = db
+        .table_by_target(TargetName::new("width_one", false), IdentifierCase::AsWritten)?
+        .expect("table width_one was created");
+    let width_two = db
+        .table_by_target(TargetName::new("width_two", false), IdentifierCase::AsWritten)?
+        .expect("table width_two was created");
+    let width_three = db
+        .table_by_target(TargetName::new("width_three", false), IdentifierCase::AsWritten)?
+        .expect("table width_three was created");
+    let width_four = db
+        .table_by_target(TargetName::new("width_four", false), IdentifierCase::AsWritten)?
+        .expect("table width_four was created");
 
     // A cheaper wrong answer cannot pass this file.
     assert_eq!(width_one.primary_key_column_ids(&db)?, vec![1]);

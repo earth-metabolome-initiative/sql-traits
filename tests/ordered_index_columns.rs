@@ -59,7 +59,10 @@ fn index_models(database: &ParserDB) -> Vec<IndexModel> {
 
 /// Summarizes every unique constraint declared on table `t`.
 fn unique_index_models(database: &ParserDB) -> Vec<IndexModel> {
-    let table = database.table(None, "t").expect("input declares table t");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("input declares table t");
     table
         .unique_indices(database)
         .expect("table belongs to the database")

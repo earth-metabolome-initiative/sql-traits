@@ -88,12 +88,39 @@ fn a_creation_naming_this_catalog_is_accepted_and_shortened() {
     )
     .expect("this catalog's own name builds");
 
-    let docs = db.table(Some("public"), "docs").expect("the table is recorded in public");
+    let docs = db
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("public", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the table is recorded in public");
     assert_eq!(docs.table_name(), "docs");
     assert_eq!(docs.table_schema(), Some("public"));
-    assert!(db.function(Some("public"), "f").is_some());
-    assert!(db.view(Some("public"), "v").is_some());
-    assert!(db.materialized_view(Some("public"), "m").is_some());
+    assert!(
+        db.function_by_target(
+            TargetName::new("f", false).with_schema("public", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.view_by_target(
+            TargetName::new("v", false).with_schema("public", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.materialized_view_by_target(
+            TargetName::new("m", false).with_schema("public", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
 }
 
 /// An index name carries no qualifier at all in PostgreSQL 18, and certainly
@@ -118,12 +145,36 @@ fn local_names_are_unaffected() {
     )
     .expect("local names build");
 
-    assert!(db.table(Some("app"), "docs").is_some());
-    assert!(db.table(None, "plain").is_some());
-    assert!(db.function(Some("app"), "f").is_some());
+    assert!(
+        db.table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.table_by_target(TargetName::new("plain", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
+    assert!(
+        db.function_by_target(
+            TargetName::new("f", false).with_schema("app", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
 
     // The index reads its column through the qualified table it is on.
-    let docs = db.table(Some("app"), "docs").expect("the table exists");
+    let docs = db
+        .table_by_target(
+            TargetName::new("docs", false).with_schema("app", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("the table exists");
     let index = db.indexes().next().expect("the index is recorded");
     let columns: Vec<_> = index
         .columns(&db)
@@ -140,7 +191,10 @@ fn local_names_are_unaffected() {
 #[test]
 fn a_check_constraint_qualified_by_another_table_is_refused() {
     let own = build("CREATE TABLE t (id INT, CHECK (t.id > 0));").expect("self-qualified builds");
-    let table = own.table(None, "t").expect("table exists");
+    let table = own
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     let check = table
         .check_constraints(&own)
         .expect("constraints resolve")

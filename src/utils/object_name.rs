@@ -18,11 +18,9 @@ use sqlparser::ast::{Ident, ObjectName, ObjectNamePart};
 
 use crate::{
     errors::LookupError,
-    structs::TargetName,
+    structs::{IdentifierCase, TargetName},
     traits::{DatabaseLike, FunctionLike, TableLike, ViewLike},
-    utils::identifier_resolution::{
-        identifiers_match, normalize_identifier, parse_lookup_identifier,
-    },
+    utils::identifier_resolution::{identifiers_match, normalize_identifier},
 };
 
 /// Reports a name a statement builds while it runs, which no static reader can
@@ -281,49 +279,45 @@ pub(crate) struct RelationKey {
     pub name: String,
 }
 
-/// Normalizes a stored schema, folding a schema-less table into `public`.
-fn stored_schema_key<T: TableLike>(table: &T) -> Cow<'_, str> {
+impl RelationKey {
+    /// The key a folded lookup reaches this one by.
+    pub(crate) fn folded(&self) -> Self {
+        Self {
+            schema: IdentifierCase::Folded.compared_form(&self.schema, false).into_owned(),
+            name: IdentifierCase::Folded.compared_form(&self.name, false).into_owned(),
+        }
+    }
+}
+
+/// Normalizes a stored schema under `case`, folding a schema-less table into
+/// `public`.
+fn stored_schema_key<T: TableLike>(table: &T, case: IdentifierCase) -> Cow<'_, str> {
     table.table_schema().map_or(Cow::Borrowed("public"), |schema| {
-        normalize_identifier(schema, table.table_schema_is_quoted())
+        case.compared_form(schema, table.table_schema_is_quoted())
     })
 }
 
-/// Normalizes a stored table name.
-fn stored_name_key<T: TableLike>(table: &T) -> Cow<'_, str> {
-    normalize_identifier(table.table_name(), table.table_name_is_quoted())
+/// Normalizes a stored table name under `case`.
+fn stored_name_key<T: TableLike>(table: &T, case: IdentifierCase) -> Cow<'_, str> {
+    case.compared_form(table.table_name(), table.table_name_is_quoted())
 }
 
-/// Key of a written target name, normalizing each part once.
-pub(crate) fn target_key(target: &TargetName<'_>) -> RelationKey {
+/// Key of a written target name under `case`, normalizing each part once.
+pub(crate) fn target_key(target: &TargetName<'_>, case: IdentifierCase) -> RelationKey {
     RelationKey {
         schema: target.schema().map_or_else(
             || String::from("public"),
-            |schema| normalize_identifier(schema, target.schema_is_quoted()).into_owned(),
+            |schema| case.compared_form(schema, target.schema_is_quoted()).into_owned(),
         ),
-        name: normalize_identifier(target.name(), target.name_is_quoted()).into_owned(),
+        name: case.compared_form(target.name(), target.name_is_quoted()).into_owned(),
     }
 }
 
-/// Key of a textual lookup, parsing quoting out of each part first.
-pub(crate) fn lookup_key(schema: Option<&str>, name: &str) -> RelationKey {
-    let name_ident = parse_lookup_identifier(name);
+/// Key a stored table is indexed under, comparing each part under `case`.
+pub(crate) fn stored_table_key<T: TableLike>(table: &T, case: IdentifierCase) -> RelationKey {
     RelationKey {
-        schema: schema.map_or_else(
-            || String::from("public"),
-            |schema| {
-                let schema_ident = parse_lookup_identifier(schema);
-                normalize_identifier(schema_ident.value(), schema_ident.is_quoted()).into_owned()
-            },
-        ),
-        name: normalize_identifier(name_ident.value(), name_ident.is_quoted()).into_owned(),
-    }
-}
-
-/// Key a stored table is indexed under.
-pub(crate) fn stored_table_key<T: TableLike>(table: &T) -> RelationKey {
-    RelationKey {
-        schema: stored_schema_key(table).into_owned(),
-        name: stored_name_key(table).into_owned(),
+        schema: stored_schema_key(table, case).into_owned(),
+        name: stored_name_key(table, case).into_owned(),
     }
 }
 
@@ -339,14 +333,17 @@ pub(crate) fn stored_identity_key(schema: Option<&str>, name: &str) -> RelationK
     }
 }
 
-/// Key a stored function is found under, folding a function declared without a
-/// schema into `public` exactly as a relation is folded.
+/// Key a stored function is found under under `case`, folding a function
+/// declared without a schema into `public` exactly as a relation is folded.
 ///
 /// Functions have their own pool of names, so this key indexes them apart
 /// from relations, and a name carrying several argument lists holds several
 /// functions.
-pub(crate) fn stored_function_key<F: FunctionLike>(function: &F) -> RelationKey {
-    target_key(&function.target_name())
+pub(crate) fn stored_function_key<F: FunctionLike>(
+    function: &F,
+    case: IdentifierCase,
+) -> RelationKey {
+    target_key(&function.target_name(), case)
 }
 
 /// Whether a function is stored under exactly this identity, with both parts
@@ -396,9 +393,10 @@ pub(crate) fn resolve_function_on_search_path_in_iter<'a, 'path, F: FunctionLike
     functions: impl Iterator<Item = &'a F>,
     target: &TargetName<'_>,
     search_path: impl Iterator<Item = (&'path str, bool)>,
+    case: IdentifierCase,
 ) -> Result<Option<&'a F>, LookupError> {
     let indexed: Vec<(RelationKey, &'a F)> =
-        functions.map(|function| (stored_function_key(function), function)).collect();
+        functions.map(|function| (stored_function_key(function, case), function)).collect();
     let written = target.to_string();
     let matching = |key: &RelationKey| -> Vec<&'a F> {
         indexed
@@ -408,13 +406,13 @@ pub(crate) fn resolve_function_on_search_path_in_iter<'a, 'path, F: FunctionLike
     };
 
     if target.schema().is_some() {
-        return resolve_one_function(&written, &matching(&target_key(target)));
+        return resolve_one_function(&written, &matching(&target_key(target, case)));
     }
 
-    let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
+    let name = case.compared_form(target.name(), target.name_is_quoted()).into_owned();
     for (entry_schema, entry_quoted) in search_path {
         let key = RelationKey {
-            schema: normalize_identifier(entry_schema, entry_quoted).into_owned(),
+            schema: case.compared_form(entry_schema, entry_quoted).into_owned(),
             name: name.clone(),
         };
         let candidates = matching(&key);
@@ -426,29 +424,37 @@ pub(crate) fn resolve_function_on_search_path_in_iter<'a, 'path, F: FunctionLike
     Ok(None)
 }
 
-/// Key a stored view is indexed under, folding a schema-less view into
-/// `public` exactly as a table is folded.
-pub(crate) fn stored_view_key<V: ViewLike>(view: &V) -> RelationKey {
+/// Key a stored view is indexed under under `case`, folding a schema-less
+/// view into `public` exactly as a table is folded.
+pub(crate) fn stored_view_key<V: ViewLike>(view: &V, case: IdentifierCase) -> RelationKey {
     RelationKey {
         schema: view.view_schema().map_or_else(
             || String::from("public"),
-            |schema| normalize_identifier(schema, view.view_schema_is_quoted()).into_owned(),
+            |schema| case.compared_form(schema, view.view_schema_is_quoted()).into_owned(),
         ),
-        name: view.stored_view_name().into_owned(),
+        name: case.compared_form(view.view_name(), view.view_name_is_quoted()).into_owned(),
     }
 }
 
-/// Returns whether a stored table answers a normalized key, normalizing only
-/// the stored side.
-pub(crate) fn table_matches_key<T: TableLike>(table: &T, key: &RelationKey) -> bool {
-    key.name == stored_name_key(table) && key.schema == stored_schema_key(table)
+/// Returns whether a stored table answers a key normalized under `case`,
+/// normalizing only the stored side.
+pub(crate) fn table_matches_key<T: TableLike>(
+    table: &T,
+    key: &RelationKey,
+    case: IdentifierCase,
+) -> bool {
+    key.name == stored_name_key(table, case) && key.schema == stored_schema_key(table, case)
 }
 
 /// Reference matcher used by tests: compares a table against a written target
 /// without precomputing a key.
 #[cfg(test)]
-pub(crate) fn table_matches_target<T: TableLike>(table: &T, target: &TargetName<'_>) -> bool {
-    table_matches_key(table, &target_key(target))
+pub(crate) fn table_matches_target<T: TableLike>(
+    table: &T,
+    target: &TargetName<'_>,
+    case: IdentifierCase,
+) -> bool {
+    table_matches_key(table, &target_key(target, case), case)
 }
 
 /// Renders a table for inclusion in an ambiguity error, quoting parts that were
@@ -512,14 +518,22 @@ pub(crate) fn resolve_target_from_candidates<'a, T: TableLike>(
 pub(crate) fn resolve_target_in_iter<'a, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
     target: &TargetName<'_>,
+    case: IdentifierCase,
 ) -> Result<Option<&'a T>, LookupError> {
-    let key = target_key(target);
-    let candidates: Vec<&T> = tables.filter(|table| table_matches_key(*table, &key)).collect();
+    let key = target_key(target, case);
+    let candidates: Vec<&T> =
+        tables.filter(|table| table_matches_key(*table, &key, case)).collect();
     resolve_target_from_candidates(target, &candidates)
 }
 
-/// Resolves a table from a one-part or two-part object name against an iterator
-/// of tables.
+/// Resolves a table from a one-part or two-part object name against an
+/// iterator of tables, comparing identifiers the way PostgreSQL does.
+///
+/// The object-name resolvers serve this crate's own ingestion, whose creation
+/// and dependency rules are PostgreSQL's, so they carry no comparison
+/// argument. A caller reading a reference on another engine's behalf builds a
+/// [`TargetName`] and states its rule through
+/// [`DatabaseLike::resolve_target_table`].
 ///
 /// # Errors
 ///
@@ -530,7 +544,11 @@ pub(crate) fn resolve_table_object_name_in_iter<'a, T: TableLike>(
     object_name: &ObjectName,
 ) -> Result<Option<&'a T>, LookupError> {
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-    resolve_target_in_iter(tables, &target_name_of_idents(schema_ident, table_ident))
+    resolve_target_in_iter(
+        tables,
+        &target_name_of_idents(schema_ident, table_ident),
+        IdentifierCase::AsWritten,
+    )
 }
 
 /// Resolves a written target name against an iterator of relations of one
@@ -550,49 +568,62 @@ fn resolve_relation_on_search_path<'a, 'path, R>(
     relations: impl Iterator<Item = &'a R>,
     target: &TargetName<'_>,
     search_path: impl Iterator<Item = (&'path str, bool)>,
-    key_of: impl Fn(&R) -> RelationKey,
+    case: IdentifierCase,
+    key_of: impl Fn(&R, IdentifierCase) -> RelationKey,
+    claimed: impl Fn(&RelationKey) -> bool,
     render: impl Fn(&R) -> String,
 ) -> Result<Option<&'a R>, LookupError> {
     if target.schema().is_some() {
-        let key = target_key(target);
-        let candidates: Vec<&R> = relations.filter(|relation| key_of(relation) == key).collect();
+        let key = target_key(target, case);
+        let candidates: Vec<&R> =
+            relations.filter(|relation| key_of(relation, case) == key).collect();
         return resolve_one_relation(target, &candidates, render);
     }
 
-    let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
-    let path: Vec<String> = search_path
-        .map(|(schema, quoted)| normalize_identifier(schema, quoted).into_owned())
-        .collect();
-    let mut winner = usize::MAX;
-    let mut candidates: Vec<&'a R> = Vec::new();
-    for relation in relations {
-        let key = key_of(relation);
-        if name != key.name {
+    let indexed: Vec<(RelationKey, &'a R)> =
+        relations.map(|relation| (key_of(relation, case), relation)).collect();
+    let mut key = RelationKey {
+        schema: String::new(),
+        name: case.compared_form(target.name(), target.name_is_quoted()).into_owned(),
+    };
+    for (entry_schema, entry_quoted) in search_path {
+        key.schema.clear();
+        key.schema.push_str(&case.compared_form(entry_schema, entry_quoted));
+        let candidates: Vec<&'a R> = indexed
+            .iter()
+            .filter_map(|(stored, relation)| (*stored == key).then_some(*relation))
+            .collect();
+        if candidates.is_empty() && !claimed(&key) {
             continue;
         }
-        for (entry, path_schema) in path.iter().take(winner.saturating_add(1)).enumerate() {
-            if path_schema == &key.schema {
-                if entry < winner {
-                    winner = entry;
-                    candidates = vec![relation];
-                } else {
-                    candidates.push(relation);
-                }
-                break;
-            }
-        }
+        // Reported under the written name: the entry qualifier is resolution
+        // machinery, not something the statement spelled.
+        return resolve_one_relation(target, &candidates, render);
     }
 
-    if winner == usize::MAX {
-        return Ok(None);
-    }
-    // Reported under the written name: the entry qualifier is resolution
-    // machinery, not something the statement spelled.
-    resolve_one_relation(target, &candidates, render)
+    Ok(None)
+}
+
+/// Whether any relation of any kind in `database` is stored under `key`.
+///
+/// Tables, views and materialized views share one pool of names, so this is
+/// what ends a search-path walk: a schema holding the name under another kind
+/// is not looked past.
+pub(crate) fn relation_name_is_claimed<DB: DatabaseLike>(
+    database: &DB,
+    key: &RelationKey,
+    case: IdentifierCase,
+) -> bool {
+    database.tables().any(|table| stored_table_key(table, case) == *key)
+        || database.views().any(|view| stored_view_key(view, case) == *key)
+        || database.materialized_views().any(|view| stored_view_key(view, case) == *key)
 }
 
 /// Resolves a written target name against an iterator of tables, trying each
 /// schema on `search_path` in turn for an unqualified name.
+///
+/// `claimed` answers whether a schema holds the name under any relation kind,
+/// which ends the walk even when no table of that name lives there.
 ///
 /// # Errors
 ///
@@ -603,18 +634,25 @@ pub(crate) fn resolve_target_on_search_path_in_iter<'a, 'path, T: TableLike>(
     tables: impl Iterator<Item = &'a T>,
     target: &TargetName<'_>,
     search_path: impl Iterator<Item = (&'path str, bool)>,
+    case: IdentifierCase,
+    claimed: impl Fn(&RelationKey) -> bool,
 ) -> Result<Option<&'a T>, LookupError> {
     resolve_relation_on_search_path(
         tables,
         target,
         search_path,
+        case,
         stored_table_key,
+        claimed,
         render_table_candidate,
     )
 }
 
 /// Resolves a written target name against an iterator of views of one kind,
 /// trying each schema on `search_path` in turn for an unqualified name.
+///
+/// `claimed` carries the same meaning it has for
+/// [`resolve_target_on_search_path_in_iter`].
 ///
 /// # Errors
 ///
@@ -625,14 +663,56 @@ pub(crate) fn resolve_view_on_search_path_in_iter<'a, 'path, V: ViewLike>(
     views: impl Iterator<Item = &'a V>,
     target: &TargetName<'_>,
     search_path: impl Iterator<Item = (&'path str, bool)>,
+    case: IdentifierCase,
+    claimed: impl Fn(&RelationKey) -> bool,
 ) -> Result<Option<&'a V>, LookupError> {
     resolve_relation_on_search_path(
         views,
         target,
         search_path,
+        case,
         stored_view_key,
+        claimed,
         render_view_candidate,
     )
+}
+
+/// Resolves a written target name against an iterator of views of one kind,
+/// consulting no search path, so an unqualified name names the default
+/// schema.
+///
+/// # Errors
+///
+/// Returns [`LookupError::AmbiguousTableLookup`] when the name matches more
+/// than one view.
+pub(crate) fn resolve_view_in_iter<'a, V: ViewLike>(
+    views: impl Iterator<Item = &'a V>,
+    target: &TargetName<'_>,
+    case: IdentifierCase,
+) -> Result<Option<&'a V>, LookupError> {
+    let key = target_key(target, case);
+    let candidates: Vec<&V> = views.filter(|view| stored_view_key(*view, case) == key).collect();
+    resolve_one_relation(target, &candidates, render_view_candidate)
+}
+
+/// Resolves a written function reference against an iterator of declarations,
+/// consulting no search path, so an unqualified name names the default
+/// schema.
+///
+/// # Errors
+///
+/// Returns [`LookupError::AmbiguousFunctionLookup`] when the name carries
+/// more than one declaration, since resolution by name alone cannot choose
+/// between argument lists.
+pub(crate) fn resolve_function_in_iter<'a, F: FunctionLike>(
+    functions: impl Iterator<Item = &'a F>,
+    target: &TargetName<'_>,
+    case: IdentifierCase,
+) -> Result<Option<&'a F>, LookupError> {
+    let key = target_key(target, case);
+    let candidates: Vec<&F> =
+        functions.filter(|function| stored_function_key(*function, case) == key).collect();
+    resolve_one_function(&target.to_string(), &candidates)
 }
 
 /// Resolves a table from a one-part or two-part object name, honouring
@@ -652,6 +732,11 @@ pub(crate) fn resolve_table_object_name_on_search_path_in_iter<'a, 'path, T: Tab
         tables,
         &target_name_of_idents(schema_ident, table_ident),
         search_path,
+        IdentifierCase::AsWritten,
+        // Only tables are in hand here, so a view holding the name does not
+        // end the walk, which is the creation-time namespace question this
+        // crate answers separately.
+        |_| false,
     )
 }
 
@@ -673,7 +758,10 @@ pub(crate) fn resolve_object_name<'db, DB: DatabaseLike>(
     let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
     // Through the trait method, so a catalog overriding it answers every
     // accessor the same way it answers a direct lookup.
-    database.resolve_target_table(target_name_of_idents(schema_ident, table_ident))
+    database.resolve_target_table(
+        target_name_of_idents(schema_ident, table_ident),
+        IdentifierCase::AsWritten,
+    )
 }
 
 /// Resolves an object name that is required to denote an existing base table of
@@ -706,8 +794,8 @@ mod tests {
 
     use super::{
         Qualifier, object_name_identifiers, object_name_last_part, qualifier_of,
-        render_table_candidate, render_view_candidate, require_local_object_name,
-        resolve_object_name, resolve_table_object_name_in_iter,
+        relation_name_is_claimed, render_table_candidate, render_view_candidate,
+        require_local_object_name, resolve_object_name, resolve_table_object_name_in_iter,
         resolve_table_object_name_on_search_path_in_iter, resolve_target_from_candidates,
         resolve_target_in_iter, resolve_view_on_search_path_in_iter, table_matches_object_name,
         table_matches_target, target_name_from_object_name, target_name_of_object_name,
@@ -715,7 +803,7 @@ mod tests {
     use crate::{
         errors::LookupError,
         prelude::ParserDB,
-        structs::TargetName,
+        structs::{IdentifierCase, TargetName},
         traits::{DatabaseLike, TableLike},
     };
 
@@ -834,7 +922,7 @@ mod tests {
             assert_eq!(target.name(), "");
             assert_eq!(target.schema(), None);
             assert!(
-                resolve_target_in_iter(tables.iter(), &target)
+                resolve_target_in_iter(tables.iter(), &target, IdentifierCase::AsWritten)
                     .expect("nothing is ambiguous")
                     .is_none()
             );
@@ -885,26 +973,31 @@ mod tests {
         let users = find(&tables, "users");
         let scoped = find(&tables, "scoped");
 
-        assert!(table_matches_target(users, &TargetName::new("users", false)));
-        assert!(!table_matches_target(users, &TargetName::new("orders", false)));
+        let case = IdentifierCase::AsWritten;
+        assert!(table_matches_target(users, &TargetName::new("users", false), case));
+        assert!(!table_matches_target(users, &TargetName::new("orders", false), case));
         assert!(table_matches_target(
             scoped,
-            &TargetName::new("scoped", false).with_schema("s", false)
+            &TargetName::new("scoped", false).with_schema("s", false),
+            case
         ));
         // The two spellings of the default schema are one place.
         assert!(table_matches_target(
             users,
-            &TargetName::new("users", false).with_schema("public", false)
+            &TargetName::new("users", false).with_schema("public", false),
+            case
         ));
         assert!(table_matches_target(
             find(&tables, "only_pub"),
-            &TargetName::new("only_pub", false)
+            &TargetName::new("only_pub", false),
+            case
         ));
         // A table in another schema stays unreachable without its qualifier.
-        assert!(!table_matches_target(scoped, &TargetName::new("scoped", false)));
+        assert!(!table_matches_target(scoped, &TargetName::new("scoped", false), case));
         assert!(!table_matches_target(
             users,
-            &TargetName::new("users", false).with_schema("s", false)
+            &TargetName::new("users", false).with_schema("s", false),
+            case
         ));
     }
 
@@ -1054,12 +1147,20 @@ mod tests {
              CREATE VIEW s.v AS SELECT id FROM t;",
         )
         .expect("schema parses");
-        let view = db.view(Some("s"), "v").expect("view exists");
+        let view = db
+            .view_by_target(
+                TargetName::new("v", false).with_schema("s", false),
+                IdentifierCase::AsWritten,
+            )
+            .expect("unambiguous lookup")
+            .expect("view exists");
         assert_eq!(render_view_candidate(view), "s.v");
         let resolved = resolve_view_on_search_path_in_iter(
             db.views(),
             &TargetName::new("v", false),
             [("s", false)].into_iter(),
+            IdentifierCase::AsWritten,
+            |key| relation_name_is_claimed(&db, key, IdentifierCase::AsWritten),
         )
         .expect("view resolves")
         .expect("view matches");

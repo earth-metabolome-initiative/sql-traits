@@ -286,12 +286,17 @@ mod tests {
     use sqlparser::dialect::GenericDialect;
 
     use super::*;
-    use crate::{structs::ParserDB, traits::DatabaseLike};
+    use crate::{
+        structs::{IdentifierCase, ParserDB, TargetName},
+        traits::DatabaseLike,
+    };
 
     fn parse(schema_sql: &str, body: &str) -> Result<usize, MaintenanceBodyError> {
         let db =
             ParserDB::parse::<GenericDialect>(schema_sql).expect("Failed to create DB from schema");
-        let table = db.table(None, "t").expect("Failed to find table 't'");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+            .expect("Failed to find table 't'");
         parse_maintenance_body(body, &table, &db).map(|v| v.len())
     }
 

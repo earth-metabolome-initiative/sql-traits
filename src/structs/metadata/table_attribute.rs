@@ -53,7 +53,8 @@ impl<T, A> TableAttribute<T, A> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let column = table.column("id", &db)?.unwrap();
     /// // `column` is a `TableAttribute<CreateTable, ColumnDef>` — its
     /// // `.table()` accessor returns the host table.
@@ -75,7 +76,8 @@ impl<T, A> TableAttribute<T, A> {
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
-    /// let table = db.table(None, "t").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
     /// let column = table.column("id", &db)?.unwrap();
     /// // `column.attribute()` is the underlying `sqlparser::ast::ColumnDef`.
     /// assert_eq!(column.attribute().name.value, "id");

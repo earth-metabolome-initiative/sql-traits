@@ -112,7 +112,7 @@ mod tests {
     use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
 
     use super::*;
-    use crate::structs::ParserDB;
+    use crate::structs::{IdentifierCase, ParserDB, TargetName};
 
     /// Helper to parse SQL using PostgreSQL dialect
     fn parse_postgres(sql: &str) -> Result<ParserDB, crate::errors::Error> {
@@ -352,7 +352,14 @@ mod tests {
         .unwrap();
 
         assert!(db.schema("my_schema").is_none());
-        assert!(db.table(Some("my_schema"), "my_table").is_none());
+        assert!(
+            db.table_by_target(
+                TargetName::new("my_table", false).with_schema("my_schema", false),
+                IdentifierCase::AsWritten
+            )
+            .expect("unambiguous lookup")
+            .is_none()
+        );
     }
 
     #[test]
@@ -369,10 +376,28 @@ mod tests {
         .unwrap();
 
         assert!(db.schema("my_schema").is_none());
-        assert!(db.table(Some("my_schema"), "table1").is_none());
-        assert!(db.table(Some("my_schema"), "table2").is_none());
+        assert!(
+            db.table_by_target(
+                TargetName::new("table1", false).with_schema("my_schema", false),
+                IdentifierCase::AsWritten
+            )
+            .expect("unambiguous lookup")
+            .is_none()
+        );
+        assert!(
+            db.table_by_target(
+                TargetName::new("table2", false).with_schema("my_schema", false),
+                IdentifierCase::AsWritten
+            )
+            .expect("unambiguous lookup")
+            .is_none()
+        );
         // Table outside schema should remain
-        assert!(db.table(None, "other_table").is_some());
+        assert!(
+            db.table_by_target(TargetName::new("other_table", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .is_some()
+        );
     }
 
     #[test]

@@ -192,7 +192,10 @@ fn an_exclusion_constraint_include_list_follows_its_column() {
          ALTER TABLE t RENAME COLUMN b TO renamed;",
     )
     .expect("b is declared");
-    let table = renamed.table(None, "t").expect("t exists");
+    let table = renamed
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     assert_eq!(
         table
             .columns(&renamed)
@@ -208,7 +211,10 @@ fn an_exclusion_constraint_include_list_follows_its_column() {
          ALTER TABLE t DROP COLUMN b;",
     )
     .expect("the constraint goes with the column it includes");
-    let table = dropped.table(None, "t").expect("t exists");
+    let table = dropped
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t exists");
     assert_eq!(
         table
             .columns(&dropped)

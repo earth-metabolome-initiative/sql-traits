@@ -136,6 +136,7 @@ mod tests {
         prelude::{
             ParseOptions, ParserDB, PostgresCatalog, PostgresCatalogCollation, PostgresCatalogType,
         },
+        structs::{IdentifierCase, TargetName},
         traits::{
             ColumnCollation, ColumnLike, DatabaseLike, DialectLike, TableLike, TypeMatch,
             TypeMatchLike,
@@ -147,13 +148,19 @@ mod tests {
     }
 
     fn bool_of(db: &ParserDB, col: &str) -> TypeMatch {
-        let table = db.table(None, "t").expect("table t exists");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table t exists");
         let column = table.column(col, db).expect("column lookup").expect("column exists");
         db.dialect().is_bool(db, column)
     }
 
     fn uuid_of(db: &ParserDB, col: &str) -> TypeMatch {
-        let table = db.table(None, "t").expect("table t exists");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table t exists");
         let column = table.column(col, db).expect("column lookup").expect("column exists");
         db.dialect().is_uuid(db, column)
     }
@@ -281,7 +288,10 @@ mod tests {
     }
 
     fn column_named<'db>(db: &'db ParserDB, name: &str) -> &'db <ParserDB as DatabaseLike>::Column {
-        let table = db.table(None, "t").expect("table t exists");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table t exists");
         table.column(name, db).expect("column lookup").expect("column exists")
     }
 
@@ -532,7 +542,13 @@ mod tests {
             CREATE TABLE t (name TEXT COLLATE "C", child_name TEXT COLLATE child_ci);
             "#,
         );
-        let table = db.table(Some("app"), "t").expect("table app.t exists");
+        let table = db
+            .table_by_target(
+                TargetName::new("t", false).with_schema("app", false),
+                IdentifierCase::AsWritten,
+            )
+            .expect("unambiguous lookup")
+            .expect("table app.t exists");
         let column = table.column("name", &db).expect("column lookup").expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
@@ -925,7 +941,13 @@ mod tests {
             CREATE TABLE t (name TEXT COLLATE ci);
             ",
         );
-        let table = db.table(Some("app"), "t").expect("table app.t exists");
+        let table = db
+            .table_by_target(
+                TargetName::new("t", false).with_schema("app", false),
+                IdentifierCase::AsWritten,
+            )
+            .expect("unambiguous lookup")
+            .expect("table app.t exists");
         let column = table.column("name", &db).expect("column lookup").expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
@@ -1313,7 +1335,13 @@ mod tests {
             CREATE TABLE app.t (name TEXT COLLATE app.ci);
             ",
         );
-        let table = db.table(Some("app"), "t").expect("table app.t exists");
+        let table = db
+            .table_by_target(
+                TargetName::new("t", false).with_schema("app", false),
+                IdentifierCase::AsWritten,
+            )
+            .expect("unambiguous lookup")
+            .expect("table app.t exists");
         let column = table.column("name", &db).expect("column lookup").expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {
@@ -1453,7 +1481,13 @@ mod tests {
             CREATE TABLE t (name TEXT COLLATE ci);
             ",
         );
-        let table = db.table(Some("renamed"), "t").expect("table exists");
+        let table = db
+            .table_by_target(
+                TargetName::new("t", false).with_schema("renamed", false),
+                IdentifierCase::AsWritten,
+            )
+            .expect("unambiguous lookup")
+            .expect("table exists");
         let column = table.column("name", &db).expect("column lookup").expect("column exists");
         let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
         else {

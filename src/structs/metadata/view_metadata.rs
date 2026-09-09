@@ -27,7 +27,9 @@ impl ViewMetadata {
     ///      CREATE VIEW v AS SELECT id FROM t;
     ///      ALTER TABLE v OWNER TO app_reader;",
     /// )?;
-    /// let view = db.view(None, "v").expect("the view is recorded");
+    /// let view = db
+    ///     .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)?
+    ///     .expect("the view is recorded");
     /// let metadata = db.view_metadata(view).expect("metadata is recorded");
     /// assert_eq!(metadata.owner(), Some("app_reader"));
     /// # Ok(())

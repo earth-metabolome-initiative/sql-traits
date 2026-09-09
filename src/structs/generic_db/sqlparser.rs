@@ -41,8 +41,8 @@ use crate::{
     errors::{LookupError, ObjectKind},
     impls::SqlparserDialect,
     structs::{
-        ColumnMetadata, GenericDB, MaterializedView, Schema, SchemaProfile, TableAttribute,
-        TableMetadata, View,
+        ColumnMetadata, GenericDB, IdentifierCase, MaterializedView, Schema, SchemaProfile,
+        TableAttribute, TableMetadata, View,
         metadata::{
             CheckMetadata, FunctionMetadata, IndexMetadata, PolicyMetadata, UniqueIndexMetadata,
         },
@@ -1380,6 +1380,10 @@ impl ParserDBBuilder {
             self.views().iter().map(|(view, _)| view.as_ref()),
             &target_name_of_idents(schema_ident, name_ident),
             self.search_path(),
+            IdentifierCase::AsWritten,
+            // Ingestion resolves within one kind, which is the creation-time
+            // namespace question this crate answers separately.
+            |_| false,
         )
     }
 
@@ -1394,6 +1398,10 @@ impl ParserDBBuilder {
             self.materialized_views().iter().map(|(view, _)| view.as_ref()),
             &target_name_of_idents(schema_ident, name_ident),
             self.search_path(),
+            IdentifierCase::AsWritten,
+            // Ingestion resolves within one kind, which is the creation-time
+            // namespace question this crate answers separately.
+            |_| false,
         )
     }
 }
@@ -3412,7 +3420,8 @@ fn apply_revoke_to_grant_store(
 /// use sqlparser::dialect::GenericDialect;
 ///
 /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY);")?;
-/// let table = db.table(None, "users").unwrap();
+/// let table =
+///     db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
 /// assert_eq!(table.table_name(), "users");
 /// # Ok(())
 /// # }
@@ -3450,7 +3459,8 @@ fn apply_revoke_to_grant_store(
 ///     ALTER TABLE ONLY t ADD CONSTRAINT t_pkey PRIMARY KEY (id);
 ///     ",
 /// )?;
-/// let table = db.table(None, "t").unwrap();
+/// let table =
+///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
 /// assert_eq!(table.primary_key_column(&db)?.unwrap().column_name(), "id");
 /// # Ok(())
 /// # }
@@ -3667,7 +3677,9 @@ impl ParserDB {
     ///         .pop()
     ///         .expect("one statement");
     /// let db = db.into_ingestor().apply_statement(statement)?.finish();
-    /// let table = db.table(None, "t").expect("table exists");
+    /// let table = db
+    ///     .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+    ///     .expect("table exists");
     /// assert!(table.column("label", &db).expect("column lookup runs").is_some());
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```
@@ -3703,7 +3715,10 @@ impl ParserDB {
         object_name: &ObjectName,
     ) -> Result<Option<&CreateTable>, LookupError> {
         let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-        self.resolve_target_table_strict(&target_name_of_idents(schema_ident, table_ident))
+        self.resolve_target_table_strict(
+            &target_name_of_idents(schema_ident, table_ident),
+            IdentifierCase::AsWritten,
+        )
     }
 
     /// Resolves a table from an SQL object name, trying each schema on the
@@ -3722,7 +3737,10 @@ impl ParserDB {
         object_name: &ObjectName,
     ) -> Result<Option<&CreateTable>, LookupError> {
         let (schema_ident, table_ident) = object_name_identifiers(object_name)?;
-        self.resolve_target_table_on_path(&target_name_of_idents(schema_ident, table_ident))
+        self.resolve_target_table_on_path(
+            &target_name_of_idents(schema_ident, table_ident),
+            IdentifierCase::AsWritten,
+        )
     }
 
     /// Whether either view kind holds the relation name a grant wrote.
@@ -3737,10 +3755,12 @@ impl ParserDB {
     fn resolve_grant_view(&self, object_name: &ObjectName) -> Result<Option<()>, LookupError> {
         let (schema_ident, name_ident) = object_name_identifiers(object_name)?;
         let target = target_name_of_idents(schema_ident, name_ident);
-        if self.resolve_target_view_on_path(&target)?.is_some() {
+        if self.resolve_target_view_on_path(&target, IdentifierCase::AsWritten)?.is_some() {
             return Ok(Some(()));
         }
-        Ok(self.resolve_target_materialized_view_on_path(&target)?.map(|_| ()))
+        Ok(self
+            .resolve_target_materialized_view_on_path(&target, IdentifierCase::AsWritten)?
+            .map(|_| ()))
     }
 
     /// Reports the roles and table targets that this database's access control
@@ -5860,7 +5880,7 @@ impl ParserDB {
                         // A view reading the table would name nothing once
                         // the table left, so it blocks the drop and `CASCADE`
                         // takes it along, as PostgreSQL does.
-                        let relation_key = stored_table_key(table);
+                        let relation_key = stored_table_key(table, IdentifierCase::AsWritten);
                         if cascade {
                             views::remove_dependent_views(&mut builder, &relation_key);
                         } else {
@@ -7363,7 +7383,12 @@ impl ParserDB {
     ///
     /// // Using GenericDialect
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY);")?;
-    /// assert_eq!(db.table(None, "users").unwrap().table_name(), "users");
+    /// assert_eq!(
+    ///     db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?
+    ///         .unwrap()
+    ///         .table_name(),
+    ///     "users"
+    /// );
     ///
     /// // Using PostgreSqlDialect
     /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE ROLE admin SUPERUSER;")?;
@@ -7579,6 +7604,7 @@ mod tests {
     use super::*;
     use crate::{
         errors::{Error, LookupError},
+        structs::{IdentifierCase, TargetName},
         traits::{DatabaseLike, TableLike},
     };
 
@@ -7776,7 +7802,10 @@ mod tests {
                 .expect("PostgreSQL default catalog resolves an ICU collation after resumption");
 
             let database = input.finish();
-            let table = database.table(None, "t").expect("table exists");
+            let table = database
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table exists");
             let column = table
                 .column("name", &database)
                 .expect("column lookup runs")
@@ -7908,8 +7937,10 @@ mod tests {
                 ALTER TABLE FOO ENABLE ROW LEVEL SECURITY;
                 ",
             );
-            let foo =
-                db.table(None, "foo").expect("Expected `foo` table to exist after ALTER TABLE");
+            let foo = db
+                .table_by_target(TargetName::new("foo", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Expected `foo` table to exist after ALTER TABLE");
             assert!(
                 foo.has_row_level_security(&db).expect("rls check"),
                 "Unquoted ALTER TABLE lookup should resolve via identifier folding"
@@ -8009,8 +8040,16 @@ mod tests {
                 ALTER TABLE FOO RENAME TO bar;
             ";
             let db = parse_postgres(sql);
-            assert!(db.table(None, "foo").is_none());
-            assert!(db.table(None, "bar").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("foo", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("bar", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
 
             let sql = r#"
                 CREATE TABLE Foo (id INT);
@@ -8031,8 +8070,16 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql)
                 .expect("Expected unquoted RENAME TABLE lookup to resolve");
-            assert!(db.table(None, "foo").is_none());
-            assert!(db.table(None, "bar").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("foo", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("bar", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
 
             let sql = r#"
                 CREATE TABLE Foo (id INT);
@@ -8259,7 +8306,11 @@ mod tests {
                 CREATE TABLE t (id INT);
             ";
             let db = ParserDB::parse::<MsSqlDialect>(sql).expect("WAITFOR should be ignored");
-            assert!(db.table(None, "t").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -8336,7 +8387,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql)
                 .expect("Quoted DROP FUNCTION should match quoted CREATE FUNCTION");
 
-            assert!(db.function(None, "\"FooBar\"").is_none());
+            assert!(
+                db.function_by_target(TargetName::new("FooBar", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
@@ -8418,8 +8473,16 @@ mod tests {
 
             assert!(result.is_ok());
             let db = result.unwrap();
-            assert!(db.table(None, "parent").is_none());
-            assert!(db.table(None, "child").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -8434,9 +8497,21 @@ mod tests {
 
             assert!(result.is_ok());
             let db = result.unwrap();
-            assert!(db.table(None, "t1").is_none());
-            assert!(db.table(None, "t2").is_none());
-            assert!(db.table(None, "t3").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("t1", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("t3", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -8468,8 +8543,21 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            assert!(db.table(Some("s1"), "t").is_none());
-            let s2_t = db.table(Some("s2"), "t").expect("s2.t should still exist");
+            assert!(
+                db.table_by_target(
+                    TargetName::new("t", false).with_schema("s1", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_none()
+            );
+            let s2_t = db
+                .table_by_target(
+                    TargetName::new("t", false).with_schema("s2", false),
+                    IdentifierCase::AsWritten,
+                )
+                .expect("unambiguous lookup")
+                .expect("s2.t should still exist");
             assert_eq!(
                 s2_t.indices(&db).expect("indices").count(),
                 1,
@@ -8491,9 +8579,30 @@ mod tests {
                 "References to s1.parent must not block dropping same-name table s2.parent",
             );
 
-            assert!(db.table(Some("s2"), "parent").is_none());
-            assert!(db.table(Some("s1"), "parent").is_some());
-            assert!(db.table(Some("s1"), "child").is_some());
+            assert!(
+                db.table_by_target(
+                    TargetName::new("parent", false).with_schema("s2", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_none()
+            );
+            assert!(
+                db.table_by_target(
+                    TargetName::new("parent", false).with_schema("s1", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
+            assert!(
+                db.table_by_target(
+                    TargetName::new("child", false).with_schema("s1", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
         }
     }
 
@@ -8510,7 +8619,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // The function exists but isn't used by any schema object
-            assert!(db.function(None, "my_func").is_some());
+            assert!(
+                db.function_by_target(TargetName::new("my_func", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -8522,7 +8635,14 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist and be used
-            assert!(db.function(None, "is_positive").is_some());
+            assert!(
+                db.function_by_target(
+                    TargetName::new("is_positive", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION is_positive;");
@@ -8540,7 +8660,14 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist
-            assert!(db.function(None, "check_access").is_some());
+            assert!(
+                db.function_by_target(
+                    TargetName::new("check_access", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION check_access;");
@@ -8558,7 +8685,14 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist
-            assert!(db.function(None, "validate").is_some());
+            assert!(
+                db.function_by_target(
+                    TargetName::new("validate", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION validate;");
@@ -8576,7 +8710,14 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Function should exist
-            assert!(db.function(None, "trigger_fn").is_some());
+            assert!(
+                db.function_by_target(
+                    TargetName::new("trigger_fn", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
 
             // Verify dropping it would fail
             let drop_sql = format!("{sql}\nDROP FUNCTION trigger_fn;");
@@ -8593,7 +8734,14 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.function(None, "check_access").is_some());
+            assert!(
+                db.function_by_target(
+                    TargetName::new("check_access", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
 
             let drop_sql = format!("{sql}\nDROP FUNCTION check_access;");
             let result = ParserDB::parse::<GenericDialect>(&drop_sql);
@@ -8659,9 +8807,21 @@ mod tests {
             "#;
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.function(None, "\"FooBar\"").is_some());
-            assert!(db.function(None, "foobar").is_none());
-            assert!(db.function(None, "\"foobar\"").is_none());
+            assert!(
+                db.function_by_target(TargetName::new("FooBar", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.function_by_target(TargetName::new("foobar", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.function_by_target(TargetName::new("foobar", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
@@ -8671,9 +8831,21 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.function(None, "foobar").is_some());
-            assert!(db.function(None, "FOOBAR").is_some());
-            assert!(db.function(None, "\"FOOBAR\"").is_none());
+            assert!(
+                db.function_by_target(TargetName::new("foobar", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.function_by_target(TargetName::new("FOOBAR", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.function_by_target(TargetName::new("FOOBAR", true), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]
@@ -8683,9 +8855,22 @@ mod tests {
             "#;
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(<ParserDB as DatabaseLike>::function(&db, None, "\"FooBar\"").is_some());
-            assert!(<ParserDB as DatabaseLike>::function(&db, None, "foobar").is_none());
-            assert!(<ParserDB as DatabaseLike>::function(&db, None, "\"foobar\"").is_none());
+            let case = IdentifierCase::AsWritten;
+            assert!(
+                db.function_by_target(TargetName::new("FooBar", true), case)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.function_by_target(TargetName::new("foobar", false), case)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
+            assert!(
+                db.function_by_target(TargetName::new("foobar", true), case)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
     }
 
@@ -8700,7 +8885,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Table exists
-            assert!(db.table(None, "standalone").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("standalone", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
 
             // Can be dropped
             let drop_sql = format!("{sql}\nDROP TABLE standalone;");
@@ -8717,8 +8906,16 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Both tables exist
-            assert!(db.table(None, "parent").is_some());
-            assert!(db.table(None, "child").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
+            assert!(
+                db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
 
             // Parent cannot be dropped (referenced)
             let drop_parent = format!("{sql}\nDROP TABLE parent;");
@@ -8741,7 +8938,11 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.table(None, "parent").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
 
             // Parent cannot be dropped
             let drop_sql = format!("{sql}\nDROP TABLE parent;");
@@ -8758,7 +8959,11 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
-            assert!(db.table(None, "tree").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("tree", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
 
             // Self-referential table CAN be dropped
             let drop_sql = format!("{sql}\nDROP TABLE tree;");
@@ -8807,10 +9012,17 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // t1 should be gone
-            assert!(db.table(None, "t1").is_none());
+            assert!(
+                db.table_by_target(TargetName::new("t1", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
 
             // t2 should still have its column
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.columns(&db).expect("columns").count(), 1);
         }
 
@@ -8826,7 +9038,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // t1's index should be gone, t2's should remain
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.indices(&db).expect("indices").count(), 1);
 
             // Total indices across all tables should be 1 (only t2's index)
@@ -8846,7 +9061,10 @@ mod tests {
 
             // Parent should exist with no foreign keys (parent doesn't have any
             // FKs pointing out)
-            let parent = db.table(None, "parent").expect("parent should exist");
+            let parent = db
+                .table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("parent should exist");
             assert_eq!(parent.foreign_keys(&db).expect("foreign keys").count(), 0);
 
             // No foreign keys in the database (child's FK was removed with
@@ -8866,7 +9084,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Only t2's check constraint should remain
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.check_constraints(&db).expect("check constraints").count(), 1);
         }
 
@@ -8884,7 +9105,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Only t2's trigger should remain
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.triggers(&db).expect("triggers").count(), 1);
         }
 
@@ -8900,7 +9124,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse");
 
             // Only t2's policy should remain
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.policies(&db).expect("policies").count(), 1);
         }
     }
@@ -8918,7 +9145,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Index should be removed
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.indices(&db).expect("indices").count(), 0);
         }
 
@@ -8932,7 +9162,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Index should be removed
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.indices(&db).expect("indices").count(), 0);
         }
 
@@ -8945,7 +9178,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Should succeed without error
-            assert!(db.table(None, "t").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -8970,7 +9207,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Only idx_age should remain
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.indices(&db).expect("indices").count(), 1);
         }
 
@@ -8985,7 +9225,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Index should exist again
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.indices(&db).expect("indices").count(), 1);
         }
 
@@ -9001,11 +9244,17 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // t1 should have no indices
-            let t1 = db.table(None, "t1").expect("t1 should exist");
+            let t1 = db
+                .table_by_target(TargetName::new("t1", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t1 should exist");
             assert_eq!(t1.indices(&db).expect("indices").count(), 0);
 
             // t2 should still have its index
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.indices(&db).expect("indices").count(), 1);
         }
 
@@ -9019,7 +9268,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Table should still exist with its columns
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.columns(&db).expect("columns").count(), 3);
         }
     }
@@ -9066,7 +9318,10 @@ mod tests {
 
             // `UNIQUE (name)` declares no name, so the constraint viewed as an
             // `IndexLike` is anonymous.
-            let table = db.table(None, "t").expect("table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table should exist");
             for ui in table.unique_indices(&db).expect("unique indices") {
                 assert!(IndexLike::name(ui).is_none());
             }
@@ -9087,7 +9342,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Trigger should be removed
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.triggers(&db).expect("triggers").count(), 0);
         }
 
@@ -9102,7 +9360,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Trigger should be removed
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.triggers(&db).expect("triggers").count(), 0);
         }
 
@@ -9115,7 +9376,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Should succeed without error
-            assert!(db.table(None, "t").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -9145,7 +9410,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Only trigger2 should remain
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.triggers(&db).expect("triggers").count(), 1);
         }
 
@@ -9161,7 +9429,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Trigger should exist again
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.triggers(&db).expect("triggers").count(), 1);
         }
 
@@ -9179,11 +9450,17 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // t1 should have no triggers
-            let t1 = db.table(None, "t1").expect("t1 should exist");
+            let t1 = db
+                .table_by_target(TargetName::new("t1", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t1 should exist");
             assert_eq!(t1.triggers(&db).expect("triggers").count(), 0);
 
             // t2 should still have its trigger
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.triggers(&db).expect("triggers").count(), 1);
         }
 
@@ -9198,7 +9475,14 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Function should still exist after dropping trigger
-            assert!(db.function(None, "trigger_fn").is_some());
+            assert!(
+                db.function_by_target(
+                    TargetName::new("trigger_fn", false),
+                    IdentifierCase::AsWritten
+                )
+                .expect("unambiguous lookup")
+                .is_some()
+            );
         }
     }
 
@@ -9215,7 +9499,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Policy should be removed
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.policies(&db).expect("policies").count(), 0);
         }
 
@@ -9229,7 +9516,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Policy should be removed
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.policies(&db).expect("policies").count(), 0);
         }
 
@@ -9242,7 +9532,11 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Should succeed without error
-            assert!(db.table(None, "t").is_some());
+            assert!(
+                db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_some()
+            );
         }
 
         #[test]
@@ -9270,7 +9564,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Only policy2 should remain
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.policies(&db).expect("policies").count(), 1);
         }
 
@@ -9285,7 +9582,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Policy should exist again
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.policies(&db).expect("policies").count(), 1);
         }
 
@@ -9301,11 +9601,17 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // t1 should have no policies
-            let t1 = db.table(None, "t1").expect("t1 should exist");
+            let t1 = db
+                .table_by_target(TargetName::new("t1", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t1 should exist");
             assert_eq!(t1.policies(&db).expect("policies").count(), 0);
 
             // t2 should still have its policy
-            let t2 = db.table(None, "t2").expect("t2 should exist");
+            let t2 = db
+                .table_by_target(TargetName::new("t2", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("t2 should exist");
             assert_eq!(t2.policies(&db).expect("policies").count(), 1);
         }
 
@@ -9319,7 +9625,10 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             // Table should still exist with its columns
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             assert_eq!(table.columns(&db).expect("columns").count(), 2);
         }
     }
@@ -9459,7 +9768,10 @@ mod tests {
             assert_eq!(remaining_privileges.len(), 1);
             assert!(matches!(remaining_privileges[0], Action::Insert { .. }));
 
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             let role = db.role("my_role").expect("Role should exist");
             assert!(
                 !table.can_select(role, &db).expect("can_select"),
@@ -9478,7 +9790,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("schema parses");
             let grant = db.table_grants().next().expect("grant remains");
-            let table = db.table(None, "t").expect("table exists");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table exists");
             let role = db.role("r").expect("role exists");
 
             assert!(!grant.with_grant_option());
@@ -9648,7 +9963,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             let role_a = db.role("a").expect("Role a should exist");
             let role_b = db.role("b").expect("Role b should exist");
 
@@ -9673,7 +9991,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             let role_a = db.role("a").expect("Role a should exist");
             let role_b = db.role("b").expect("Role b should exist");
 
@@ -9698,7 +10019,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             let role_a = db.role("a").expect("Role a should exist");
             let role_b = db.role("b").expect("Role b should exist");
 
@@ -9732,7 +10056,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             let role_a = db.role("a").expect("Role a should exist");
             let role_b = db.role("b").expect("Role b should exist");
 
@@ -9777,7 +10104,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             let app_user = db.role("app_user").expect("Role should exist");
             assert!(table.can_select(app_user, &db).expect("can_select"));
         }
@@ -9795,8 +10125,20 @@ mod tests {
             let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
 
             let role = db.role("app_role").expect("Role should exist");
-            let s1_t = db.table(Some("s1"), "t").expect("s1.t should exist");
-            let s2_t = db.table(Some("s2"), "t").expect("s2.t should exist");
+            let s1_t = db
+                .table_by_target(
+                    TargetName::new("t", false).with_schema("s1", false),
+                    IdentifierCase::AsWritten,
+                )
+                .expect("unambiguous lookup")
+                .expect("s1.t should exist");
+            let s2_t = db
+                .table_by_target(
+                    TargetName::new("t", false).with_schema("s2", false),
+                    IdentifierCase::AsWritten,
+                )
+                .expect("unambiguous lookup")
+                .expect("s2.t should exist");
 
             assert!(s1_t.can_select(role, &db).expect("can_select"));
             assert!(!s2_t.can_select(role, &db).expect("can_select"));
@@ -9812,7 +10154,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("Failed to parse SQL");
 
-            let table = db.table(None, "t").expect("Table should exist");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("Table should exist");
             let role = db.role("my_role").expect("Role should exist");
             assert!(!table.can_select(role, &db).expect("can_select"));
             assert_eq!(db.table_grants().count(), 0);
@@ -10055,7 +10400,10 @@ mod tests {
             ";
             let db = ParserDB::parse::<GenericDialect>(sql).expect("parse");
 
-            let table = db.table(None, "t").unwrap();
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .unwrap();
             let r1 = db.role("r1").unwrap();
             let r2 = db.role("r2").unwrap();
             assert!(
@@ -10128,8 +10476,17 @@ mod tests {
             ";
             let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
             let grant = db.table_grants().next().expect("grant");
-            let in_scope = db.table(Some("s"), "in_scope").expect("in_scope table");
-            let out_of_scope = db.table(None, "out_of_scope").expect("out_of_scope table");
+            let in_scope = db
+                .table_by_target(
+                    TargetName::new("in_scope", false).with_schema("s", false),
+                    IdentifierCase::AsWritten,
+                )
+                .expect("unambiguous lookup")
+                .expect("in_scope table");
+            let out_of_scope = db
+                .table_by_target(TargetName::new("out_of_scope", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("out_of_scope table");
 
             assert!(grant.applies_to_table(in_scope, &db));
             assert!(!grant.applies_to_table(out_of_scope, &db));
@@ -10191,7 +10548,10 @@ mod tests {
                 GRANT INSERT (a), UPDATE (b), REFERENCES (c) ON t TO r;
             ";
             let db = ParserDB::parse::<PostgreSqlDialect>(sql).expect("parse");
-            let table = db.table(None, "t").expect("table");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table");
 
             // Iterate every column grant and call `.columns(table, &db)`.
             // This routes through the Insert/Update/References match
@@ -10499,7 +10859,10 @@ mod tests {
                 "CREATE TABLE t (a INT, b INT, PRIMARY KEY (a, b));",
             )
             .expect("parse");
-            let table = db.table(None, "t").expect("table t");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table t");
             let pk: Vec<&str> = table
                 .primary_key_columns(&db)
                 .expect("pk columns")
@@ -10520,7 +10883,8 @@ mod tests {
         }
 
         fn primary_key(db: &ParserDB, table_name: &str) -> Vec<String> {
-            db.table(None, table_name)
+            db.table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .expect("table")
                 .primary_key_columns(db)
                 .expect("pk columns")
@@ -10529,7 +10893,8 @@ mod tests {
         }
 
         fn unique_index_count(db: &ParserDB, table_name: &str) -> usize {
-            db.table(None, table_name)
+            db.table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .expect("table")
                 .unique_indices(db)
                 .expect("unique indices")
@@ -10537,7 +10902,8 @@ mod tests {
         }
 
         fn foreign_key_count(db: &ParserDB, table_name: &str) -> usize {
-            db.table(None, table_name)
+            db.table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
                 .expect("table")
                 .foreign_keys(db)
                 .expect("foreign keys")
@@ -10583,7 +10949,13 @@ mod tests {
                 "CREATE TABLE public.t (id uuid NOT NULL);
                  ALTER TABLE ONLY public.t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
             );
-            let table = db.table(Some("public"), "t").expect("table");
+            let table = db
+                .table_by_target(
+                    TargetName::new("t", false).with_schema("public", false),
+                    IdentifierCase::AsWritten,
+                )
+                .expect("unambiguous lookup")
+                .expect("table");
             let pk: Vec<&str> = table
                 .primary_key_columns(&db)
                 .expect("pk columns")
@@ -10600,7 +10972,10 @@ mod tests {
                  ALTER TABLE ONLY t ADD CONSTRAINT t_o_fkey FOREIGN KEY (o) REFERENCES u(id);",
             );
             assert_eq!(foreign_key_count(&db, "t"), 1);
-            let table = db.table(None, "t").expect("table");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table");
             let foreign_key = table
                 .foreign_keys(&db)
                 .expect("t is in this database")
@@ -10615,7 +10990,10 @@ mod tests {
                 "CREATE TABLE t (id INT NOT NULL);
                  ALTER TABLE t ADD CONSTRAINT t_id_positive CHECK (id > 0);",
             );
-            let table = db.table(None, "t").expect("table");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table");
             assert_eq!(table.check_constraints(&db).expect("check constraints").count(), 1);
         }
 
@@ -10629,7 +11007,10 @@ mod tests {
                  CREATE POLICY t_all ON t USING (true);
                  ALTER TABLE ONLY t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
             );
-            let table = db.table(None, "t").expect("table");
+            let table = db
+                .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("table");
 
             assert!(table.has_row_level_security(&db).expect("rls"));
             assert!(table.has_forced_row_level_security(&db).expect("forced rls"));
@@ -10726,7 +11107,12 @@ mod tests {
                 "ALTER TABLE IF EXISTS t ADD CONSTRAINT t_pkey PRIMARY KEY (id);",
             )
             .expect("IF EXISTS tolerates an absent table");
-            assert!(tolerated.table(None, "t").is_none());
+            assert!(
+                tolerated
+                    .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+                    .expect("unambiguous lookup")
+                    .is_none()
+            );
         }
 
         #[test]

@@ -161,7 +161,8 @@ fn validate_v1_layout_inner(
 ///
 /// let db =
 ///     ParserDB::parse::<GenericDialect>("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);")?;
-/// let table = db.table(None, "users").unwrap();
+/// let table =
+///     db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
 /// let fp = table.schema_fingerprint(&db)?;
 ///
 /// assert_eq!(fp.to_hex().len(), 64);

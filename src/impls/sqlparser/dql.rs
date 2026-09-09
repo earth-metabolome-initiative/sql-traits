@@ -36,6 +36,7 @@ use sqlparser::ast::{
 
 use crate::{
     errors::LookupError,
+    structs::IdentifierCase,
     traits::{ColumnLike, DQLLike, DatabaseLike, TableLike, ViewLike},
     utils::{
         identifier_resolution::identifiers_match,
@@ -3461,14 +3462,17 @@ where
     let Some(target) = target_name_from_object_name(name.get()) else {
         return Ok(opaque_factor(OpaqueIdentity::Known { key, schema }));
     };
-    let (view, row_preserving) =
-        if let Some(view) = deriving.database.resolve_target_view(target.clone())? {
-            (DerivingView::Plain(view), true)
-        } else if let Some(view) = deriving.database.resolve_target_materialized_view(target)? {
-            (DerivingView::Materialized(view), false)
-        } else {
-            return Ok(opaque_factor(OpaqueIdentity::Known { key, schema }));
-        };
+    let (view, row_preserving) = if let Some(view) =
+        deriving.database.resolve_target_view(target.clone(), IdentifierCase::AsWritten)?
+    {
+        (DerivingView::Plain(view), true)
+    } else if let Some(view) =
+        deriving.database.resolve_target_materialized_view(target, IdentifierCase::AsWritten)?
+    {
+        (DerivingView::Materialized(view), false)
+    } else {
+        return Ok(opaque_factor(OpaqueIdentity::Known { key, schema }));
+    };
     let shape = derive_view_shape(view, row_preserving, deriving, profile)?;
     let shape = match alias {
         Some(table_alias) => apply_alias_columns(shape, table_alias.get()),

@@ -31,7 +31,10 @@ fn test_set_returning_declaration_is_distinguishable() {
         ("()", None, false),
     ] {
         let database = probe(declared);
-        let function = database.function(None, "probe_fn").expect("input declares probe_fn");
+        let function = database
+            .function_by_target(TargetName::new("probe_fn", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("input declares probe_fn");
 
         assert_eq!(
             function.return_type_name(&database).as_deref(),
@@ -47,7 +50,10 @@ fn test_set_returning_declaration_is_distinguishable() {
 #[test]
 fn test_normalization_keeps_the_setof_marker() {
     let database = probe("() RETURNS SETOF UUID");
-    let function = database.function(None, "probe_fn").expect("input declares probe_fn");
+    let function = database
+        .function_by_target(TargetName::new("probe_fn", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("input declares probe_fn");
 
     assert_eq!(function.normalized_return_type_name(&database).as_deref(), Some("SETOF UUID"));
 }
@@ -60,7 +66,10 @@ fn test_mssql_named_table_return_is_a_set() {
         "CREATE FUNCTION probe_fn(@x INT) RETURNS @result TABLE (id INT) AS BEGIN INSERT INTO @result SELECT 1; RETURN; END",
     )
     .expect("schema builds");
-    let function = database.function(None, "probe_fn").expect("input declares probe_fn");
+    let function = database
+        .function_by_target(TargetName::new("probe_fn", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("input declares probe_fn");
 
     assert_eq!(function.return_type_name(&database).as_deref(), Some("TABLE"));
     assert!(function.returns_set());

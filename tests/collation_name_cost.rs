@@ -42,7 +42,9 @@ fn resolved_collation() -> Result<NamedColumnCollation<'static>, Error> {
         CREATE TABLE t (name TEXT COLLATE app.ci);
         ",
     )?;
-    let table = db.table(None, "t").expect("table t was created");
+    let table = db
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+        .expect("table t was created");
     let column = table.column("name", &db)?.expect("column name was declared");
     let ColumnCollation::Named(named) = column.collation(&db)? else {
         panic!("a declared COLLATE resolves to a named collation");

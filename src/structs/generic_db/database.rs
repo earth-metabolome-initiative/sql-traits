@@ -7,15 +7,12 @@ use alloc::{
 
 use crate::{
     errors::LookupError,
-    structs::{GenericDB, SchemaProfile, TargetName, generic_db::RelationSlot},
+    structs::{GenericDB, IdentifierCase, SchemaProfile, TargetName, generic_db::RelationSlot},
     traits::{DatabaseLike, TableLike},
-    utils::{
-        identifier_resolution::normalize_identifier,
-        object_name::{
-            RelationKey, function_has_stored_identity, lookup_key, render_view_candidate,
-            resolve_one_function, resolve_one_relation, resolve_target_from_candidates,
-            stored_identity_key, target_key,
-        },
+    utils::object_name::{
+        RelationKey, function_has_stored_identity, render_table_candidate, render_view_candidate,
+        resolve_one_function, resolve_one_relation, resolve_target_from_candidates,
+        stored_function_key, stored_identity_key, stored_table_key, stored_view_key,
     },
 };
 
@@ -62,10 +59,6 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
         self.search_path.iter().map(|(name, quoted)| (name.as_str(), *quoted))
     }
 
-    fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table> {
-        self.indexed_tables(&lookup_key(schema, table_name)).next()
-    }
-
     fn table_by_stored_identity(&self, schema: Option<&str>, name: &str) -> Option<&Self::Table> {
         // One bucket holds both spellings of the default schema, so the probe
         // narrows to a name and the comparison decides the identity.
@@ -82,18 +75,6 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
         self.materialized_views.iter().map(|(view, _)| view.as_ref())
     }
 
-    fn view(&self, schema: Option<&str>, view_name: &str) -> Option<&Self::View> {
-        self.indexed_views(&lookup_key(schema, view_name)).next()
-    }
-
-    fn materialized_view(
-        &self,
-        schema: Option<&str>,
-        view_name: &str,
-    ) -> Option<&Self::MaterializedView> {
-        self.indexed_materialized_views(&lookup_key(schema, view_name)).next()
-    }
-
     fn table_id(&self, table: &Self::Table) -> Option<usize> {
         self.tables
             .binary_search_by_key(&(table.table_schema(), table.table_name()), |(t, _)| {
@@ -105,22 +86,64 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
     fn resolve_target_table(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::Table>, LookupError> {
-        self.resolve_target_table_on_path(&target)
+        self.resolve_target_table_on_path(&target, case)
     }
 
     fn resolve_target_view(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::View>, LookupError> {
-        self.resolve_target_view_on_path(&target)
+        self.resolve_target_view_on_path(&target, case)
     }
 
     fn resolve_target_materialized_view(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::MaterializedView>, LookupError> {
-        self.resolve_target_materialized_view_on_path(&target)
+        self.resolve_target_materialized_view_on_path(&target, case)
+    }
+
+    fn table_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::Table>, LookupError> {
+        self.resolve_target_table_strict(&target, case)
+    }
+
+    fn view_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::View>, LookupError> {
+        let probe = IndexProbe::new(&target, case, None);
+        resolve_one_relation(&target, &self.probed_views(&probe), render_view_candidate)
+    }
+
+    fn materialized_view_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::MaterializedView>, LookupError> {
+        let probe = IndexProbe::new(&target, case, None);
+        resolve_one_relation(
+            &target,
+            &self.probed_materialized_views(&probe),
+            render_view_candidate,
+        )
+    }
+
+    fn function_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::Function>, LookupError> {
+        let probe = IndexProbe::new(&target, case, None);
+        resolve_one_function(&target.to_string(), &self.probed_functions(&probe))
     }
 
     fn table_by_id(&self, table_id: usize) -> Option<&Self::Table> {
@@ -147,10 +170,6 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
         self.functions.iter().map(|(func, _)| func.as_ref())
     }
 
-    fn function(&self, schema: Option<&str>, name: &str) -> Option<&Self::Function> {
-        self.indexed_functions(&lookup_key(schema, name)).next()
-    }
-
     fn function_by_stored_identity(
         &self,
         schema: Option<&str>,
@@ -168,8 +187,9 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
     fn resolve_target_function(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::Function>, LookupError> {
-        self.resolve_target_function_on_path(&target)
+        self.resolve_target_function_on_path(&target, case)
     }
 
     fn policies(&self) -> impl Iterator<Item = &Self::Policy> {
@@ -193,10 +213,167 @@ impl<P: SchemaProfile> DatabaseLike for GenericDB<P> {
     }
 }
 
+/// How a lookup reaches the index, and which of the relations it reaches the
+/// lookup then accepts.
+///
+/// The index is keyed by PostgreSQL's rule, so a folding lookup probes the
+/// folded key and follows the aliases a quoted stored spelling registered
+/// under. An exact lookup gathers the same candidates, since byte equality
+/// implies folded equality, and then keeps only those whose stored key
+/// matches byte for byte.
+struct IndexProbe {
+    /// Key whose bucket, with `aliases` when they are consulted, holds every
+    /// candidate.
+    key: RelationKey,
+    /// Whether the folded aliases of `key` are consulted.
+    aliases: bool,
+    /// Stored key a candidate must equal, when the bucket alone does not
+    /// decide it.
+    exact: Option<RelationKey>,
+}
+
+/// Case the index is probed under for a lookup comparing under `case`.
+fn probing_case(case: IdentifierCase) -> IdentifierCase {
+    match case {
+        IdentifierCase::AsWritten => IdentifierCase::AsWritten,
+        IdentifierCase::Folded | IdentifierCase::Exact => IdentifierCase::Folded,
+    }
+}
+
+impl IndexProbe {
+    /// Probe for `target` under `case`, aimed at `entry` when the search path
+    /// supplies the schema rather than the target's own qualifier.
+    fn new(target: &TargetName<'_>, case: IdentifierCase, entry: Option<(&str, bool)>) -> Self {
+        let name = |under: IdentifierCase| {
+            under.compared_form(target.name(), target.name_is_quoted()).into_owned()
+        };
+        let schema = |under: IdentifierCase| {
+            match entry {
+                Some((entry, quoted)) => under.compared_form(entry, quoted).into_owned(),
+                None => {
+                    target.schema().map_or_else(
+                        || String::from("public"),
+                        |schema| {
+                            under.compared_form(schema, target.schema_is_quoted()).into_owned()
+                        },
+                    )
+                }
+            }
+        };
+        let probing = probing_case(case);
+        Self {
+            key: RelationKey { schema: schema(probing), name: name(probing) },
+            aliases: case != IdentifierCase::AsWritten,
+            exact: (case == IdentifierCase::Exact).then(|| {
+                RelationKey {
+                    schema: schema(IdentifierCase::Exact),
+                    name: name(IdentifierCase::Exact),
+                }
+            }),
+        }
+    }
+
+    /// Whether a relation whose stored key is `stored` is one this probe
+    /// accepts.
+    fn accepts(&self, stored: impl FnOnce() -> RelationKey) -> bool {
+        self.exact.as_ref().is_none_or(|exact| stored() == *exact)
+    }
+}
+
 impl<P: SchemaProfile> GenericDB<P> {
     /// Slots of every relation whose stored identity equals `key`.
     fn indexed_relation_slots(&self, key: &RelationKey) -> &[RelationSlot] {
         self.relation_index.get(key).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// Slots a probe reaches, its own bucket first and its folded aliases
+    /// after, in storage order within each.
+    fn probed_relation_slots<'db>(
+        &'db self,
+        probe: &IndexProbe,
+    ) -> impl Iterator<Item = &'db RelationSlot> {
+        let aliases: &[RelationKey] = if probe.aliases {
+            self.folded_relation_index.get(&probe.key).map_or(&[][..], Vec::as_slice)
+        } else {
+            &[]
+        };
+        self.indexed_relation_slots(&probe.key)
+            .iter()
+            .chain(aliases.iter().flat_map(|key| self.indexed_relation_slots(key)))
+    }
+
+    /// Tables a probe accepts, in storage order.
+    fn probed_tables<'db>(&'db self, probe: &IndexProbe) -> Vec<&'db P::Table> {
+        self.probed_relation_slots(probe)
+            .filter_map(|slot| {
+                match slot {
+                    RelationSlot::Table(position) => self.tables.get(*position),
+                    RelationSlot::View(_) | RelationSlot::MaterializedView(_) => None,
+                }
+            })
+            .map(|(table, _)| table.as_ref())
+            .filter(|table| probe.accepts(|| stored_table_key(*table, IdentifierCase::Exact)))
+            .collect()
+    }
+
+    /// Plain views a probe accepts, in storage order.
+    fn probed_views<'db>(&'db self, probe: &IndexProbe) -> Vec<&'db P::View> {
+        self.probed_relation_slots(probe)
+            .filter_map(|slot| {
+                match slot {
+                    RelationSlot::View(position) => self.views.get(*position),
+                    RelationSlot::Table(_) | RelationSlot::MaterializedView(_) => None,
+                }
+            })
+            .map(|(view, _)| view.as_ref())
+            .filter(|view| probe.accepts(|| stored_view_key(*view, IdentifierCase::Exact)))
+            .collect()
+    }
+
+    /// Materialized views a probe accepts, in storage order.
+    fn probed_materialized_views<'db>(
+        &'db self,
+        probe: &IndexProbe,
+    ) -> Vec<&'db P::MaterializedView> {
+        self.probed_relation_slots(probe)
+            .filter_map(|slot| {
+                match slot {
+                    RelationSlot::MaterializedView(position) => {
+                        self.materialized_views.get(*position)
+                    }
+                    RelationSlot::Table(_) | RelationSlot::View(_) => None,
+                }
+            })
+            .map(|(view, _)| view.as_ref())
+            .filter(|view| probe.accepts(|| stored_view_key(*view, IdentifierCase::Exact)))
+            .collect()
+    }
+
+    /// Whether any relation of any kind answers a probe.
+    ///
+    /// Tables, views and materialized views share one pool of names, so a
+    /// schema holding the name under any kind ends a search-path walk, as
+    /// PostgreSQL's own name resolution does.
+    fn probed_name_is_taken(&self, probe: &IndexProbe) -> bool {
+        self.probed_relation_slots(probe).any(|slot| {
+            match slot {
+                RelationSlot::Table(position) => {
+                    self.tables.get(*position).is_some_and(|(table, _)| {
+                        probe.accepts(|| stored_table_key(table.as_ref(), IdentifierCase::Exact))
+                    })
+                }
+                RelationSlot::View(position) => {
+                    self.views.get(*position).is_some_and(|(view, _)| {
+                        probe.accepts(|| stored_view_key(view.as_ref(), IdentifierCase::Exact))
+                    })
+                }
+                RelationSlot::MaterializedView(position) => {
+                    self.materialized_views.get(*position).is_some_and(|(view, _)| {
+                        probe.accepts(|| stored_view_key(view.as_ref(), IdentifierCase::Exact))
+                    })
+                }
+            }
+        })
     }
 
     /// Functions whose stored identity equals `key`, in storage order.
@@ -209,6 +386,21 @@ impl<P: SchemaProfile> GenericDB<P> {
             .map(|(function, _)| function.as_ref())
     }
 
+    /// Functions a probe accepts, in storage order.
+    fn probed_functions<'db>(&'db self, probe: &IndexProbe) -> Vec<&'db P::Function> {
+        let aliases: &[RelationKey] = if probe.aliases {
+            self.folded_function_index.get(&probe.key).map_or(&[][..], Vec::as_slice)
+        } else {
+            &[]
+        };
+        self.indexed_functions(&probe.key)
+            .chain(aliases.iter().flat_map(|key| self.indexed_functions(key)))
+            .filter(|function| {
+                probe.accepts(|| stored_function_key(*function, IdentifierCase::Exact))
+            })
+            .collect()
+    }
+
     /// Resolves a written function reference through the index, walking the
     /// search path for an unqualified name.
     ///
@@ -219,35 +411,23 @@ impl<P: SchemaProfile> GenericDB<P> {
     fn resolve_target_function_on_path(
         &self,
         target: &TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&P::Function>, LookupError> {
         let written = target.to_string();
         if target.schema().is_some() {
-            let candidates: Vec<&P::Function> =
-                self.indexed_functions(&target_key(target)).collect();
-            return resolve_one_function(&written, &candidates);
+            let probe = IndexProbe::new(target, case, None);
+            return resolve_one_function(&written, &self.probed_functions(&probe));
         }
 
-        let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
         for (entry_schema, entry_quoted) in &self.search_path {
-            let key = RelationKey {
-                schema: normalize_identifier(entry_schema, *entry_quoted).into_owned(),
-                name: name.clone(),
-            };
-            let candidates: Vec<&P::Function> = self.indexed_functions(&key).collect();
+            let probe = IndexProbe::new(target, case, Some((entry_schema, *entry_quoted)));
+            let candidates = self.probed_functions(&probe);
             if !candidates.is_empty() {
                 return resolve_one_function(&written, &candidates);
             }
         }
 
         Ok(None)
-    }
-
-    /// Whether any relation of any kind answers `key`.
-    ///
-    /// Tables, views and materialized views share one pool of names, so this
-    /// is what a creation asks before taking a name.
-    pub(super) fn relation_key_is_taken(&self, key: &RelationKey) -> bool {
-        !self.indexed_relation_slots(key).is_empty()
     }
 
     /// Tables whose stored identity equals `key`, in storage order.
@@ -263,38 +443,6 @@ impl<P: SchemaProfile> GenericDB<P> {
             .map(|(table, _)| table.as_ref())
     }
 
-    /// Plain views whose stored identity equals `key`, in storage order.
-    pub(super) fn indexed_views(&self, key: &RelationKey) -> impl Iterator<Item = &P::View> {
-        self.indexed_relation_slots(key)
-            .iter()
-            .filter_map(|slot| {
-                match slot {
-                    RelationSlot::View(position) => self.views.get(*position),
-                    RelationSlot::Table(_) | RelationSlot::MaterializedView(_) => None,
-                }
-            })
-            .map(|(view, _)| view.as_ref())
-    }
-
-    /// Materialized views whose stored identity equals `key`, in storage
-    /// order.
-    pub(super) fn indexed_materialized_views(
-        &self,
-        key: &RelationKey,
-    ) -> impl Iterator<Item = &P::MaterializedView> {
-        self.indexed_relation_slots(key)
-            .iter()
-            .filter_map(|slot| {
-                match slot {
-                    RelationSlot::MaterializedView(position) => {
-                        self.materialized_views.get(*position)
-                    }
-                    RelationSlot::Table(_) | RelationSlot::View(_) => None,
-                }
-            })
-            .map(|(view, _)| view.as_ref())
-    }
-
     /// Resolves a written target against the index, ignoring any search path.
     ///
     /// # Errors
@@ -304,9 +452,10 @@ impl<P: SchemaProfile> GenericDB<P> {
     pub(super) fn resolve_target_table_strict(
         &self,
         target: &TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&P::Table>, LookupError> {
-        let candidates: Vec<&P::Table> = self.indexed_tables(&target_key(target)).collect();
-        resolve_target_from_candidates(target, &candidates)
+        let probe = IndexProbe::new(target, case, None);
+        resolve_target_from_candidates(target, &self.probed_tables(&probe))
     }
 
     /// Resolves a written target through the index and the search path.
@@ -318,28 +467,9 @@ impl<P: SchemaProfile> GenericDB<P> {
     pub(super) fn resolve_target_table_on_path(
         &self,
         target: &TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&P::Table>, LookupError> {
-        if target.schema().is_some() {
-            return self.resolve_target_table_strict(target);
-        }
-
-        let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
-        for (entry_schema, entry_quoted) in &self.search_path {
-            let key = RelationKey {
-                schema: normalize_identifier(entry_schema, *entry_quoted).into_owned(),
-                name: name.clone(),
-            };
-            if self.relation_key_is_taken(&key) {
-                let candidates: Vec<&P::Table> = self.indexed_tables(&key).collect();
-                // Reported under the written name: the entry qualifier is
-                // resolution machinery, not something the statement spelled.
-                // A schema holding the name under another relation kind still
-                // ends the walk, as PostgreSQL's own name resolution does.
-                return resolve_target_from_candidates(target, &candidates);
-            }
-        }
-
-        Ok(None)
+        self.resolve_relation_on_path(target, case, Self::probed_tables, render_table_candidate)
     }
 
     /// Resolves a written target to a plain view, applying the search path to
@@ -352,12 +482,9 @@ impl<P: SchemaProfile> GenericDB<P> {
     pub(super) fn resolve_target_view_on_path(
         &self,
         target: &TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&P::View>, LookupError> {
-        self.resolve_relation_on_path(
-            target,
-            |db, key| db.indexed_views(key).collect(),
-            render_view_candidate,
-        )
+        self.resolve_relation_on_path(target, case, Self::probed_views, render_view_candidate)
     }
 
     /// Resolves a written target to a materialized view, applying the search
@@ -370,40 +497,36 @@ impl<P: SchemaProfile> GenericDB<P> {
     pub(super) fn resolve_target_materialized_view_on_path(
         &self,
         target: &TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&P::MaterializedView>, LookupError> {
         self.resolve_relation_on_path(
             target,
-            |db, key| db.indexed_materialized_views(key).collect(),
+            case,
+            Self::probed_materialized_views,
             render_view_candidate,
         )
     }
 
     /// Resolves a written target to one relation of a kind, walking the search
     /// path for an unqualified name.
-    ///
-    /// A schema holding the name under any relation kind ends the walk, as
-    /// PostgreSQL's own name resolution does, so a name taken by a table is
-    /// not looked for again further along the path as a view.
     fn resolve_relation_on_path<'db, R>(
         &'db self,
         target: &TargetName<'_>,
-        candidates_of: impl Fn(&'db Self, &RelationKey) -> Vec<&'db R>,
+        case: IdentifierCase,
+        candidates_of: impl for<'probe> Fn(&'db Self, &'probe IndexProbe) -> Vec<&'db R>,
         render: impl Fn(&R) -> String,
     ) -> Result<Option<&'db R>, LookupError> {
         if target.schema().is_some() {
-            let candidates = candidates_of(self, &target_key(target));
-            return resolve_one_relation(target, &candidates, render);
+            let probe = IndexProbe::new(target, case, None);
+            return resolve_one_relation(target, &candidates_of(self, &probe), render);
         }
 
-        let name = normalize_identifier(target.name(), target.name_is_quoted()).into_owned();
         for (entry_schema, entry_quoted) in &self.search_path {
-            let key = RelationKey {
-                schema: normalize_identifier(entry_schema, *entry_quoted).into_owned(),
-                name: name.clone(),
-            };
-            if self.relation_key_is_taken(&key) {
-                let candidates = candidates_of(self, &key);
-                return resolve_one_relation(target, &candidates, render);
+            let probe = IndexProbe::new(target, case, Some((entry_schema, *entry_quoted)));
+            if self.probed_name_is_taken(&probe) {
+                // Reported under the written name: the entry qualifier is
+                // resolution machinery, not something the statement spelled.
+                return resolve_one_relation(target, &candidates_of(self, &probe), render);
             }
         }
 

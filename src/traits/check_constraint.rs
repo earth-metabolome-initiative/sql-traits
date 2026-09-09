@@ -518,7 +518,8 @@ pub trait CheckConstraintLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> =
     ///     table.check_constraints(&db)?.map(|cc| cc.expression(&db).to_string()).collect();
     /// assert_eq!(check_constraints, vec!["id > 0", "length(name) > 0"]);
@@ -544,7 +545,8 @@ pub trait CheckConstraintLike:
     /// let db = ParserDB::parse::<PostgreSqlDialect>(
     ///     "CREATE TABLE par (id INT, CONSTRAINT own CHECK (id > 0) NO INHERIT, CHECK (id < 9));",
     /// )?;
-    /// let table = db.table(None, "par").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("par", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [own, passed] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
@@ -579,7 +581,8 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, CHECK (id > 0));")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let cc = check_constraints[0];
     /// let table_ref = CheckConstraintLike::table(cc, &db)?;
@@ -611,7 +614,7 @@ pub trait CheckConstraintLike:
     /// use sql_traits::prelude::*;
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, CHECK ((id, name) = (1, 'test')), CHECK (length(name) > 0), CHECK (id BETWEEN 1 AND 10), CHECK (id IS NOT NULL));")?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let columns = table.columns(&db)?.collect::<Vec<_>>();
     /// let [id, name] = &columns.as_slice() else {
     ///     panic!("Expected two columns");
@@ -653,7 +656,8 @@ pub trait CheckConstraintLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
@@ -691,7 +695,8 @@ pub trait CheckConstraintLike:
     ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
     ///
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let columns = table.columns(&db)?.collect::<Vec<_>>();
     /// let [id, name] = &columns.as_slice() else {
     ///     panic!("Expected two columns");
@@ -737,7 +742,8 @@ pub trait CheckConstraintLike:
     ///     "CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)));",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc] = &check_constraints.as_slice() else {
     ///     panic!("Expected one check constraint");
@@ -776,7 +782,8 @@ pub trait CheckConstraintLike:
     ///     "CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
@@ -823,7 +830,8 @@ pub trait CheckConstraintLike:
     ///     "CREATE FUNCTION is_positive(INT) RETURNS BOOLEAN;
     ///        CREATE TABLE my_table (id INT CHECK (is_positive(id)), age INT CHECK (age > 0));",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2] = &check_constraints.as_slice() else {
     ///     panic!("Expected two check constraints");
@@ -860,7 +868,8 @@ pub trait CheckConstraintLike:
     /// let db = ParserDB::parse::<GenericDialect>(
     ///     "CREATE TABLE my_table (id INT CHECK (id > 0), name TEXT CHECK (length(name) > 0));",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let columns = table.columns(&db)?.collect::<Vec<_>>();
     /// let [id, name] = &columns.as_slice() else {
     ///     panic!("Expected two columns");
@@ -925,7 +934,8 @@ pub trait CheckConstraintLike:
     ///         CHECK (col1 IS NULL OR col2 IS NOT NULL)
     ///     );",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7] = &check_constraints.as_slice() else {
     ///     panic!("Expected seven check constraints");
@@ -998,7 +1008,8 @@ pub trait CheckConstraintLike:
     ///         CHECK (col2 IS NULL)
     ///     );",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc_s1, cc_s2, cc1, cc2, cc3, cc4, cc5] = &check_constraints.as_slice() else {
     ///     panic!("Expected seven check constraints");
@@ -1068,7 +1079,8 @@ pub trait CheckConstraintLike:
     ///         CHECK (col2 < 100)
     ///     );",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6] = &check_constraints.as_slice() else {
     ///     panic!("Expected six check constraints");
@@ -1135,7 +1147,8 @@ pub trait CheckConstraintLike:
     ///         chained_or TEXT CHECK (chained_or <> '' OR chained_or = 'default')
     ///     );",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5] = &check_constraints.as_slice() else {
     ///     panic!("Expected five check constraints");
@@ -1194,7 +1207,8 @@ pub trait CheckConstraintLike:
     ///         s13 TEXT CHECK (length(s13) < 10)
     ///     );",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7, cc8, cc9, cc10, cc11, cc12, cc13] =
     ///     &check_constraints.as_slice()
@@ -1267,7 +1281,8 @@ pub trait CheckConstraintLike:
     ///         s8 TEXT CHECK (length(s8) > 10 OR length(s8) > 5)
     ///     );",
     /// )?;
-    /// let table = db.table(None, "my_table").unwrap();
+    /// let table =
+    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
     /// let check_constraints: Vec<_> = table.check_constraints(&db)?.collect();
     /// let [cc1, cc2, cc3, cc4, cc5, cc6, cc7, cc8] = &check_constraints.as_slice() else {
     ///     panic!("Expected eight check constraints");
@@ -1315,7 +1330,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "t").expect("Table 't' not found");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table 't' not found");
         let constraints: Vec<_> =
             table.check_constraints(&db).expect("check_constraints").collect();
 
@@ -1348,7 +1366,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "t").expect("Table 't' not found");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table 't' not found");
         let constraints: Vec<_> =
             table.check_constraints(&db).expect("check_constraints").collect();
 
@@ -1376,7 +1397,10 @@ mod tests {
             );
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "t").expect("Table 't' not found");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table 't' not found");
         let constraints: Vec<_> =
             table.check_constraints(&db).expect("check_constraints").collect();
         assert_eq!(constraints.len(), 4);
@@ -1398,7 +1422,10 @@ mod tests {
             CREATE TABLE t (id INT CHECK ("FooBar"(id)));
         "#;
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "t").expect("Table 't' not found");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table 't' not found");
         let constraint = table
             .check_constraints(&db)
             .expect("check_constraints")
@@ -1417,7 +1444,10 @@ mod tests {
             CREATE TABLE t (id INT CHECK (foobar(id)));
         ";
         let db = ParserDB::parse::<GenericDialect>(sql).expect("Failed to parse SQL");
-        let table = db.table(None, "t").expect("Table 't' not found");
+        let table = db
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("Table 't' not found");
         let constraint = table
             .check_constraints(&db)
             .expect("check_constraints")

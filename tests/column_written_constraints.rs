@@ -24,7 +24,8 @@ fn database(sql: &str) -> ParserDB {
 
 fn checks(database: &ParserDB, table_name: &str) -> usize {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .check_constraints(database)
         .expect("table is in this database")
@@ -33,7 +34,8 @@ fn checks(database: &ParserDB, table_name: &str) -> usize {
 
 fn unique_indices(database: &ParserDB, table_name: &str) -> usize {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .unique_indices(database)
         .expect("table is in this database")
@@ -42,7 +44,8 @@ fn unique_indices(database: &ParserDB, table_name: &str) -> usize {
 
 fn foreign_keys(database: &ParserDB, table_name: &str) -> usize {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .foreign_keys(database)
         .expect("table is in this database")
@@ -51,7 +54,8 @@ fn foreign_keys(database: &ParserDB, table_name: &str) -> usize {
 
 fn requires_a_value(database: &ParserDB, table_name: &str, column_name: &str) -> bool {
     !database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .column(column_name, database)
         .expect("lookup succeeds")
@@ -86,7 +90,8 @@ fn a_key_written_on_a_column_is_droppable_by_name_and_takes_its_index() {
     assert_eq!(unique_indices(&primary, "t"), 0);
     assert_eq!(
         primary
-            .table(None, "t")
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .primary_key_columns(&primary)
             .expect("in database")
@@ -145,7 +150,8 @@ fn a_name_that_precedes_something_other_than_a_constraint_is_refused() {
     );
     assert_eq!(
         excused
-            .table(None, "t")
+            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
             .expect("table exists")
             .column("id", &excused)
             .expect("lookup")

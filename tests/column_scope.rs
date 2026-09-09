@@ -612,7 +612,13 @@ fn schema_qualified_from_qualifies_by_table_name() {
             .map(TableLike::table_name),
         Some("a")
     );
-    let table = db.table(Some("\"s\""), "a").expect("schema table is found");
+    let table = db
+        .table_by_target(
+            TargetName::new("a", false).with_schema("s", true),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("schema table is found");
     assert_eq!(table.columns(&db).expect("columns resolve").count(), 1);
 }
 
@@ -655,7 +661,10 @@ fn scope_survives_group_by_and_distinct() {
 #[test]
 fn single_table_scope_resolves_the_defined_tables_columns() {
     let db = schema_db();
-    let table = db.table(None, "a").expect("table a exists");
+    let table = db
+        .table_by_target(TargetName::new("a", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table a exists");
     let scope = ColumnScope::for_table(table, &db);
     assert_eq!(
         scope
@@ -679,7 +688,10 @@ fn single_table_scope_resolves_the_defined_tables_columns() {
 fn single_table_scope_qualifier_is_quote_aware() {
     let db =
         ParserDB::parse::<GenericDialect>("CREATE TABLE \"Mix\"(v INT);").expect("schema parses");
-    let table = db.table(None, "\"Mix\"").expect("quoted table is found");
+    let table = db
+        .table_by_target(TargetName::new("Mix", true), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("quoted table is found");
     let scope = ColumnScope::for_table(table, &db);
     assert_eq!(
         scope

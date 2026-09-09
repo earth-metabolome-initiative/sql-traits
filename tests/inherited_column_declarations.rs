@@ -34,7 +34,8 @@ fn database(sql: &str) -> ParserDB {
 
 fn checks(database: &ParserDB, table_name: &str) -> usize {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .check_constraints(database)
         .expect("table is in this database")
@@ -51,7 +52,8 @@ fn column<'db>(
     column_name: &str,
 ) -> &'db <ParserDB as DatabaseLike>::Column {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .column(column_name, database)
         .expect("lookup succeeds")
@@ -60,7 +62,8 @@ fn column<'db>(
 
 fn carries_an_identity(database: &ParserDB, table_name: &str, column_name: &str) -> bool {
     database
-        .table(None, table_name)
+        .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
         .expect("table exists")
         .columns
         .iter()
@@ -109,11 +112,17 @@ fn a_redeclared_column_receives_no_key_and_no_reference() {
          CREATE TABLE chi (u INT, r INT) INHERITS (par);",
     );
 
-    let chi = database.table(None, "chi").expect("table exists");
+    let chi = database
+        .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(chi.unique_indices(&database).expect("in database").count(), 0);
     assert_eq!(chi.foreign_keys(&database).expect("in database").count(), 0);
 
-    let par = database.table(None, "par").expect("table exists");
+    let par = database
+        .table_by_target(TargetName::new("par", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("table exists");
     assert_eq!(par.unique_indices(&database).expect("in database").count(), 1);
     assert_eq!(par.foreign_keys(&database).expect("in database").count(), 1);
 }

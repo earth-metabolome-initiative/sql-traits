@@ -30,7 +30,7 @@ use super::{
 };
 use crate::{
     errors::{Error, ObjectKind},
-    structs::{MaterializedView, View, metadata::ViewMetadata},
+    structs::{IdentifierCase, MaterializedView, View, metadata::ViewMetadata},
     traits::ViewLike,
     utils::object_name::{
         RelationKey, object_name_last_part, qualifier_of, stored_table_key, stored_view_key,
@@ -186,8 +186,12 @@ fn declared_names_of(node: &CreateView) -> Option<Vec<(String, bool)>> {
 /// the written qualifier against the stored one instead would miss every view
 /// the path placed in a schema other than the default.
 fn plain_view_position(builder: &ParserDBBuilder, name: &ObjectName) -> Option<usize> {
-    let key = stored_view_key(builder.resolve_view_object_name(name).ok()??);
-    builder.views().iter().position(|(view, _)| stored_view_key(view.as_ref()) == key)
+    let key =
+        stored_view_key(builder.resolve_view_object_name(name).ok()??, IdentifierCase::AsWritten);
+    builder
+        .views()
+        .iter()
+        .position(|(view, _)| stored_view_key(view.as_ref(), IdentifierCase::AsWritten) == key)
 }
 
 /// The last part of a view name, without its quoting.
@@ -230,9 +234,12 @@ pub(super) fn drop_views(
         };
         if let Some(position) = position {
             let key = if materialized {
-                stored_view_key(builder.materialized_views()[position].0.as_ref())
+                stored_view_key(
+                    builder.materialized_views()[position].0.as_ref(),
+                    IdentifierCase::AsWritten,
+                )
             } else {
-                stored_view_key(builder.views()[position].0.as_ref())
+                stored_view_key(builder.views()[position].0.as_ref(), IdentifierCase::AsWritten)
             };
             if cascade {
                 remove_dependent_views(&mut builder, &key);
@@ -282,8 +289,14 @@ pub(super) fn drop_views(
 /// The position of the materialized view a written `name` resolves to,
 /// through the search path.
 fn materialized_view_position(builder: &ParserDBBuilder, name: &ObjectName) -> Option<usize> {
-    let key = stored_view_key(builder.resolve_materialized_view_object_name(name).ok()??);
-    builder.materialized_views().iter().position(|(view, _)| stored_view_key(view.as_ref()) == key)
+    let key = stored_view_key(
+        builder.resolve_materialized_view_object_name(name).ok()??,
+        IdentifierCase::AsWritten,
+    );
+    builder
+        .materialized_views()
+        .iter()
+        .position(|(view, _)| stored_view_key(view.as_ref(), IdentifierCase::AsWritten) == key)
 }
 
 /// Refuses a `DROP TABLE` naming a view, as PostgreSQL does.
@@ -550,7 +563,7 @@ fn relations_read_by<V: ViewLike>(builder: &ParserDBBuilder, view: &V) -> Vec<Re
         })
         .filter_map(|name| {
             let target = target_name_from_object_name(name)?;
-            let written = target_key(&target);
+            let written = target_key(&target, IdentifierCase::AsWritten);
             if target.schema().is_some() {
                 return Some(written);
             }
@@ -569,12 +582,18 @@ fn relations_read_by<V: ViewLike>(builder: &ParserDBBuilder, view: &V) -> Vec<Re
 
 /// Whether any stored relation answers `key`.
 fn relation_key_is_held(builder: &ParserDBBuilder, key: &RelationKey) -> bool {
-    builder.tables().iter().any(|(table, _)| stored_table_key(table.as_ref()) == *key)
-        || builder.views().iter().any(|(view, _)| stored_view_key(view.as_ref()) == *key)
+    builder
+        .tables()
+        .iter()
+        .any(|(table, _)| stored_table_key(table.as_ref(), IdentifierCase::AsWritten) == *key)
+        || builder
+            .views()
+            .iter()
+            .any(|(view, _)| stored_view_key(view.as_ref(), IdentifierCase::AsWritten) == *key)
         || builder
             .materialized_views()
             .iter()
-            .any(|(view, _)| stored_view_key(view.as_ref()) == *key)
+            .any(|(view, _)| stored_view_key(view.as_ref(), IdentifierCase::AsWritten) == *key)
 }
 
 /// Every view reading the relation `key` names, and every view reading one of
@@ -597,14 +616,14 @@ pub(super) fn dependent_views(
         .map(|(view, _)| {
             (
                 ObjectKind::View,
-                stored_view_key(view.as_ref()),
+                stored_view_key(view.as_ref(), IdentifierCase::AsWritten),
                 relations_read_by(builder, view.as_ref()),
             )
         })
         .chain(builder.materialized_views().iter().map(|(view, _)| {
             (
                 ObjectKind::MaterializedView,
-                stored_view_key(view.as_ref()),
+                stored_view_key(view.as_ref(), IdentifierCase::AsWritten),
                 relations_read_by(builder, view.as_ref()),
             )
         }))
@@ -657,12 +676,14 @@ pub(super) fn remove_dependent_views(builder: &mut ParserDBBuilder, key: &Relati
     let doomed = dependent_views(builder, key);
     builder.views_mut().retain(|(view, _)| {
         !doomed.iter().any(|(kind, dead)| {
-            *kind == ObjectKind::View && *dead == stored_view_key(view.as_ref())
+            *kind == ObjectKind::View
+                && *dead == stored_view_key(view.as_ref(), IdentifierCase::AsWritten)
         })
     });
     builder.materialized_views_mut().retain(|(view, _)| {
         !doomed.iter().any(|(kind, dead)| {
-            *kind == ObjectKind::MaterializedView && *dead == stored_view_key(view.as_ref())
+            *kind == ObjectKind::MaterializedView
+                && *dead == stored_view_key(view.as_ref(), IdentifierCase::AsWritten)
         })
     });
 }

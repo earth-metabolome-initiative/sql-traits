@@ -32,7 +32,9 @@ fn a_column_ordinal_follows_the_identifier_rule() -> Result<(), Error> {
     let db = ParserDB::parse::<PostgreSqlDialect>(
         "CREATE TABLE t (\"ID\" INT, id INT, \"Name\" TEXT);",
     )?;
-    let table = db.table(None, "t").expect("table t was created");
+    let table = db
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+        .expect("table t was created");
 
     assert_eq!(table.column_id_by_name("\"ID\"", &db)?, Some(0));
     assert_eq!(table.column_id_by_name("id", &db)?, Some(1));
@@ -54,7 +56,9 @@ fn a_column_name_and_its_ordinal_round_trip() -> Result<(), Error> {
     let db = ParserDB::parse::<PostgreSqlDialect>(
         "CREATE TABLE t (\"ID\" INT, id INT, \"Name\" TEXT, payload JSONB);",
     )?;
-    let table = db.table(None, "t").expect("table t was created");
+    let table = db
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+        .expect("table t was created");
 
     let number_of_columns = table.number_of_columns(&db)?;
     assert_eq!(number_of_columns, 4);
@@ -87,15 +91,21 @@ fn a_declared_key_answers_ordinals_in_declaration_order() -> Result<(), Error> {
         ",
     )?;
 
-    let out_of_order = db.table(None, "out_of_order").expect("table out_of_order was created");
+    let out_of_order = db
+        .table_by_target(TargetName::new("out_of_order", false), IdentifierCase::AsWritten)?
+        .expect("table out_of_order was created");
     // The key is written (d, b), so the ordinals arrive as the key declares
     // them and not as the columns are declared.
     assert_eq!(out_of_order.primary_key_column_ids(&db)?, vec![3, 1]);
 
-    let single = db.table(None, "single").expect("table single was created");
+    let single = db
+        .table_by_target(TargetName::new("single", false), IdentifierCase::AsWritten)?
+        .expect("table single was created");
     assert_eq!(single.primary_key_column_ids(&db)?, vec![0]);
 
-    let keyless = db.table(None, "keyless").expect("table keyless was created");
+    let keyless = db
+        .table_by_target(TargetName::new("keyless", false), IdentifierCase::AsWritten)?
+        .expect("table keyless was created");
     assert_eq!(keyless.primary_key_column_ids(&db)?, Vec::<usize>::new());
 
     Ok(())
@@ -106,7 +116,9 @@ fn a_quoted_key_column_keeps_its_own_ordinal() -> Result<(), Error> {
     let db = ParserDB::parse::<PostgreSqlDialect>(
         "CREATE TABLE t (\"ID\" INT, id INT, PRIMARY KEY (id));",
     )?;
-    let table = db.table(None, "t").expect("table t was created");
+    let table = db
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+        .expect("table t was created");
 
     assert_eq!(table.primary_key_column_ids(&db)?, vec![1]);
 
@@ -121,8 +133,12 @@ fn a_column_ordinal_is_asked_of_the_table_that_declares_it() -> Result<(), Error
         CREATE TABLE second (payload TEXT, id INT);
         ",
     )?;
-    let first = db.table(None, "first").expect("table first was created");
-    let second = db.table(None, "second").expect("table second was created");
+    let first = db
+        .table_by_target(TargetName::new("first", false), IdentifierCase::AsWritten)?
+        .expect("table first was created");
+    let second = db
+        .table_by_target(TargetName::new("second", false), IdentifierCase::AsWritten)?
+        .expect("table second was created");
 
     assert_eq!(first.column_id_by_name("id", &db)?, Some(0));
     assert_eq!(second.column_id_by_name("id", &db)?, Some(1));
@@ -150,7 +166,9 @@ fn a_column_ordinal_is_asked_of_the_table_that_declares_it() -> Result<(), Error
 fn the_navigation_accessors_answer_the_same_through_a_reference() -> Result<(), Error> {
     let db =
         ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE t (a INT, b INT, PRIMARY KEY (b, a));")?;
-    let table = db.table(None, "t").expect("table t was created");
+    let table = db
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
+        .expect("table t was created");
     let by_reference = &table;
 
     assert_eq!(TableLike::column_id_by_name(by_reference, "b", &db)?, Some(1));

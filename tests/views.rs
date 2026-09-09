@@ -121,7 +121,12 @@ impl ViewLike for DefaultView {
 fn default_view_name_helpers_fold_unquoted_parts() {
     let source =
         parse("CREATE TABLE t (a INT); CREATE VIEW v AS SELECT a FROM t;").expect("schema");
-    let definition = source.view(None, "v").expect("view").definition().clone();
+    let definition = source
+        .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("view")
+        .definition()
+        .clone();
     let qualified = DefaultView {
         name: "MyView".to_string(),
         schema: Some("MySchema".to_string()),
@@ -156,16 +161,36 @@ fn a_view_is_recorded_and_listed_apart_from_tables() {
     assert_eq!(db.views().count(), 1);
     assert_eq!(db.materialized_views().count(), 1);
 
-    let view = db.view(None, "v").expect("the view is found");
+    let view = db
+        .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("the view is found");
     assert_eq!(view.view_name(), "v");
     assert!(!view.is_materialized());
     assert_eq!(view.definition().to_string(), "SELECT a, b FROM t");
 
-    assert!(db.materialized_view(None, "m").expect("found").is_materialized());
+    assert!(
+        db.materialized_view_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("found")
+            .is_materialized()
+    );
     // Each lookup answers only its own kind.
-    assert!(db.view(None, "m").is_none());
-    assert!(db.materialized_view(None, "v").is_none());
-    assert!(db.table(None, "v").is_none());
+    assert!(
+        db.view_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    assert!(
+        db.materialized_view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    assert!(
+        db.table_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
 }
 
 #[test]
@@ -206,16 +231,41 @@ fn a_view_name_folds_and_quotes_like_a_table_name() {
     )
     .expect("both are recorded");
 
-    let folded = db.view(None, "my_view").expect("an unquoted name folds down");
+    let folded = db
+        .view_by_target(TargetName::new("my_view", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("an unquoted name folds down");
     assert_eq!(folded.view_name(), "My_View", "the raw spelling is preserved");
     assert_eq!(folded.stored_view_name(), "my_view", "the stored name is folded");
     // An unquoted lookup folds too, so either spelling of it finds the view,
     // while a quoted lookup has to match the stored name exactly.
-    assert!(db.view(None, "My_View").is_some());
-    assert!(db.view(None, "\"my_view\"").is_some());
-    assert!(db.view(None, "\"My_View\"").is_none());
-    assert!(db.view(None, "\"Other\"").is_some(), "a quoted name keeps its case");
-    assert!(db.view(None, "other").is_none(), "and an unquoted lookup cannot reach it");
+    assert!(
+        db.view_by_target(TargetName::new("My_View", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
+    assert!(
+        db.view_by_target(TargetName::new("my_view", true), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
+    assert!(
+        db.view_by_target(TargetName::new("My_View", true), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    assert!(
+        db.view_by_target(TargetName::new("Other", true), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some(),
+        "a quoted name keeps its case"
+    );
+    assert!(
+        db.view_by_target(TargetName::new("other", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none(),
+        "and an unquoted lookup cannot reach it"
+    );
 }
 
 #[test]
@@ -264,8 +314,20 @@ fn the_search_path_decides_which_schema_a_view_lands_in() {
          CREATE VIEW v AS SELECT a FROM public.t;",
     )
     .expect("the path places the view");
-    assert!(db.view(Some("s"), "v").is_some());
-    assert!(db.view(None, "v").is_none(), "it is not in the default schema");
+    assert!(
+        db.view_by_target(
+            TargetName::new("v", false).with_schema("s", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
+    assert!(
+        db.view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none(),
+        "it is not in the default schema"
+    );
 
     let refused = parse("SET search_path TO nope; CREATE VIEW v AS SELECT 1;")
         .expect_err("the path names no creatable schema");
@@ -282,7 +344,10 @@ fn a_column_list_renames_what_the_definition_produces() {
     // own names, and more names than columns is refused at creation.
     let db = parse("CREATE TABLE t (a INT, b INT); CREATE VIEW v (x) AS SELECT a, b FROM t;")
         .expect("a partial list is accepted");
-    let view = db.view(None, "v").expect("found");
+    let view = db
+        .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("found");
     assert_eq!(view.declared_column_names(), &[("x".to_string(), false)]);
 
     let schema = "CREATE TABLE t (a INT, b INT); CREATE VIEW v (x, y) AS SELECT a, b FROM t;";
@@ -321,7 +386,14 @@ fn replacing_a_view_may_only_add_columns_on_the_end() {
          CREATE OR REPLACE VIEW v (x, y) AS SELECT a, b FROM t;",
     )
     .expect("appending is accepted");
-    assert_eq!(db.view(None, "v").expect("found").declared_column_names().len(), 2);
+    assert_eq!(
+        db.view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("found")
+            .declared_column_names()
+            .len(),
+        2
+    );
     assert_eq!(db.views().count(), 1, "the replacement takes the recorded view's place");
 }
 
@@ -335,7 +407,10 @@ fn a_replacement_keeps_the_recorded_owner() {
          CREATE OR REPLACE VIEW v (x, y) AS SELECT a, b FROM t;",
     )
     .expect("the replacement is accepted");
-    let view = db.view(None, "v").expect("found");
+    let view = db
+        .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("found");
     assert_eq!(db.view_metadata(view).expect("metadata").owner(), Some("r"));
 }
 
@@ -394,8 +469,16 @@ fn dropping_a_view_frees_its_name() {
          CREATE TABLE v (x INT);",
     )
     .expect("the name is free again");
-    assert!(db.view(None, "v").is_none());
-    assert!(db.table(None, "v").is_some());
+    assert!(
+        db.view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    assert!(
+        db.table_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 
     let db = parse(
         "CREATE TABLE t (a INT);
@@ -404,8 +487,16 @@ fn dropping_a_view_frees_its_name() {
          CREATE TABLE m (x INT);",
     )
     .expect("the materialized view name is free again");
-    assert!(db.materialized_view(None, "m").is_none());
-    assert!(db.table(None, "m").is_some());
+    assert!(
+        db.materialized_view_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    assert!(
+        db.table_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_some()
+    );
 
     let refused = parse("DROP VIEW nope;").expect_err("nothing holds the name");
     assert!(
@@ -428,8 +519,15 @@ fn a_view_can_be_renamed_and_handed_to_a_role() {
          ALTER TABLE w OWNER TO r;",
     )
     .expect("both actions are accepted");
-    assert!(db.view(None, "v").is_none());
-    let view = db.view(None, "w").expect("renamed");
+    assert!(
+        db.view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    let view = db
+        .view_by_target(TargetName::new("w", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("renamed");
     assert_eq!(db.view_metadata(view).expect("metadata").owner(), Some("r"));
 
     let db = parse(
@@ -439,8 +537,15 @@ fn a_view_can_be_renamed_and_handed_to_a_role() {
          ALTER TABLE n OWNER TO CURRENT_USER;",
     )
     .expect("a materialized view can be renamed and handed to the current user");
-    assert!(db.materialized_view(None, "m").is_none());
-    let view = db.materialized_view(None, "n").expect("renamed");
+    assert!(
+        db.materialized_view_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .is_none()
+    );
+    let view = db
+        .materialized_view_by_target(TargetName::new("n", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("renamed");
     assert_eq!(db.materialized_view_metadata(view).expect("metadata").owner(), None);
 
     let refused = parse(
@@ -816,9 +921,15 @@ fn renaming_a_role_carries_a_view_owner_with_it() {
          ALTER ROLE r RENAME TO r2;",
     )
     .expect("the rename is accepted");
-    let view = db.view(None, "v").expect("found");
+    let view = db
+        .view_by_target(TargetName::new("v", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("found");
     assert_eq!(db.view_metadata(view).expect("metadata").owner(), Some("r2"));
-    let materialized = db.materialized_view(None, "m").expect("found");
+    let materialized = db
+        .materialized_view_by_target(TargetName::new("m", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("found");
     assert_eq!(db.materialized_view_metadata(materialized).expect("metadata").owner(), Some("r2"),);
 
     let refused = parse(
@@ -1014,11 +1125,31 @@ fn a_view_the_search_path_placed_answers_its_bare_name() {
     assert_eq!(db.table_grants().count(), 1);
 
     let db = parse(&format!("{placed} ALTER TABLE v RENAME TO w;")).expect("a rename resolves");
-    assert!(db.view(Some("s"), "v").is_none());
-    assert!(db.view(Some("s"), "w").is_some());
+    assert!(
+        db.view_by_target(
+            TargetName::new("v", false).with_schema("s", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_none()
+    );
+    assert!(
+        db.view_by_target(
+            TargetName::new("w", false).with_schema("s", false),
+            IdentifierCase::AsWritten
+        )
+        .expect("unambiguous lookup")
+        .is_some()
+    );
 
     let db = parse(&format!("{placed} ALTER TABLE v OWNER TO r;")).expect("an owner resolves");
-    let view = db.view(Some("s"), "v").expect("found");
+    let view = db
+        .view_by_target(
+            TargetName::new("v", false).with_schema("s", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("found");
     assert_eq!(db.view_metadata(view).expect("metadata").owner(), Some("r"));
 
     let db = parse(&format!("{placed} DROP VIEW v;")).expect("a drop resolves");

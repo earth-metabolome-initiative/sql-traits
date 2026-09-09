@@ -65,11 +65,17 @@ fn the_named_table_still_receives_the_setting() {
     )
     .expect("both tables exist");
 
-    let guarded = database.table(None, "guarded").expect("guarded was created");
+    let guarded = database
+        .table_by_target(TargetName::new("guarded", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("guarded was created");
     assert!(guarded.has_row_level_security(&database).expect("guarded is in this database"));
     assert!(guarded.has_forced_row_level_security(&database).expect("guarded is in this database"));
 
-    let untouched = database.table(None, "untouched").expect("untouched was created");
+    let untouched = database
+        .table_by_target(TargetName::new("untouched", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("untouched was created");
     assert!(!untouched.has_row_level_security(&database).expect("untouched is in this database"));
     assert!(
         !untouched.has_forced_row_level_security(&database).expect("untouched is in this database")
@@ -89,7 +95,10 @@ fn a_later_operation_overrides_an_earlier_one() {
     )
     .expect("t exists throughout");
 
-    let table = database.table(None, "t").expect("t was created");
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t was created");
     assert!(!table.has_row_level_security(&database).expect("t is in this database"));
     assert!(!table.has_forced_row_level_security(&database).expect("t is in this database"));
 }
@@ -134,6 +143,12 @@ fn a_qualified_absent_table_is_refused() {
          ALTER TABLE s.guarded ENABLE ROW LEVEL SECURITY;",
     )
     .expect("s.guarded exists");
-    let guarded = database.table(Some("s"), "guarded").expect("s.guarded was created");
+    let guarded = database
+        .table_by_target(
+            TargetName::new("guarded", false).with_schema("s", false),
+            IdentifierCase::AsWritten,
+        )
+        .expect("unambiguous lookup")
+        .expect("s.guarded was created");
     assert!(guarded.has_row_level_security(&database).expect("s.guarded is in this database"));
 }

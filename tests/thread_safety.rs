@@ -35,13 +35,22 @@ fn parser_db_can_be_shared_across_threads() {
     for _ in 0..4 {
         let db = Arc::clone(&shared_db);
         handles.push(std::thread::spawn(move || {
-            let users = db.table(None, "users").expect("users table should exist");
+            let users = db
+                .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("users table should exist");
             assert_eq!(users.table_name(), "users");
 
-            let posts = db.table(None, "posts").expect("posts table should exist");
+            let posts = db
+                .table_by_target(TargetName::new("posts", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("posts table should exist");
             assert_eq!(posts.table_name(), "posts");
 
-            let function = db.function(None, "user_count").expect("function should exist");
+            let function = db
+                .function_by_target(TargetName::new("user_count", false), IdentifierCase::AsWritten)
+                .expect("unambiguous lookup")
+                .expect("function should exist");
             assert_eq!(function.name(), "user_count");
 
             let table_count = db.tables().count();

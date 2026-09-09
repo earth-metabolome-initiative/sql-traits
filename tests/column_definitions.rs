@@ -204,12 +204,19 @@ fn table_scope_returns_base_definitions() {
          CREATE TABLE app.docs(body TEXT);",
     )
     .expect("schema parses");
-    for (schema, table_name, references) in [
-        (None, "docs", &["body", "docs.body"][..]),
-        (None, "\"Docs\"", &["\"Body\"", "\"Docs\".\"Body\""][..]),
-        (Some("app"), "docs", &["body", "docs.body", "app.docs.body"][..]),
+    for (schema, (table_name, quoted), references) in [
+        (None, ("docs", false), &["body", "docs.body"][..]),
+        (None, ("Docs", true), &["\"Body\"", "\"Docs\".\"Body\""][..]),
+        (Some("app"), ("docs", false), &["body", "docs.body", "app.docs.body"][..]),
     ] {
-        let table = db.table(schema, table_name).expect("table exists");
+        let target = match schema {
+            Some(schema) => TargetName::new(table_name, quoted).with_schema(schema, false),
+            None => TargetName::new(table_name, quoted),
+        };
+        let table = db
+            .table_by_target(target, IdentifierCase::AsWritten)
+            .expect("unambiguous lookup")
+            .expect("table exists");
         let scope = ColumnScope::for_table(table, &db);
         for reference_sql in references {
             let Some(ColumnDefinition::Base { table: resolved_table, column }) = scope
@@ -1665,7 +1672,11 @@ fn stored_view_query_containers_use_database_ast_references() {
     else {
         panic!("expected an expression definition")
     };
-    let definition = db.view(None, "nested_containers").expect("view exists").definition();
+    let definition = db
+        .view_by_target(TargetName::new("nested_containers", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("view exists")
+        .definition();
     let mut oracle = IndexedSelectOracle {
         scope: defining_scope,
         select_count: 0,

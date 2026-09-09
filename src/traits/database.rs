@@ -11,7 +11,7 @@ use geometric_traits::{
 
 use crate::{
     errors::{Error, LookupError},
-    structs::TargetName,
+    structs::{IdentifierCase, TargetName},
     traits::{
         CheckConstraintLike, ColumnGrantLike, ColumnLike, DialectLike, ForeignKeyLike,
         FunctionLike, IndexLike, PolicyLike, RoleLike, SchemaLike, TableGrantLike, TableLike,
@@ -20,8 +20,9 @@ use crate::{
     utils::{
         identifier_resolution::stored_identifier_matches_lookup,
         object_name::{
-            function_has_stored_identity, resolve_function_on_search_path_in_iter,
-            resolve_one_function, resolve_target_on_search_path_in_iter,
+            function_has_stored_identity, relation_name_is_claimed, resolve_function_in_iter,
+            resolve_function_on_search_path_in_iter, resolve_one_function, resolve_target_in_iter,
+            resolve_target_on_search_path_in_iter, resolve_view_in_iter,
             resolve_view_on_search_path_in_iter,
         },
     },
@@ -326,9 +327,13 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// );
     /// ",
     /// )?;
-    /// let user_table = db.table(None, "users").unwrap();
-    /// let comment_table = db.table(None, "comments").unwrap();
-    /// let extended_comment_table = db.table(None, "extended_comments").unwrap();
+    /// let user_table =
+    ///     db.table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let comment_table =
+    ///     db.table_by_target(TargetName::new("comments", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let extended_comment_table = db
+    ///     .table_by_target(TargetName::new("extended_comments", false), IdentifierCase::AsWritten)?
+    ///     .unwrap();
     /// let ordered_tables = db.table_dag()?;
     /// assert_eq!(ordered_tables, vec![user_table, comment_table, extended_comment_table]);
     /// # Ok(())
@@ -413,81 +418,6 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ```
     fn functions(&self) -> impl Iterator<Item = &Self::Function>;
 
-    /// Returns the table with the given (optional) schema and name.
-    ///
-    /// # Arguments
-    ///
-    /// * `schema` - Optional schema name of the table.
-    /// * `table_name` - Name of the table.
-    ///
-    /// A table stored without a schema resides in the default schema, so
-    /// `Some("public")` reaches it and `None` reaches a table stored in
-    /// `public`.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use sql_traits::prelude::*;
-    ///
-    /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "
-    /// CREATE SCHEMA my_schema;
-    /// CREATE TABLE my_schema.my_table_with_schema (id INT);
-    /// CREATE TABLE my_table (id INT);
-    /// CREATE TABLE public.audit (id INT);
-    /// ",
-    /// )?;
-    /// let table_with_schema = db.table(Some("my_schema"), "my_table_with_schema").unwrap();
-    /// assert_eq!(table_with_schema.table_name(), "my_table_with_schema");
-    /// assert_eq!(table_with_schema.table_schema(), Some("my_schema"));
-    ///
-    /// let table_without_schema = db.table(None, "my_table").unwrap();
-    /// assert_eq!(table_without_schema.table_name(), "my_table");
-    /// assert_eq!(table_without_schema.table_schema(), None);
-    ///
-    /// // Either spelling of the default schema reaches both tables.
-    /// assert!(db.table(Some("public"), "my_table").is_some());
-    /// assert!(db.table(None, "audit").is_some());
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// PostgreSQL-style identifier resolution is applied:
-    ///
-    /// - Unquoted lookup names are case-insensitive.
-    /// - Quoted lookup names are case-sensitive.
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use sql_traits::prelude::*;
-    /// use sqlparser::dialect::PostgreSqlDialect;
-    ///
-    /// let db = ParserDB::parse::<PostgreSqlDialect>(
-    ///     r#"
-    ///     CREATE TABLE Foo (id INT);
-    ///     CREATE TABLE "Bar" (id INT);
-    ///     "#,
-    /// )?;
-    ///
-    /// assert!(db.table(None, "foo").is_some());
-    /// assert!(db.table(None, "\"foo\"").is_some());
-    /// assert!(db.table(None, "\"Foo\"").is_none());
-    ///
-    /// assert!(db.table(None, "\"Bar\"").is_some());
-    /// assert!(db.table(None, "bar").is_none());
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// To resolve a name a statement wrote, honouring the search path and
-    /// reporting ambiguity, use [`Self::resolve_target_table`]. To resolve a
-    /// parser node, use
-    /// [`ParserDB::resolve_table_object_name_on_search_path`](crate::structs::ParserDB::resolve_table_object_name_on_search_path).
-    /// To ask for the table stored under an exact identity rather than for
-    /// what a reference denotes, use [`Self::table_by_stored_identity`].
-    fn table(&self, schema: Option<&str>, table_name: &str) -> Option<&Self::Table>;
-
     /// Returns the table stored under exactly this identity.
     ///
     /// Both parts are read as the catalog holds them, the form
@@ -497,9 +427,9 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// table stored without a schema is not reached by a `public` qualifier.
     /// A caller that normalized a name once asks for that name back this way.
     ///
-    /// [`Self::table`] answers the other question, what a written reference
-    /// denotes, so it folds an unquoted name and reads no schema and `public`
-    /// as one place.
+    /// [`Self::table_by_target`] answers the other question, what a written
+    /// reference denotes, so it folds an unquoted name and reads no schema and
+    /// `public` as one place.
     ///
     /// The body here scans [`Self::tables`], which an implementation holding
     /// an index of its own overrides, as [`GenericDB`] does.
@@ -524,8 +454,16 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     ///
     /// // A written reference folds an unquoted name, and either spelling of
     /// // the default schema reaches a table stored in it.
-    /// assert!(db.table(None, "PLAIN").is_some());
-    /// assert!(db.table(Some("public"), "plain").is_some());
+    /// assert!(
+    ///     db.table_by_target(TargetName::new("PLAIN", false), IdentifierCase::AsWritten)?.is_some()
+    /// );
+    /// assert!(
+    ///     db.table_by_target(
+    ///         TargetName::new("plain", false).with_schema("public", false),
+    ///         IdentifierCase::AsWritten
+    ///     )?
+    ///     .is_some()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -574,64 +512,24 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// ```
     fn materialized_views(&self) -> impl Iterator<Item = &Self::MaterializedView>;
 
-    /// Returns the plain view with the given (optional) schema and name.
+    /// Resolves a name a statement wrote into the table it denotes, comparing
+    /// identifiers as `case` says the engine does.
     ///
-    /// The name matches under PostgreSQL's identifier rules, so an unquoted
-    /// lookup folds to lowercase and a quoted one matches exactly, the same as
-    /// [`Self::table`]. A materialized view of that name answers [`None`]
-    /// here: ask [`Self::materialized_view`] for those.
-    ///
-    /// ```rust
-    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use sql_traits::prelude::*;
-    ///
-    /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE TABLE t (id INT);
-    ///      CREATE SCHEMA app;
-    ///      CREATE VIEW app.v AS SELECT id FROM t;",
-    /// )?;
-    /// assert!(db.view(Some("app"), "v").is_some());
-    /// assert!(db.view(None, "v").is_none());
-    /// assert!(db.materialized_view(Some("app"), "v").is_none());
-    /// # Ok(())
-    /// # }
-    /// ```
-    fn view(&self, schema: Option<&str>, view_name: &str) -> Option<&Self::View>;
-
-    /// Returns the materialized view with the given (optional) schema and
-    /// name.
-    ///
-    /// A plain view of that name answers [`None`] here: ask [`Self::view`] for
-    /// those.
-    ///
-    /// ```rust
-    /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use sql_traits::prelude::*;
-    ///
-    /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE TABLE t (id INT); CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
-    /// )?;
-    /// assert!(db.materialized_view(None, "m").is_some());
-    /// assert!(db.view(None, "m").is_none());
-    /// # Ok(())
-    /// # }
-    /// ```
-    fn materialized_view(
-        &self,
-        schema: Option<&str>,
-        view_name: &str,
-    ) -> Option<&Self::MaterializedView>;
-
-    /// Resolves a name a statement wrote into the table it denotes, applying
-    /// PostgreSQL's rules: an unqualified name resolves through the first
-    /// schema on [`Self::search_path`] holding it, a table stored without a
-    /// schema resides in the default schema `public`, and quoting decides case
-    /// sensitivity on both parts.
+    /// An unqualified name resolves through the first schema on
+    /// [`Self::search_path`] holding it, and a table stored without a schema
+    /// resides in the default schema `public`. What `case` decides is the
+    /// comparison of each part, both the name and any qualifier, and of the
+    /// schemas on the search path:
+    /// [`IdentifierCase::AsWritten`] lets quoting decide, which is
+    /// PostgreSQL's rule, [`IdentifierCase::Folded`] folds both sides, which
+    /// is SQLite's, and [`IdentifierCase::Exact`] folds neither, which is
+    /// MySQL with `lower_case_table_names = 0`.
     ///
     /// This is the counterpart of the readers that hand back a target as
     /// written, such as [`PolicyLike::target_table_name`]. Unlike
-    /// [`Self::table`], which matches a single spelling exactly, this walks the
-    /// search path and reports an ambiguous name rather than picking a winner.
+    /// [`Self::table_by_target`], this walks the search path, and either
+    /// reports an ambiguous name rather than picking a winner: two tables
+    /// differing only in case are one name under folding.
     ///
     /// # Errors
     ///
@@ -654,7 +552,8 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// )?;
     /// let policy = db.policies().next().unwrap();
     /// // The policy wrote no qualifier, and the search path carries it into `app`.
-    /// let table = db.resolve_target_table(policy.target_table_name())?.unwrap();
+    /// let table =
+    ///     db.resolve_target_table(policy.target_table_name(), IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(table.table_schema(), Some("app"));
     /// # Ok(())
     /// # }
@@ -663,8 +562,15 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     fn resolve_target_table(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::Table>, LookupError> {
-        resolve_target_on_search_path_in_iter(self.tables(), &target, self.search_path())
+        resolve_target_on_search_path_in_iter(
+            self.tables(),
+            &target,
+            self.search_path(),
+            case,
+            |key| relation_name_is_claimed(self, key, case),
+        )
     }
 
     /// Resolves a name a statement wrote into the plain view it denotes,
@@ -679,8 +585,15 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     fn resolve_target_view(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::View>, LookupError> {
-        resolve_view_on_search_path_in_iter(self.views(), &target, self.search_path())
+        resolve_view_on_search_path_in_iter(
+            self.views(),
+            &target,
+            self.search_path(),
+            case,
+            |key| relation_name_is_claimed(self, key, case),
+        )
     }
 
     /// Resolves a name a statement wrote into the materialized view it denotes,
@@ -695,8 +608,189 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     fn resolve_target_materialized_view(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::MaterializedView>, LookupError> {
-        resolve_view_on_search_path_in_iter(self.materialized_views(), &target, self.search_path())
+        resolve_view_on_search_path_in_iter(
+            self.materialized_views(),
+            &target,
+            self.search_path(),
+            case,
+            |key| relation_name_is_claimed(self, key, case),
+        )
+    }
+
+    /// Returns the table an identifier and its optional qualifier name,
+    /// comparing them as `case` says the engine does and consulting no search
+    /// path, so an unqualified target names the default schema `public` and a
+    /// `public` qualifier reaches a table stored without one.
+    ///
+    /// Takes the name in parts, which is what a caller holding identifier
+    /// values rather than written SQL has, so a table really called
+    /// `my.table` or `we"ird` is reachable. Read written text into parts with
+    /// [`TargetName::parse`], which keeps a dot or a doubled quote inside the
+    /// identifier it belongs to.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches
+    /// more than one table, which folding can make of two stored spellings.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE SCHEMA app;
+    ///      CREATE TABLE app.docs (id INT);
+    ///      CREATE TABLE plain (id INT);
+    ///      CREATE TABLE \"Mixed\" (id INT);
+    ///      CREATE TABLE \"my.table\" (id INT);",
+    /// )?;
+    /// let case = IdentifierCase::AsWritten;
+    /// let docs = TargetName::new("docs", false).with_schema("app", false);
+    /// assert_eq!(db.table_by_target(docs, case)?.and_then(TableLike::table_schema), Some("app"));
+    ///
+    /// // Either spelling of the default schema names one place, and an
+    /// // unquoted name folds while a quoted one stands as written.
+    /// let plain = TargetName::new("PLAIN", false).with_schema("public", false);
+    /// assert!(db.table_by_target(plain, case)?.is_some());
+    /// assert!(db.table_by_target(TargetName::new("Mixed", true), case)?.is_some());
+    /// assert!(db.table_by_target(TargetName::new("mixed", false), case)?.is_none());
+    ///
+    /// // A dot inside an identifier is part of it, which no text lookup can say.
+    /// assert!(db.table_by_target(TargetName::new("my.table", true), case)?.is_some());
+    /// let parsed = TargetName::parse("\"my.table\"").expect("one identifier");
+    /// assert!(db.table_by_target(parsed, case)?.is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn table_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::Table>, LookupError> {
+        resolve_target_in_iter(self.tables(), &target, case)
+    }
+
+    /// Returns the plain view a name in parts denotes, applying the same rules
+    /// as [`Self::table_by_target`].
+    ///
+    /// A materialized view of that name answers [`None`] here: ask
+    /// [`Self::materialized_view_by_target`] for those.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches
+    /// more than one view.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT);
+    ///      CREATE SCHEMA app;
+    ///      CREATE VIEW app.v AS SELECT id FROM t;",
+    /// )?;
+    /// let case = IdentifierCase::AsWritten;
+    /// let qualified = || TargetName::new("v", false).with_schema("app", false);
+    /// assert!(db.view_by_target(qualified(), case)?.is_some());
+    /// assert!(db.view_by_target(TargetName::new("v", false), case)?.is_none());
+    /// assert!(db.materialized_view_by_target(qualified(), case)?.is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn view_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::View>, LookupError> {
+        resolve_view_in_iter(self.views(), &target, case)
+    }
+
+    /// Returns the materialized view a name in parts denotes, applying the
+    /// same rules as [`Self::table_by_target`].
+    ///
+    /// A plain view of that name answers [`None`] here: ask
+    /// [`Self::view_by_target`] for those.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] when the name matches
+    /// more than one materialized view.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE TABLE t (id INT); CREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
+    /// )?;
+    /// let case = IdentifierCase::AsWritten;
+    /// assert!(db.materialized_view_by_target(TargetName::new("m", false), case)?.is_some());
+    /// assert!(db.view_by_target(TargetName::new("m", false), case)?.is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn materialized_view_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::MaterializedView>, LookupError> {
+        resolve_view_in_iter(self.materialized_views(), &target, case)
+    }
+
+    /// Returns the function a name in parts denotes, applying the same rules
+    /// as [`Self::table_by_target`].
+    ///
+    /// A registered builtin lives in `pg_catalog`, so it is asked for by that
+    /// schema. Use [`Self::resolve_target_function`] to have the search path
+    /// applied.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousFunctionLookup`] when the name carries
+    /// more than one declaration, since resolution by name alone cannot
+    /// choose between argument lists.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>(
+    ///     "CREATE SCHEMA app;
+    ///      CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
+    ///      CREATE FUNCTION app.touch() RETURNS INT AS 'SELECT 1;';",
+    /// )?;
+    /// let case = IdentifierCase::AsWritten;
+    /// assert_eq!(
+    ///     db.function_by_target(TargetName::new("add_one", false), case)?.map(FunctionLike::name),
+    ///     Some("add_one")
+    /// );
+    /// let touch = TargetName::new("touch", false).with_schema("app", false);
+    /// assert!(db.function_by_target(touch, case)?.is_some());
+    /// assert!(db.function_by_target(TargetName::new("touch", false), case)?.is_none());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn function_by_target(
+        &self,
+        target: TargetName<'_>,
+        case: IdentifierCase,
+    ) -> Result<Option<&Self::Function>, LookupError> {
+        resolve_function_in_iter(self.functions(), &target, case)
     }
 
     /// Returns the table ID for the given table object according to its
@@ -719,7 +813,9 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// CREATE TABLE table3 (score DECIMAL);
     /// ",
     /// )?;
-    /// let table2 = db.table(None, "table2").expect("Table 'table2' should exist");
+    /// let table2 = db
+    ///     .table_by_target(TargetName::new("table2", false), IdentifierCase::AsWritten)?
+    ///     .expect("Table 'table2' should exist");
     /// let table2_id = db.table_id(table2).expect("Table ID for 'table2' should exist");
     /// assert_eq!(table2_id, 1);
     /// # Ok(())
@@ -755,42 +851,6 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     fn table_by_id(&self, table_id: usize) -> Option<&Self::Table> {
         self.tables().nth(table_id)
     }
-
-    /// Returns the function a written reference denotes, taking the qualifier
-    /// apart from the name.
-    ///
-    /// Both parts are read as a statement would write them, so an unquoted
-    /// name folds, a quoted one is exact, and a function declared without a
-    /// schema resides in the default schema `public`. A registered builtin
-    /// lives in `pg_catalog`, so it is asked for by that schema.
-    ///
-    /// A name can carry several declarations differing in their arguments.
-    /// This answers the first of them in storage order, as
-    /// [`Self::table`] answers the first table a name matched. Use
-    /// [`Self::resolve_target_function`] to be told about the ambiguity
-    /// instead, and to have the search path applied.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), sql_traits::errors::Error> {
-    /// use sql_traits::prelude::*;
-    ///
-    /// let db = ParserDB::parse::<GenericDialect>(
-    ///     "CREATE SCHEMA app;
-    ///      CREATE FUNCTION add_one(x INT) RETURNS INT AS 'SELECT x + 1;';
-    ///      CREATE FUNCTION app.touch() RETURNS INT AS 'SELECT 1;';",
-    /// )?;
-    ///
-    /// assert_eq!(db.function(None, "add_one").map(FunctionLike::name), Some("add_one"));
-    /// assert!(db.function(Some("public"), "ADD_ONE").is_some());
-    /// assert!(db.function(Some("app"), "touch").is_some());
-    /// assert!(db.function(None, "touch").is_none());
-    /// assert!(db.function(None, "absent").is_none());
-    /// # Ok(())
-    /// # }
-    /// ```
-    fn function(&self, schema: Option<&str>, name: &str) -> Option<&Self::Function>;
 
     /// Returns the function stored under exactly this identity.
     ///
@@ -863,20 +923,22 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// )?;
     ///
     /// let touch = db
-    ///     .resolve_target_function(TargetName::new("touch", false))?
+    ///     .resolve_target_function(TargetName::new("touch", false), IdentifierCase::AsWritten)?
     ///     .expect("the path carries `app`");
     /// assert_eq!(touch.name(), "touch");
     /// let qualified = TargetName::new("touch", false).with_schema("app", false);
-    /// assert!(db.resolve_target_function(qualified)?.is_some());
-    /// assert!(db.resolve_target_function(TargetName::new("absent", false))?.is_none());
+    /// assert!(db.resolve_target_function(qualified, IdentifierCase::AsWritten)?.is_some());
+    /// let absent = TargetName::new("absent", false);
+    /// assert!(db.resolve_target_function(absent, IdentifierCase::AsWritten)?.is_none());
     /// # Ok(())
     /// # }
     /// ```
     fn resolve_target_function(
         &self,
         target: TargetName<'_>,
+        case: IdentifierCase,
     ) -> Result<Option<&Self::Function>, LookupError> {
-        resolve_function_on_search_path_in_iter(self.functions(), &target, self.search_path())
+        resolve_function_on_search_path_in_iter(self.functions(), &target, self.search_path(), case)
     }
 
     /// Iterates over the policies defined in the schema.
@@ -1308,8 +1370,20 @@ pub trait DatabaseLike: Clone + Debug + Send + Sync {
     /// let created = ParserDB::parse::<GenericDialect>(
     ///     "CREATE SCHEMA app; SET search_path TO app; CREATE TABLE docs (id INT);",
     /// )?;
-    /// assert_eq!(created.table(Some("app"), "docs").map(TableLike::table_name), Some("docs"));
-    /// assert!(created.table(None, "docs").is_none());
+    /// assert_eq!(
+    ///     created
+    ///         .table_by_target(
+    ///             TargetName::new("docs", false).with_schema("app", false),
+    ///             IdentifierCase::AsWritten
+    ///         )?
+    ///         .map(TableLike::table_name),
+    ///     Some("docs")
+    /// );
+    /// assert!(
+    ///     created
+    ///         .table_by_target(TargetName::new("docs", false), IdentifierCase::AsWritten)?
+    ///         .is_none()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
