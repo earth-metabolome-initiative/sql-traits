@@ -132,8 +132,9 @@ pub(super) fn direct_children(
 
 /// Marks a column a table has just received from a parent as inherited.
 pub(super) fn mark_inherited(builder: &mut ParserDBBuilder, table: &StoredTable, column: &str) {
+    let case = builder.identifier_case();
     if let Some((_, metadata)) =
-        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored, case))
     {
         let mut names = metadata.inherited_column_names().to_vec();
         names.push(column.to_string());
@@ -144,8 +145,9 @@ pub(super) fn mark_inherited(builder: &mut ParserDBBuilder, table: &StoredTable,
 /// Records that a column a table received is now its own, which is what an
 /// `ONLY` drop on the parent leaves behind.
 pub(super) fn unmark_inherited(builder: &mut ParserDBBuilder, table: &StoredTable, column: &str) {
+    let case = builder.identifier_case();
     if let Some((_, metadata)) =
-        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored, case))
     {
         let names: Vec<String> = metadata
             .inherited_column_names()
@@ -164,8 +166,9 @@ pub(super) fn rename_inherited(
     from: &str,
     to: &Ident,
 ) {
+    let case = builder.identifier_case();
     if let Some((_, metadata)) =
-        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored, case))
     {
         let names = metadata
             .inherited_column_names()
@@ -550,8 +553,9 @@ pub(super) fn mark_inherited_constraint(
     table: &StoredTable,
     constraint: &TableConstraint,
 ) {
+    let case = builder.identifier_case();
     if let Some((_, metadata)) =
-        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored, case))
     {
         let mut held = metadata.inherited_constraints().to_vec();
         held.push(constraint.to_string());
@@ -566,8 +570,9 @@ pub(super) fn unmark_inherited_constraint(
     table: &StoredTable,
     constraint: &TableConstraint,
 ) {
+    let case = builder.identifier_case();
     if let Some((_, metadata)) =
-        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored))
+        builder.tables_mut().iter_mut().find(|(stored, _)| table.matches(stored, case))
     {
         let rendered = constraint.to_string();
         let held: Vec<String> = metadata
@@ -591,7 +596,7 @@ pub(super) fn records_inherited_constraint(
     builder
         .tables()
         .iter()
-        .find(|(stored, _)| table.matches(stored))
+        .find(|(stored, _)| table.matches(stored, builder.identifier_case()))
         .is_some_and(|(_, metadata)| metadata.inherited_constraints().contains(&rendered))
 }
 

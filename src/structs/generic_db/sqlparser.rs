@@ -846,7 +846,8 @@ fn existing_child_column_collation_conflict(
     inherited_metadata: &ColumnMetadata,
 ) -> Option<crate::errors::Error> {
     let (child_column, child_metadata) = builder.columns().iter().find(|(column, _)| {
-        child.matches(TableAttribute::table(column)) && added.matches(&column.attribute().name)
+        child.matches(TableAttribute::table(column), builder.identifier_case())
+            && added.matches(&column.attribute().name)
     })?;
     if child_metadata.postgres_collation_matches(inherited_metadata) != Some(false) {
         return None;
@@ -922,6 +923,7 @@ impl ParserDBBuilder {
         schema_name: Option<&str>,
         schema_quoted: bool,
     ) -> bool {
+        let case = self.identifier_case();
         for (fk, ()) in self.foreign_keys() {
             // Check if this FK references the table being dropped
             // and is NOT from the same table (self-referential FKs are OK to
@@ -951,6 +953,7 @@ impl ParserDBBuilder {
                 table_name_quoted,
                 schema_name,
                 schema_quoted,
+                case,
             );
             let host_matches = table_matches_resolved_identity(
                 host_table,
@@ -958,6 +961,7 @@ impl ParserDBBuilder {
                 table_name_quoted,
                 schema_name,
                 schema_quoted,
+                case,
             );
 
             if referenced_matches && !host_matches {
@@ -987,71 +991,25 @@ impl ParserDBBuilder {
         schema_name: Option<&str>,
         schema_quoted: bool,
     ) {
-        // Remove the table
-        self.tables_mut().retain(|(t, _)| {
-            !table_matches_resolved_identity(
-                t,
+        let case = self.identifier_case();
+        let is_target = |table: &CreateTable| {
+            table_matches_resolved_identity(
+                table,
                 table_name,
                 table_name_quoted,
                 schema_name,
                 schema_quoted,
+                case,
             )
-        });
+        };
 
-        // Remove columns belonging to this table
-        self.columns_mut().retain(|(c, _)| {
-            !table_matches_resolved_identity(
-                TableAttribute::table(c),
-                table_name,
-                table_name_quoted,
-                schema_name,
-                schema_quoted,
-            )
-        });
-
-        // Remove indices on this table
-        self.indices_mut().retain(|(i, _)| {
-            !table_matches_resolved_identity(
-                TableAttribute::table(i),
-                table_name,
-                table_name_quoted,
-                schema_name,
-                schema_quoted,
-            )
-        });
-
-        // Remove unique indices on this table
-        self.unique_indices_mut().retain(|(u, _)| {
-            !table_matches_resolved_identity(
-                TableAttribute::table(u),
-                table_name,
-                table_name_quoted,
-                schema_name,
-                schema_quoted,
-            )
-        });
-
-        // Remove foreign keys from this table
-        self.foreign_keys_mut().retain(|(fk, ())| {
-            !table_matches_resolved_identity(
-                TableAttribute::table(fk),
-                table_name,
-                table_name_quoted,
-                schema_name,
-                schema_quoted,
-            )
-        });
-
-        // Remove check constraints on this table
-        self.check_constraints_mut().retain(|(c, _)| {
-            !table_matches_resolved_identity(
-                TableAttribute::table(c),
-                table_name,
-                table_name_quoted,
-                schema_name,
-                schema_quoted,
-            )
-        });
+        self.tables_mut().retain(|(table, _)| !is_target(table));
+        self.columns_mut().retain(|(column, _)| !is_target(TableAttribute::table(column)));
+        self.indices_mut().retain(|(index, _)| !is_target(TableAttribute::table(index)));
+        self.unique_indices_mut().retain(|(index, _)| !is_target(TableAttribute::table(index)));
+        self.foreign_keys_mut().retain(|(key, ())| !is_target(TableAttribute::table(key)));
+        self.check_constraints_mut()
+            .retain(|(constraint, _)| !is_target(TableAttribute::table(constraint)));
 
         // Remove triggers on this table
         self.triggers_mut().retain(|(t, ())| {
@@ -1145,8 +1103,9 @@ impl ParserDBBuilder {
         declaring: &[StoredTable],
         column: &NamedColumn,
     ) -> bool {
+        let case = self.identifier_case();
         self.tables().iter().any(|(host, _)| {
-            !table.matches(host.as_ref()) && refers_to_column(host.as_ref(), table, column)
+            !table.matches(host.as_ref(), case) && refers_to_column(host.as_ref(), table, column)
         }) || self.policies().iter().any(|(policy, _)| {
             table.named_by(&policy.table_name)
                 && column.in_expressions(policy.as_ref(), table, declaring)
@@ -1167,8 +1126,9 @@ impl ParserDBBuilder {
         declaring: &[StoredTable],
         column: &NamedColumn,
     ) {
+        let case = self.identifier_case();
         self.indices_mut().retain(|(index, _)| {
-            !(table.matches(TableAttribute::table(index))
+            !(table.matches(TableAttribute::table(index), case)
                 && (column.in_expressions(index.attribute(), table, declaring)
                     || column.in_idents(&index.attribute().include)))
         });
@@ -1190,6 +1150,7 @@ impl ParserDBBuilder {
         declaring: &[StoredTable],
         column: &NamedColumn,
     ) -> Vec<StoredTable> {
+        let case = self.identifier_case();
         self.policies_mut().retain(|(policy, _)| {
             !(table.named_by(&policy.table_name)
                 && column.in_expressions(policy.as_ref(), table, declaring))
@@ -1201,7 +1162,7 @@ impl ParserDBBuilder {
         self.tables()
             .iter()
             .map(|(host, _)| host.as_ref())
-            .filter(|host| !table.matches(host) && refers_to_column(host, table, column))
+            .filter(|host| !table.matches(host, case) && refers_to_column(host, table, column))
             .map(StoredTable::of)
             .collect()
     }
@@ -1217,8 +1178,9 @@ impl ParserDBBuilder {
         from: &NamedColumn,
         to: &Ident,
     ) {
+        let case = self.identifier_case();
         for (index, _) in self.indices_mut() {
-            if table.matches(TableAttribute::table(index)) {
+            if table.matches(TableAttribute::table(index), case) {
                 let index = Arc::make_mut(index).attribute_mut();
                 rename_column_in_expressions(index, table, declaring, from, to);
                 rename_column_idents(&mut index.include, from, to);
@@ -1268,6 +1230,7 @@ impl ParserDBBuilder {
         schema_name: Option<&str>,
         schema_quoted: bool,
     ) -> Vec<(CreateIndex, Expr)> {
+        let case = self.identifier_case();
         let belongs_to = |table: &CreateTable| {
             table_matches_resolved_identity(
                 table,
@@ -1275,6 +1238,7 @@ impl ParserDBBuilder {
                 table_name_quoted,
                 schema_name,
                 schema_quoted,
+                case,
             )
         };
 
@@ -1383,9 +1347,9 @@ impl ParserDBBuilder {
             self.views().iter().map(|(view, _)| view.as_ref()),
             &target_name_of_idents(schema_ident, name_ident),
             self.search_path(),
-            IdentifierCase::AsWritten,
-            // Ingestion resolves within one kind, which is the creation-time
-            // namespace question this crate answers separately.
+            self.identifier_case(),
+            // Ingestion resolves within one kind: the shared pool of names is
+            // asked separately, by the creation checks.
             |_| false,
         )
     }
@@ -1401,9 +1365,9 @@ impl ParserDBBuilder {
             self.materialized_views().iter().map(|(view, _)| view.as_ref()),
             &target_name_of_idents(schema_ident, name_ident),
             self.search_path(),
-            IdentifierCase::AsWritten,
-            // Ingestion resolves within one kind, which is the creation-time
-            // namespace question this crate answers separately.
+            self.identifier_case(),
+            // Ingestion resolves within one kind: the shared pool of names is
+            // asked separately, by the creation checks.
             |_| false,
         )
     }
@@ -1561,8 +1525,9 @@ fn table_matches_resolved_identity(
     table_name_quoted: bool,
     schema_name: Option<&str>,
     schema_quoted: bool,
+    case: IdentifierCase,
 ) -> bool {
-    if !identifiers_match(
+    if !case.identifiers_match(
         table.table_name(),
         table.table_name_is_quoted(),
         table_name,
@@ -1574,7 +1539,7 @@ fn table_matches_resolved_identity(
     match (table.table_schema(), schema_name) {
         (None, None) => true,
         (Some(table_schema), Some(schema_name)) => {
-            identifiers_match(
+            case.identifiers_match(
                 table_schema,
                 table.table_schema_is_quoted(),
                 schema_name,
@@ -1639,13 +1604,14 @@ impl StoredTable {
         }
     }
 
-    fn matches(&self, table: &CreateTable) -> bool {
+    fn matches(&self, table: &CreateTable, case: IdentifierCase) -> bool {
         table_matches_resolved_identity(
             table,
             &self.name,
             self.name_quoted,
             self.schema.as_deref(),
             self.schema_quoted,
+            case,
         )
     }
 
@@ -2016,11 +1982,12 @@ fn tables_declaring_column(
     altered: &StoredTable,
     column: &NamedColumn,
 ) -> Vec<StoredTable> {
+    let case = builder.identifier_case();
     builder
         .tables()
         .iter()
         .map(|(table, _)| table.as_ref())
-        .filter(|table| !altered.matches(table) && column.declared_by(table))
+        .filter(|table| !altered.matches(table, case) && column.declared_by(table))
         .map(StoredTable::of)
         .collect()
 }
@@ -2271,6 +2238,15 @@ fn retain_action_columns(action: &mut Action, keep: impl Fn(&Ident) -> bool) {
 
 /// Returns whether two identifiers name the same object under PostgreSQL
 /// folding: an unquoted one is case-insensitive, a quoted one exact.
+fn case_idents_match(left: &Ident, right: &Ident, case: IdentifierCase) -> bool {
+    case.identifiers_match(
+        left.value.as_str(),
+        left.quote_style.is_some(),
+        right.value.as_str(),
+        right.quote_style.is_some(),
+    )
+}
+
 fn idents_match(left: &Ident, right: &Ident) -> bool {
     identifiers_match(
         left.value.as_str(),
@@ -2286,10 +2262,10 @@ fn idents_match(left: &Ident, right: &Ident) -> bool {
 /// A qualifier is left out of the comparison: what scopes the name is decided
 /// by the caller, since a trigger is scoped by its table and an index by the
 /// schema of the table it is on rather than by anything the name spells.
-fn object_names_match(left: &ObjectName, right: &ObjectName) -> bool {
+fn object_names_match(left: &ObjectName, right: &ObjectName, case: IdentifierCase) -> bool {
     match (object_name_last_part(left), object_name_last_part(right)) {
         (Some((left, left_quoted)), Some((right, right_quoted))) => {
-            identifiers_match(left, left_quoted, right, right_quoted)
+            case.identifiers_match(left, left_quoted, right, right_quoted)
         }
         _ => false,
     }
@@ -2330,15 +2306,12 @@ fn function_signatures_match(
     left_args: Option<&[OperateFunctionArg]>,
     right: &ObjectName,
     right_args: Option<&[OperateFunctionArg]>,
+    case: IdentifierCase,
 ) -> bool {
-    if !object_names_match(left, right)
+    if !object_names_match(left, right, case)
         || matches!(qualifier_of(left), Qualifier::RunTime)
         || matches!(qualifier_of(right), Qualifier::RunTime)
-        || !schema_qualifiers_match(
-            qualifier_of(left).named(),
-            qualifier_of(right).named(),
-            IdentifierCase::AsWritten,
-        )
+        || !schema_qualifiers_match(qualifier_of(left).named(), qualifier_of(right).named(), case)
     {
         return false;
     }
@@ -2551,14 +2524,14 @@ fn search_path_entry(value: &Expr) -> Option<(String, bool)> {
 /// unqualified name means schema `public`, which is the allowance
 /// [`ParserDB::resolve_table_object_name_on_search_path`] already makes when
 /// resolving such a target.
-fn target_tables_match(left: &ObjectName, right: &ObjectName) -> bool {
+fn target_tables_match(left: &ObjectName, right: &ObjectName, case: IdentifierCase) -> bool {
     let (Ok((left_schema, left_table)), Ok((right_schema, right_table))) =
         (object_name_identifiers(left), object_name_identifiers(right))
     else {
         return false;
     };
 
-    if !idents_match(left_table, right_table) {
+    if !case_idents_match(left_table, right_table, case) {
         return false;
     }
 
@@ -4066,7 +4039,7 @@ impl ParserDB {
             .iter()
             .map(|(table, _)| table.as_ref())
             .filter(|table| {
-                !renamed.matches(table)
+                !renamed.matches(table, builder.identifier_case())
                     && (table_references(table, &renamed)
                         || inheritance::names_parent(table, &renamed))
             })
@@ -4117,8 +4090,10 @@ impl ParserDB {
         preserve: impl FnOnce(&mut Vec<PreservedColumnMetadata>),
         edit: impl FnOnce(&CreateTable, &mut CreateTable) -> Result<(), crate::errors::Error>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
-        let Some(position) =
-            builder.tables().iter().position(|(table, _)| stored.matches(table.as_ref()))
+        let Some(position) = builder
+            .tables()
+            .iter()
+            .position(|(table, _)| stored.matches(table.as_ref(), builder.identifier_case()))
         else {
             return Err(ObjectKind::Table.not_in_database(&stored.name).into());
         };
@@ -4156,7 +4131,7 @@ impl ParserDB {
 
         let replacement = Arc::new(replacement);
 
-        let renamed = !stored.matches(&replacement);
+        let renamed = !stored.matches(&replacement, builder.identifier_case());
         for (mut index, expression) in detached_indices {
             if renamed {
                 index.table_name = replacement.name.clone();
@@ -5011,6 +4986,7 @@ impl ParserDB {
         let resolved_schema_name = resolved_table.table_schema().map(str::to_string);
         let resolved_schema_quoted = resolved_table.table_schema_is_quoted();
 
+        let case = builder.identifier_case();
         let Some(entry) = builder.tables_mut().iter_mut().find(|(table, _)| {
             table_matches_resolved_identity(
                 table.as_ref(),
@@ -5018,6 +4994,7 @@ impl ParserDB {
                 resolved_table_quoted,
                 resolved_schema_name.as_deref(),
                 resolved_schema_quoted,
+                case,
             )
         }) else {
             // The identity came from a table this builder resolved, so this is
@@ -5059,6 +5036,7 @@ impl ParserDB {
         builder: &ParserDBBuilder,
         func_desc: &FunctionDesc,
     ) -> Result<usize, crate::errors::Error> {
+        let case = builder.identifier_case();
         let matching: Vec<usize> = builder
             .functions()
             .iter()
@@ -5071,9 +5049,10 @@ impl ParserDB {
                             function.args.as_deref(),
                             &func_desc.name,
                             Some(args),
+                            case,
                         )
                     }
-                    None => object_names_match(&function.name, &func_desc.name),
+                    None => object_names_match(&function.name, &func_desc.name, case),
                 }
             })
             .map(|(position, _)| position)
@@ -5104,7 +5083,7 @@ impl ParserDB {
             .tables()
             .iter()
             .map(|(table, _)| table.as_ref())
-            .find(|table| stored.matches(table))
+            .find(|table| stored.matches(table, builder.identifier_case()))
             .ok_or_else(|| ObjectKind::Table.not_in_database(&stored.name).into())
     }
 
@@ -5391,7 +5370,10 @@ impl ParserDB {
             .tables()
             .iter()
             .map(|(table, _)| table.as_ref())
-            .filter(|host| !stored.matches(host) && refers_to_column(host, &stored, &from))
+            .filter(|host| {
+                !stored.matches(host, builder.identifier_case())
+                    && refers_to_column(host, &stored, &from)
+            })
             .map(StoredTable::of)
             .collect();
         let declaring = tables_declaring_column(&builder, &stored, &from);
@@ -5766,12 +5748,14 @@ impl ParserDB {
                         crate::errors::ObjectKind::Function,
                         builder.catalog_name(),
                     )?;
+                    let case = builder.identifier_case();
                     let existing = builder.functions().iter().position(|(existing, _)| {
                         function_signatures_match(
                             &existing.name,
                             existing.args.as_deref(),
                             &create_function.name,
                             create_function.args.as_deref(),
+                            case,
                         )
                     });
                     let replaced = match (existing, create_function.or_replace) {
@@ -5822,6 +5806,7 @@ impl ParserDB {
                         // A statement that spells the argument list names one
                         // function, and one that omits it names whichever
                         // function carries the name, so long as only one does.
+                        let case = builder.identifier_case();
                         let matching: Vec<usize> = builder
                             .functions()
                             .iter()
@@ -5834,9 +5819,12 @@ impl ParserDB {
                                             function.args.as_deref(),
                                             &func_desc.name,
                                             Some(args),
+                                            case,
                                         )
                                     }
-                                    None => object_names_match(&function.name, &func_desc.name),
+                                    None => {
+                                        object_names_match(&function.name, &func_desc.name, case)
+                                    }
                                 }
                             })
                             .map(|(position, _)| position)
@@ -6018,12 +6006,13 @@ impl ParserDB {
                     name,
                     operation: AlterIndexOperation::RenameIndex { index_name: new_name },
                 } => {
+                    let case = builder.identifier_case();
                     let Some(position) = builder.indices().iter().position(|(index, _)| {
                         index
                             .attribute()
                             .name
                             .as_ref()
-                            .is_some_and(|stored| object_names_match(stored, &name))
+                            .is_some_and(|stored| object_names_match(stored, &name, case))
                     }) else {
                         return Err(crate::errors::Error::AlterIndexNotFound {
                             index_name: last_str(&name).to_string(),
@@ -6115,9 +6104,14 @@ impl ParserDB {
                     // `CREATE OR REPLACE` replaces the stored node rather than
                     // appending a second one, which would leave the stale node
                     // answering every lookup.
+                    let case = builder.identifier_case();
                     let existing = builder.triggers().iter().position(|(existing, ())| {
-                        object_names_match(&existing.name, &create_trigger.name)
-                            && target_tables_match(&existing.table_name, &create_trigger.table_name)
+                        object_names_match(&existing.name, &create_trigger.name, case)
+                            && target_tables_match(
+                                &existing.table_name,
+                                &create_trigger.table_name,
+                                case,
+                            )
                     });
                     match (existing, create_trigger.or_replace) {
                         (Some(_), false) => {
@@ -6141,10 +6135,11 @@ impl ParserDB {
                     // statement names both and both have to match. Dropping by
                     // name alone reached a trigger of the same name on another
                     // table, which the database refuses to do.
+                    let case = builder.identifier_case();
                     let matches = |trigger: &CreateTrigger| {
-                        object_names_match(&trigger.name, &drop_trigger.trigger_name)
+                        object_names_match(&trigger.name, &drop_trigger.trigger_name, case)
                             && drop_trigger.table_name.as_ref().is_none_or(|table_name| {
-                                target_tables_match(&trigger.table_name, table_name)
+                                target_tables_match(&trigger.table_name, table_name, case)
                             })
                     };
 
@@ -6164,7 +6159,11 @@ impl ParserDB {
                 Statement::DropPolicy(drop_policy) => {
                     let Some(index) = builder.policies().iter().position(|(policy, _)| {
                         idents_match(&policy.name, &drop_policy.name)
-                            && target_tables_match(&policy.table_name, &drop_policy.table_name)
+                            && target_tables_match(
+                                &policy.table_name,
+                                &drop_policy.table_name,
+                                IdentifierCase::AsWritten,
+                            )
                     }) else {
                         if drop_policy.if_exists {
                             continue;
@@ -6377,6 +6376,7 @@ impl ParserDB {
                         });
                     }
 
+                    let case = builder.identifier_case();
                     if let Some(entry) = builder.tables_mut().iter_mut().find(|(table, _)| {
                         table_matches_resolved_identity(
                             table.as_ref(),
@@ -6384,6 +6384,7 @@ impl ParserDB {
                             resolved_table_quoted,
                             resolved_schema_name.as_deref(),
                             resolved_schema_quoted,
+                            case,
                         )
                     }) {
                         entry.1.add_index(index.clone());
@@ -6820,7 +6821,11 @@ impl ParserDB {
                     // construction rather than by inspection.
                     if builder.policies().iter().any(|(existing, _)| {
                         idents_match(&existing.name, &policy.name)
-                            && target_tables_match(&existing.table_name, &policy.table_name)
+                            && target_tables_match(
+                                &existing.table_name,
+                                &policy.table_name,
+                                IdentifierCase::AsWritten,
+                            )
                     }) {
                         return Err(crate::errors::Error::PolicyAlreadyExists {
                             policy_name: policy.name.value.clone(),
@@ -7178,7 +7183,11 @@ impl ParserDB {
                 Statement::AlterPolicy(AlterPolicy { name, table_name, operation }) => {
                     let Some(index) = builder.policies().iter().position(|(policy, _)| {
                         idents_match(&policy.name, &name)
-                            && target_tables_match(&policy.table_name, &table_name)
+                            && target_tables_match(
+                                &policy.table_name,
+                                &table_name,
+                                IdentifierCase::AsWritten,
+                            )
                     }) else {
                         return Err(crate::errors::Error::AlterPolicyNotFound {
                             policy_name: name.value.clone(),
