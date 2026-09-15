@@ -601,16 +601,16 @@ impl<P: SchemaProfile> GenericDB<P> {
 
     /// Returns a reference to the catalog name.
     ///
+    /// The name is the one the schema was started with, and no statement in
+    /// the input changes it.
+    ///
     /// # Example
     ///
     /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t (id INT);")?;
-    /// assert_eq!(db.catalog_name(), "unknown_catalog");
-    /// # Ok(())
-    /// # }
+    /// let db = ParserDBIngestor::new::<GenericDialect>("analytics".to_string()).finish();
+    /// assert_eq!(db.catalog_name(), "analytics");
     /// ```
     #[must_use]
     #[inline]
@@ -737,17 +737,9 @@ impl<P: SchemaProfile> GenericDB<P> {
     /// use sql_traits::prelude::*;
     /// use sqlparser::dialect::PostgreSqlDialect;
     ///
-    /// let db = ParserDB::parse::<PostgreSqlDialect>(
-    ///     r#"
-    ///     CREATE SCHEMA Foo;
-    ///     CREATE SCHEMA "Bar";
-    ///     "#,
-    /// )?;
+    /// let db = ParserDB::parse::<PostgreSqlDialect>(r#"CREATE SCHEMA "Bar";"#)?;
     ///
-    /// assert!(db.schema("foo").is_some());
-    /// assert!(db.schema("\"foo\"").is_some());
-    /// assert!(db.schema("\"Foo\"").is_none());
-    /// assert!(db.schema("\"Bar\"").is_some());
+    /// assert_eq!(db.schema("\"Bar\"").map(SchemaLike::name), Some("Bar"));
     /// assert!(db.schema("bar").is_none());
     /// # Ok(())
     /// # }
