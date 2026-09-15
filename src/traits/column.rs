@@ -182,17 +182,21 @@ pub trait ColumnLike:
 
     /// Returns the name of the column.
     ///
+    /// The name is the stored spelling, without the quotes a quoted
+    /// identifier was written with.
+    ///
     /// # Example
     ///
     /// ```rust
     /// #  fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use sql_traits::prelude::*;
     ///
-    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
+    /// let db = ParserDB::parse::<GenericDialect>(r#"CREATE TABLE t ("Id" INT);"#)?;
     /// let table =
-    ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let columns: Vec<&str> = table.columns(&db)?.map(|col| col.column_name()).collect();
-    /// assert_eq!(columns, vec!["id", "name"]);
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let column = table.columns(&db)?.next().unwrap();
+    /// assert_eq!(column.column_name(), "Id");
+    /// assert!(column.column_name_is_quoted());
     /// # Ok(())
     /// # }
     /// ```
