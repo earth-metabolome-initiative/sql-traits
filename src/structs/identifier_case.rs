@@ -3,7 +3,7 @@
 use alloc::borrow::Cow;
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use crate::utils::identifier_resolution::normalize_identifier;
+use crate::utils::identifier_resolution::{normalize_identifier, parse_lookup_identifier};
 
 /// How a lookup compares a written identifier against a stored one.
 ///
@@ -111,6 +111,26 @@ impl IdentifierCase {
         right_quoted: bool,
     ) -> bool {
         self.compared_form(left, left_quoted) == self.compared_form(right, right_quoted)
+    }
+
+    /// Whether a stored identifier is named by a written lookup, reading the
+    /// lookup's own quoting out of its text.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use sql_traits::prelude::*;
+    ///
+    /// // The lookup carries its quoting, so PostgreSQL's rule needs it back.
+    /// assert!(IdentifierCase::AsWritten.names_stored("Body", true, "\"Body\""));
+    /// assert!(!IdentifierCase::AsWritten.names_stored("Body", true, "body"));
+    /// // A folding engine reads a column name either way.
+    /// assert!(IdentifierCase::Folded.names_stored("Body", true, "body"));
+    /// ```
+    #[must_use]
+    pub fn names_stored(self, stored: &str, stored_quoted: bool, lookup: &str) -> bool {
+        let written = parse_lookup_identifier(lookup);
+        self.identifiers_match(stored, stored_quoted, written.value(), written.is_quoted())
     }
 }
 

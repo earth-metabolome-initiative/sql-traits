@@ -1803,15 +1803,18 @@ fn foreign_keys_of(node: &CreateTable) -> impl Iterator<Item = &ForeignKeyConstr
 struct NamedColumn {
     name: String,
     quoted: bool,
+    /// Comparison the parse states, which every engine answers its own way for
+    /// a column: only PostgreSQL keeps a quoted spelling apart.
+    case: IdentifierCase,
 }
 
 impl NamedColumn {
-    fn of(ident: &Ident) -> Self {
-        Self { name: ident.value.clone(), quoted: ident.quote_style.is_some() }
+    fn of(ident: &Ident, case: IdentifierCase) -> Self {
+        Self { name: ident.value.clone(), quoted: ident.quote_style.is_some(), case }
     }
 
     fn matches(&self, ident: &Ident) -> bool {
-        identifiers_match(
+        self.case.identifiers_match(
             &self.name,
             self.quoted,
             ident.value.as_str(),
@@ -2759,10 +2762,13 @@ fn search_path_qualifier(
 ///
 /// PostgreSQL folds an unquoted identifier, so `a` and `A` are one column while
 /// `a` and `"A"` are two.
-fn validate_distinct_columns(create_table: &CreateTable) -> Result<(), crate::errors::Error> {
+fn validate_distinct_columns(
+    create_table: &CreateTable,
+    case: IdentifierCase,
+) -> Result<(), crate::errors::Error> {
     for (position, column) in create_table.columns.iter().enumerate() {
         let repeated = create_table.columns[..position].iter().any(|earlier| {
-            identifiers_match(
+            case.identifiers_match(
                 earlier.name.value.as_str(),
                 earlier.name.quote_style.is_some(),
                 column.name.value.as_str(),
@@ -2994,9 +3000,10 @@ fn validate_index_columns(
     columns: &[IndexColumn],
     include: &[Ident],
     create_table: &CreateTable,
+    case: IdentifierCase,
 ) -> Result<(), LookupError> {
     let absent = |ident: &Ident| {
-        (!NamedColumn::of(ident).declared_by(create_table)).then(|| {
+        (!NamedColumn::of(ident, case).declared_by(create_table)).then(|| {
             LookupError::ColumnNotFound {
                 table_name: create_table.name.to_string(),
                 column_name: ident.value.clone(),
@@ -3675,7 +3682,12 @@ impl ParserDB {
     /// let table = db
     ///     .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
     ///     .expect("table exists");
-    /// assert!(table.column("label", &db).expect("column lookup runs").is_some());
+    /// assert!(
+    ///     table
+    ///         .column("label", &db, IdentifierCase::AsWritten)
+    ///         .expect("column lookup runs")
+    ///         .is_some()
+    /// );
     /// # Ok::<(), sql_traits::errors::Error>(())
     /// ```
     #[must_use]
@@ -3992,7 +4004,12 @@ impl ParserDB {
                 index_name: create_index.name.as_ref().map_or("<unnamed>", last_str).to_string(),
             });
         };
-        validate_index_columns(&create_index.columns, &create_index.include, table)?;
+        validate_index_columns(
+            &create_index.columns,
+            &create_index.include,
+            table,
+            builder.identifier_case(),
+        )?;
 
         let index_arc = Arc::new(TableAttribute::new(Arc::new(table.clone()), create_index));
         let Some(expression) = Self::create_index_expression(&index_arc.attribute().columns) else {
@@ -4522,7 +4539,7 @@ impl ParserDB {
         preserved: &[PreservedColumnMetadata],
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         validate_table_schema(&builder, &create_table)?;
-        validate_distinct_columns(&create_table)?;
+        validate_distinct_columns(&create_table, builder.identifier_case())?;
         validate_relation_names(&builder, &create_table)?;
 
         let search_path: Vec<_> =
@@ -5121,7 +5138,7 @@ impl ParserDB {
         let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
         };
-        let added = NamedColumn::of(&column_def.name);
+        let added = NamedColumn::of(&column_def.name, builder.identifier_case());
 
         if added.declared_by(Self::stored_node(&builder, &stored)?) {
             if if_not_exists {
@@ -5172,6 +5189,7 @@ impl ParserDB {
             should_validate_missing_collations(*builder.dialect()),
         )?;
 
+        let case = builder.identifier_case();
         let mut builder = Self::replace_table_node_with_collations(
             builder,
             &stored,
@@ -5182,7 +5200,7 @@ impl ParserDB {
                 let at = match position {
                     Some(MySQLColumnPosition::First) => 0,
                     Some(MySQLColumnPosition::After(after)) => {
-                        let after = NamedColumn::of(after);
+                        let after = NamedColumn::of(after, case);
                         node.columns
                             .iter()
                             .position(|declared| after.matches(&declared.name))
@@ -5245,7 +5263,7 @@ impl ParserDB {
         };
 
         for column_name in column_names {
-            let column = NamedColumn::of(column_name);
+            let column = NamedColumn::of(column_name, builder.identifier_case());
 
             if !column.declared_by(Self::stored_node(&builder, &stored)?) {
                 if column_if_exists {
@@ -5345,8 +5363,8 @@ impl ParserDB {
             scope,
             crate::errors::InheritedChange::RenameColumn,
         )?;
-        let from = NamedColumn::of(old_column_name);
-        let to = NamedColumn::of(new_column_name);
+        let from = NamedColumn::of(old_column_name, builder.identifier_case());
+        let to = NamedColumn::of(new_column_name, builder.identifier_case());
         let node = Self::stored_node(&builder, &stored)?;
 
         if !from.declared_by(node) {
@@ -5443,7 +5461,7 @@ impl ParserDB {
         let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? else {
             return Ok(builder);
         };
-        let column = NamedColumn::of(column_name);
+        let column = NamedColumn::of(column_name, builder.identifier_case());
 
         if !column.declared_by(Self::stored_node(&builder, &stored)?) {
             return Err(LookupError::ColumnNotFound {
@@ -5501,7 +5519,7 @@ impl ParserDB {
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         if let Some(stored) = Self::alter_table_target(&builder, table_name, scope)? {
             let node = Self::stored_node(&builder, &stored)?;
-            let column = NamedColumn::of(column_name);
+            let column = NamedColumn::of(column_name, builder.identifier_case());
             if column.declared_by(node) {
                 Self::refuse_alter_column(&builder, &stored, node, &column, operation)?;
             }
@@ -7841,7 +7859,7 @@ mod tests {
                 .expect("unambiguous lookup")
                 .expect("table exists");
             let column = table
-                .column("name", &database)
+                .column("name", &database, IdentifierCase::AsWritten)
                 .expect("column lookup runs")
                 .expect("column exists");
             let ColumnCollation::Named(collation) =

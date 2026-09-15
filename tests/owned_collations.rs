@@ -29,7 +29,9 @@ fn a_collation_outlives_the_catalog_it_was_read_from() -> Result<(), Error> {
         let table = db
             .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
             .expect("table t was created");
-        let column = table.column("name", &db)?.expect("column name was declared");
+        let column = table
+            .column("name", &db, IdentifierCase::AsWritten)?
+            .expect("column name was declared");
         let ColumnCollation::Named(named) = column.collation(&db)? else {
             panic!("a declared COLLATE resolves to a named collation");
         };

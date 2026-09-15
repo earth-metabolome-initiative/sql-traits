@@ -55,7 +55,7 @@ fn column<'db>(
         .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists")
-        .column(column_name, database)
+        .column(column_name, database, IdentifierCase::AsWritten)
         .expect("lookup succeeds")
         .expect("column exists")
 }

@@ -77,7 +77,10 @@ fn column<'db>(
     name: &str,
     database: &'db ParserDB,
 ) -> &'db <ParserDB as DatabaseLike>::Column {
-    table.column(name, database).expect("lookup succeeds").expect("column exists")
+    table
+        .column(name, database, IdentifierCase::AsWritten)
+        .expect("lookup succeeds")
+        .expect("column exists")
 }
 
 #[test]
@@ -235,7 +238,10 @@ fn a_child_receives_defaults_and_checks_but_no_key_of_its_own() {
     assert_eq!(child.check_constraints(&database).expect("in database").count(), 1);
 
     // The primary key is withheld but the `NOT NULL` it implies is not.
-    let keyed = child.column("keyed", &database).expect("lookup succeeds").expect("column exists");
+    let keyed = child
+        .column("keyed", &database, IdentifierCase::AsWritten)
+        .expect("lookup succeeds")
+        .expect("column exists");
     assert!(!keyed.is_nullable(&database).expect("column is in this database"));
 
     let parent = database
@@ -307,7 +313,10 @@ fn a_column_a_parent_renames_or_retypes_changes_in_the_child_too() {
         .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    let retyped = child.column("c", &database).expect("lookup succeeds").expect("column exists");
+    let retyped = child
+        .column("c", &database, IdentifierCase::AsWritten)
+        .expect("lookup succeeds")
+        .expect("column exists");
     assert_eq!(retyped.data_type(&database), "BIGINT");
 }
 
@@ -747,8 +756,10 @@ fn an_identity_spelled_the_other_way_is_withheld_just_the_same() {
         .table_by_target(TargetName::new("chi", false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists");
-    let counted =
-        child.column("counted", &database).expect("lookup succeeds").expect("column exists");
+    let counted = child
+        .column("counted", &database, IdentifierCase::AsWritten)
+        .expect("lookup succeeds")
+        .expect("column exists");
     // The identity is gone but the `NOT NULL` it implies stays.
     assert!(!counted.is_nullable(&database).expect("column is in this database"));
     assert_eq!(child.primary_key_columns(&database).expect("in database").count(), 0);

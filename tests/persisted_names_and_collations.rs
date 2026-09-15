@@ -81,7 +81,9 @@ fn a_resolved_collation_survives_the_database_it_came_from() -> Result<(), Error
         let table = db
             .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?
             .expect("table t was created");
-        let column = table.column("name", &db)?.expect("column name was declared");
+        let column = table
+            .column("name", &db, IdentifierCase::AsWritten)?
+            .expect("column name was declared");
         let collation: ColumnCollation<'static> = column.collation(&db)?.into_owned();
         round_trip(&collation)
     };

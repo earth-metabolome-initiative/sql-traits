@@ -91,7 +91,7 @@ fn a_column_reports_its_absent_table() {
         .expect("unambiguous lookup")
         .expect("anon exists");
     let column = table
-        .column("name", &host)
+        .column("name", &host, IdentifierCase::AsWritten)
         .expect("anon is in the host database")
         .expect("anon declares name");
 

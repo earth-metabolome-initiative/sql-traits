@@ -28,7 +28,7 @@ fn accepts_nothing(database: &ParserDB, table_name: &str, column_name: &str) -> 
         .table_by_target(TargetName::new(table_name, false), IdentifierCase::AsWritten)
         .expect("unambiguous lookup")
         .expect("table exists")
-        .column(column_name, database)
+        .column(column_name, database, IdentifierCase::AsWritten)
         .expect("lookup succeeds")
         .expect("column exists")
         .is_nullable(database)
@@ -135,12 +135,18 @@ fn every_column_of_a_multi_column_key_belongs_to_it() {
         .expect("table exists");
 
     for name in ["a", "b"] {
-        let column = pair.column(name, &database).expect("lookup").expect("column exists");
+        let column = pair
+            .column(name, &database, IdentifierCase::AsWritten)
+            .expect("lookup")
+            .expect("column exists");
         assert!(pair.is_primary_key_column(&database, column).expect("in database"), "{name}");
         assert!(accepts_nothing(&database, "pair", name), "{name}");
     }
 
-    let c = pair.column("c", &database).expect("lookup").expect("column exists");
+    let c = pair
+        .column("c", &database, IdentifierCase::AsWritten)
+        .expect("lookup")
+        .expect("column exists");
     assert!(!pair.is_primary_key_column(&database, c).expect("in database"));
     assert!(!accepts_nothing(&database, "pair", "c"));
 }
@@ -156,7 +162,10 @@ fn a_table_with_no_key_has_no_key_columns() {
         .expect("table exists");
 
     for name in ["a", "b"] {
-        let column = plain.column(name, &database).expect("lookup").expect("column exists");
+        let column = plain
+            .column(name, &database, IdentifierCase::AsWritten)
+            .expect("lookup")
+            .expect("column exists");
         assert!(!plain.is_primary_key_column(&database, column).expect("in database"), "{name}");
     }
 }

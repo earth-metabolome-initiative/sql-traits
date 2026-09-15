@@ -145,7 +145,7 @@ impl ColumnCollation<'_> {
     ///     )?;
     ///     let table =
     ///         db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
-    ///     let column = table.column("name", &db)?.unwrap();
+    ///     let column = table.column("name", &db, IdentifierCase::AsWritten)?.unwrap();
     ///     column.collation(&db)?.into_owned()
     /// };
     /// let ColumnCollation::Named(named) = collation else {
@@ -263,8 +263,10 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let column_name = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let column_name =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
     /// assert_eq!(column.column_doc(&db)?, Some("the id of the table_row"));
     /// assert!(column_name.column_doc(&db)?.is_none());
     /// # Ok(())
@@ -291,9 +293,13 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let score_column = table
+    ///     .column("score", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'score' should exist");
     /// assert_eq!(id_column.data_type(&db), "INT");
     /// assert_eq!(name_column.data_type(&db), "TEXT");
     /// assert_eq!(score_column.data_type(&db), "REAL");
@@ -316,9 +322,9 @@ pub trait ColumnLike:
     /// let table = db
     ///     .table_by_target(TargetName::new("measurements", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let id = table.column("id", &db)?.unwrap();
-    /// let value = table.column("value", &db)?.unwrap();
-    /// let label = table.column("label", &db)?.unwrap();
+    /// let id = table.column("id", &db, IdentifierCase::AsWritten)?.unwrap();
+    /// let value = table.column("value", &db, IdentifierCase::AsWritten)?.unwrap();
+    /// let label = table.column("label", &db, IdentifierCase::AsWritten)?.unwrap();
     /// assert_eq!(id.scalar_family(&db), Some(ScalarFamily::Int));
     /// assert_eq!(value.scalar_family(&db), Some(ScalarFamily::Decimal));
     /// assert_eq!(label.scalar_family(&db), Some(ScalarFamily::String));
@@ -356,7 +362,7 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let column = table.column("name", &db)?.unwrap();
+    /// let column = table.column("name", &db, IdentifierCase::AsWritten)?.unwrap();
     /// let ColumnCollation::Named(collation) = column.collation(&db)? else {
     ///     panic!("expected a named collation");
     /// };
@@ -393,13 +399,21 @@ pub trait ColumnLike:
     ///     db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)?.unwrap();
     /// let child_table =
     ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
-    /// let bigg_id_column = table.column("bigg_id", &db)?.expect("Column 'bigg_id' should exist");
-    /// let parent_id_column =
-    ///     child_table.column("parent_id", &db)?.expect("Column 'parent_id' should exist");
-    /// let other_column = child_table.column("other", &db)?.expect("Column 'other' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let age_column =
+    ///     table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
+    /// let bigg_id_column = table
+    ///     .column("bigg_id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'bigg_id' should exist");
+    /// let parent_id_column = child_table
+    ///     .column("parent_id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'parent_id' should exist");
+    /// let other_column = child_table
+    ///     .column("other", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'other' should exist");
     /// assert!(id_column.is_generated(), "id column should be generative");
     /// assert!(!name_column.is_generated(), "name column should not be generative");
     /// assert!(!age_column.is_generated(), "age column should not be generative");
@@ -435,9 +449,12 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let age_column =
+    ///     table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
     /// assert!(id_column.is_primary_key(&db)?, "id column should be primary key");
     /// assert!(!name_column.is_primary_key(&db)?, "name column should not be primary key");
     /// assert!(!age_column.is_primary_key(&db)?, "age column should not be primary key");
@@ -476,9 +493,12 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let age_column =
+    ///     table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
     /// assert!(id_column.is_surrogate_key(&db)?, "id column should be a surrogate key");
     /// assert!(!name_column.is_surrogate_key(&db)?, "name column should not be a surrogate key");
     /// assert!(!age_column.is_surrogate_key(&db)?, "age column should not be a surrogate key");
@@ -500,11 +520,11 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, serial_id SERIAL, bigg_id BIGSERIAL, small_id SMALLSERIAL, name TEXT);")?;
     /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let serial_id_column = table.column("serial_id", &db)?.expect("Column 'serial_id' should exist");
-    /// let bigg_id_column = table.column("bigg_id", &db)?.expect("Column 'bigg_id' should exist");
-    /// let small_id_column = table.column("small_id", &db)?.expect("Column 'small_id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let id_column = table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let serial_id_column = table.column("serial_id", &db, IdentifierCase::AsWritten)?.expect("Column 'serial_id' should exist");
+    /// let bigg_id_column = table.column("bigg_id", &db, IdentifierCase::AsWritten)?.expect("Column 'bigg_id' should exist");
+    /// let small_id_column = table.column("small_id", &db, IdentifierCase::AsWritten)?.expect("Column 'small_id' should exist");
+    /// let name_column = table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
     /// assert_eq!(id_column.normalized_data_type(&db), "INT");
     /// assert_eq!(serial_id_column.normalized_data_type(&db), "INT");
     /// assert_eq!(bigg_id_column.normalized_data_type(&db), "BIGINT");
@@ -540,11 +560,15 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let description_column =
-    ///     table.column("description", &db)?.expect("Column 'description' should exist");
-    /// let note_column = table.column("note", &db)?.expect("Column 'note' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let description_column = table
+    ///     .column("description", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'description' should exist");
+    /// let note_column =
+    ///     table.column("note", &db, IdentifierCase::AsWritten)?.expect("Column 'note' should exist");
     /// assert!(!id_column.is_textual(&db), "id column should not be textual");
     /// assert!(name_column.is_textual(&db), "name column should be textual");
     /// assert!(description_column.is_textual(&db), "description column should be textual");
@@ -575,10 +599,13 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let optional_column =
-    ///     table.column("optional_field", &db)?.expect("Column 'optional_field' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let optional_column = table
+    ///     .column("optional_field", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'optional_field' should exist");
     /// assert!(!id_column.is_nullable(&db)?, "id column should not be nullable");
     /// assert!(name_column.is_nullable(&db)?, "name column should be nullable by default");
     /// assert!(
@@ -603,10 +630,13 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let created_at_column =
-    ///     table.column("created_at", &db)?.expect("Column 'created_at' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let created_at_column = table
+    ///     .column("created_at", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'created_at' should exist");
     /// assert_eq!(
     ///     id_column.default_value(),
     ///     Some("0".to_string()),
@@ -636,10 +666,13 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let created_at_column =
-    ///     table.column("created_at", &db)?.expect("Column 'created_at' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let created_at_column = table
+    ///     .column("created_at", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'created_at' should exist");
     /// assert!(id_column.has_default(), "id column should have a default value");
     /// assert!(!name_column.has_default(), "name column should not have a default value");
     /// assert!(created_at_column.has_default(), "created_at column should have a default value");
@@ -666,7 +699,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT);")?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
     /// let column_table = ColumnLike::table(id_column, &db);
     /// assert_eq!(column_table.table_name(), "my_table");
     /// # Ok(())
@@ -699,9 +733,12 @@ pub trait ColumnLike:
     ///     ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, name TEXT, age INT);")?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let age_column =
+    ///     table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
     /// assert_eq!(id_column.column_id(&db)?, Some(0));
     /// assert_eq!(name_column.column_id(&db)?, Some(1));
     /// assert_eq!(age_column.column_id(&db)?, Some(2));
@@ -748,8 +785,11 @@ pub trait ColumnLike:
     /// let host_table = db
     ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let id_column =
+    ///     host_table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column = host_table
+    ///     .column("name", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'name' should exist");
     /// let id_fks = id_column.foreign_keys(&db)?.collect::<Vec<_>>();
     /// let name_fks = name_column.foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(id_fks.len(), 1);
@@ -816,7 +856,7 @@ pub trait ColumnLike:
     ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
     /// let other_table =
     ///     db.table_by_target(TargetName::new("other", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let child_id_column = other_table.column("child_id", &db)?.unwrap();
+    /// let child_id_column = other_table.column("child_id", &db, IdentifierCase::AsWritten)?.unwrap();
     /// assert!(
     ///     child_id_column.references_table_pk_or_descendant(&db, parent_table)?,
     ///     "child_id should reference parent or its descendant"
@@ -885,11 +925,14 @@ pub trait ColumnLike:
     ///     db.table_by_target(TargetName::new("parent", false), IdentifierCase::AsWritten)?.unwrap();
     /// let child_table =
     ///     db.table_by_target(TargetName::new("child", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let parent_id_column =
-    ///     child_table.column("parent_id", &db)?.expect("Column 'parent_id' should exist");
+    /// let parent_id_column = child_table
+    ///     .column("parent_id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'parent_id' should exist");
     /// let ext_fks = parent_id_column.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(ext_fks.len(), 1);
-    /// let id_column = parent_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let id_column = parent_table
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist");
     /// let id_fks = id_column.extension_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(id_fks.len(), 0);
     /// # Ok(())
@@ -946,8 +989,8 @@ pub trait ColumnLike:
     /// let host_table = db
     ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let id_column = host_table.column("id", &db)?.unwrap();
-    /// let name_column = host_table.column("name", &db)?.unwrap();
+    /// let id_column = host_table.column("id", &db, IdentifierCase::AsWritten)?.unwrap();
+    /// let name_column = host_table.column("name", &db, IdentifierCase::AsWritten)?.unwrap();
     /// assert!(id_column.is_part_of_foreign_key(&db)?, "id column should be a foreign key");
     /// assert!(!name_column.is_part_of_foreign_key(&db)?, "name column should not be a foreign key");
     /// # Ok(())
@@ -992,8 +1035,11 @@ pub trait ColumnLike:
     /// let host_table = db
     ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let name_column = host_table.column("name", &db)?.expect("Column 'name' should exist");
+    /// let id_column =
+    ///     host_table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let name_column = host_table
+    ///     .column("name", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'name' should exist");
     /// let id_fks = id_column.non_composite_foreign_keys(&db)?.collect::<Vec<_>>();
     /// let name_fks = name_column.non_composite_foreign_keys(&db)?.collect::<Vec<_>>();
     /// assert_eq!(id_fks.len(), 1);
@@ -1068,35 +1114,44 @@ pub trait ColumnLike:
     /// let host_table = db
     ///     .table_by_target(TargetName::new("host_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let id_column = host_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let id_column =
+    ///     host_table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
     /// let compatible_table = db
     ///     .table_by_target(TargetName::new("compatible_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
     /// let serial_table_one = db
     ///     .table_by_target(TargetName::new("serial_table_one", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let serial_id_column = serial_table_one.column("id", &db)?.expect("Column 'id' should exist");
+    /// let serial_id_column = serial_table_one
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist");
     /// let serial_table_two = db
     ///     .table_by_target(TargetName::new("serial_table_two", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let serial_id_column_two =
-    ///     serial_table_two.column("id", &db)?.expect("Column 'id' should exist");
-    /// let compatible_id_column =
-    ///     compatible_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let serial_id_column_two = serial_table_two
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist");
+    /// let compatible_id_column = compatible_table
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist");
     /// let incompatible_table = db
     ///     .table_by_target(TargetName::new("incompatible_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let incompatible_id_column =
-    ///     incompatible_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let incompatible_id_column = incompatible_table
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist");
     /// let another_host_table = db
     ///     .table_by_target(TargetName::new("another_host_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let another_id_column =
-    ///     another_host_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let another_id_column = another_host_table
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist");
     /// let non_fk_table = db
     ///     .table_by_target(TargetName::new("non_fk_table", false), IdentifierCase::AsWritten)?
     ///     .unwrap();
-    /// let non_fk_id_column = non_fk_table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let non_fk_id_column = non_fk_table
+    ///     .column("id", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'id' should exist");
     /// assert!(
     ///     id_column.is_compatible_with(&db, compatible_id_column)?,
     ///     "Columns should be compatible as they reference the same table"
@@ -1202,8 +1257,8 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));")?;
     ///
     /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// let age_column = table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db, IdentifierCase::AsWritten)?.expect("Column 'score' should exist");
     ///
     /// let age_checks = age_column.check_constraints(&db)?.collect::<Vec<_>>();
     /// let score_checks = score_column.check_constraints(&db)?.collect::<Vec<_>>();
@@ -1254,8 +1309,10 @@ pub trait ColumnLike:
     ///
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let name_column = table.column("name", &db)?.expect("Column 'name' should exist");
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
+    /// let name_column =
+    ///     table.column("name", &db, IdentifierCase::AsWritten)?.expect("Column 'name' should exist");
+    /// let id_column =
+    ///     table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
     ///
     /// let name_indices: Vec<_> = name_column.indices(&db)?.collect();
     /// let id_indices: Vec<_> = id_column.indices(&db)?.collect();
@@ -1305,8 +1362,11 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// let age_column =
+    ///     table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
+    /// let score_column = table
+    ///     .column("score", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'score' should exist");
     /// assert!(age_column.has_check_constraints(&db)?, "age column should have check constraints");
     /// assert!(
     ///     !score_column.has_check_constraints(&db)?,
@@ -1343,8 +1403,8 @@ pub trait ColumnLike:
     ///
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT, age INT CHECK (age >= 0), score INT CHECK (score BETWEEN 0 AND 100));")?;
     /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// let age_column = table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db, IdentifierCase::AsWritten)?.expect("Column 'score' should exist");
     /// let age_non_tauto = age_column.non_tautological_check_constraints(&db)?.collect::<Vec<_>>();
     /// let score_non_tauto = score_column.non_tautological_check_constraints(&db)?.collect::<Vec<_>>();
     /// assert_eq!(age_non_tauto.len(), 1, "age column should have one non-tautological check constraint");
@@ -1393,8 +1453,11 @@ pub trait ColumnLike:
     /// )?;
     /// let table =
     ///     db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
+    /// let age_column =
+    ///     table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
+    /// let score_column = table
+    ///     .column("score", &db, IdentifierCase::AsWritten)?
+    ///     .expect("Column 'score' should exist");
     /// assert!(
     ///     age_column.has_non_tautological_check_constraints(&db)?,
     ///     "age column should have non-tautological check constraints"
@@ -1436,10 +1499,10 @@ pub trait ColumnLike:
     /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE my_table (id INT PRIMARY KEY, other TEXT, age INT, score INT, UNIQUE (age, score));")?;
     ///
     /// let table = db.table_by_target(TargetName::new("my_table", false), IdentifierCase::AsWritten)?.unwrap();
-    /// let id_column = table.column("id", &db)?.expect("Column 'id' should exist");
-    /// let age_column = table.column("age", &db)?.expect("Column 'age' should exist");
-    /// let score_column = table.column("score", &db)?.expect("Column 'score' should exist");
-    /// let other_column = table.column("other", &db)?.expect("Column 'other' should exist");
+    /// let id_column = table.column("id", &db, IdentifierCase::AsWritten)?.expect("Column 'id' should exist");
+    /// let age_column = table.column("age", &db, IdentifierCase::AsWritten)?.expect("Column 'age' should exist");
+    /// let score_column = table.column("score", &db, IdentifierCase::AsWritten)?.expect("Column 'score' should exist");
+    /// let other_column = table.column("other", &db, IdentifierCase::AsWritten)?.expect("Column 'other' should exist");
     ///
     /// let id_unique = id_column.unique_indices(&db)?.collect::<Vec<_>>();
     /// let age_unique = age_column.unique_indices(&db)?.collect::<Vec<_>>();
@@ -1616,8 +1679,10 @@ mod tests {
                 .table_by_target(TargetName::new("users", false), IdentifierCase::AsWritten)
                 .expect("unambiguous lookup")
                 .expect("Table not found");
-            let column =
-                table.column("name", &db).expect("table lookup").expect("Column not found");
+            let column = table
+                .column("name", &db, IdentifierCase::AsWritten)
+                .expect("table lookup")
+                .expect("Column not found");
 
             let col_ref = column;
 
@@ -1649,8 +1714,10 @@ mod tests {
                 .table_by_target(TargetName::new("products", false), IdentifierCase::AsWritten)
                 .expect("unambiguous lookup")
                 .expect("Table not found");
-            let column =
-                table.column("price", &db).expect("table lookup").expect("Column not found");
+            let column = table
+                .column("price", &db, IdentifierCase::AsWritten)
+                .expect("table lookup")
+                .expect("Column not found");
 
             let col_arc = Arc::new(column.clone());
 
@@ -1688,7 +1755,7 @@ mod tests {
                 .expect("unambiguous lookup")
                 .unwrap();
             for col_name in &["a", "b", "c"] {
-                let col = t.column(col_name, &db).unwrap().unwrap();
+                let col = t.column(col_name, &db, IdentifierCase::AsWritten).unwrap().unwrap();
                 assert!(col.is_textual(&db), "{col_name} should be textual");
             }
         }
@@ -1702,7 +1769,7 @@ mod tests {
                 .expect("unambiguous lookup")
                 .unwrap();
             for col_name in &["a", "b", "c", "d", "e"] {
-                let col = t.column(col_name, &db).unwrap().unwrap();
+                let col = t.column(col_name, &db, IdentifierCase::AsWritten).unwrap().unwrap();
                 assert!(col.is_textual(&db), "{col_name} should be textual");
             }
         }
@@ -1715,7 +1782,7 @@ mod tests {
                 .expect("unambiguous lookup")
                 .unwrap();
             for col_name in &["a", "b", "c"] {
-                let col = t.column(col_name, &db).unwrap().unwrap();
+                let col = t.column(col_name, &db, IdentifierCase::AsWritten).unwrap().unwrap();
                 assert!(!col.is_textual(&db), "{col_name} should not be textual");
             }
         }
