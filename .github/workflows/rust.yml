@@ -128,7 +128,7 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
     - name: Check for duplicated doctests
-      uses: LucaCappelletti94/cargo-dejadoc@a60fa7acd31a77fc362c63ad70168694b511c80a # v1
+      uses: LucaCappelletti94/cargo-dejadoc@e1e2d7afecc32bfca6e7e0decf37bd6189c863df # v1
 
   coverage:
     name: Code Coverage
@@ -147,7 +147,7 @@ jobs:
     - name: Generate coverage
       run: cargo tarpaulin --engine=llvm --out xml --workspace --run-types AllTargets --run-types Doctests --features git,serde
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         fail_ci_if_error: false
