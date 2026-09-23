@@ -1,7 +1,7 @@
 //! Implementations for [`ParserDB`] - a database schema parsed from SQL text.
 
 use alloc::{
-    borrow::{Cow, ToOwned},
+    borrow::Cow,
     boxed::Box,
     collections::BTreeSet,
     string::{String, ToString},
@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 
 #[cfg(feature = "git")]
 use git2::Repository;
-use sql_docs::SqlDoc;
 #[cfg(feature = "std")]
 use sqlparser::parser::ParserError;
 use sqlparser::{
@@ -67,12 +66,14 @@ use crate::{
 mod column_copy;
 mod functions_in_expression;
 mod inheritance;
+mod leading_comments;
 mod like;
 mod parse_options;
 mod postgres_catalog;
 mod postgres_icu_collations;
 mod views;
 
+use leading_comments::{CommentedSource, TableDocumentation};
 pub use parse_options::{AccessResolution, ParseOptions};
 pub use postgres_catalog::{PostgresCatalog, PostgresCatalogCollation, PostgresCatalogType};
 
@@ -3616,6 +3617,7 @@ impl ParserDBIngestor {
     fn apply_statements(
         self,
         statements: impl IntoIterator<Item = Statement>,
+        source: Option<&CommentedSource<'_>>,
     ) -> Result<Self, crate::errors::Error> {
         let Self { builder, ingestion } = self;
         let ParserIngestion { access_resolution, active_postgres_catalog, collation_metadata } =
@@ -3627,6 +3629,7 @@ impl ParserDBIngestor {
             collation_metadata,
             access_resolution,
             &mut statements,
+            source,
         )?;
         let ingestion = Arc::new(ParserIngestion {
             access_resolution,
@@ -3642,7 +3645,7 @@ impl ParserDBIngestor {
     ///
     /// Returns an error when the statement is invalid for the current schema.
     pub fn apply_statement(self, statement: Statement) -> Result<Self, crate::errors::Error> {
-        self.apply_statements(core::iter::once(statement))
+        self.apply_statements(core::iter::once(statement), None)
     }
 
     /// Returns a queryable snapshot without consuming the builder.
@@ -4117,7 +4120,7 @@ impl ParserDB {
         let empty_catalog = PostgresCatalog::empty();
         let catalog = catalog.unwrap_or(&empty_catalog);
 
-        let (previous_node, previous_metadata) = builder.tables_mut().remove(position);
+        let (previous_node, mut previous_metadata) = builder.tables_mut().remove(position);
         let mut replacement = (*previous_node).clone();
         edit(&previous_node, &mut replacement)?;
         record_implied_not_null(&mut replacement);
@@ -4126,6 +4129,7 @@ impl ParserDB {
         metadata.set_rls_enabled(previous_metadata.rls_enabled());
         metadata.set_rls_forced(previous_metadata.rls_forced());
         metadata.set_owner(previous_metadata.owner().map(str::to_string));
+        metadata.set_documentation(previous_metadata.take_documentation());
         // Which columns came from a parent is not spelled by the node, so it
         // has to survive the rebuild the way the other unspelled settings do.
         metadata.set_inherited_column_names(previous_metadata.inherited_column_names().to_vec());
@@ -4168,6 +4172,7 @@ impl ParserDB {
             collations,
             catalog,
             &preserved_collations,
+            None,
         )?;
         builder.tables_mut().sort_by(|(a, _), (b, _)| {
             (a.table_schema(), a.table_name()).cmp(&(b.table_schema(), b.table_name()))
@@ -4529,7 +4534,9 @@ impl ParserDB {
     /// options and table constraints imply.
     ///
     /// `table_metadata` carries the state the node does not express: row level
-    /// security flags and `CREATE INDEX` indexes.
+    /// security flags and `CREATE INDEX` indexes. A statement creating the
+    /// table passes its `documentation`, which replaces any documentation a
+    /// column carried over.
     fn ingest_table_node_with_collations(
         mut builder: ParserDBBuilder,
         create_table: Arc<CreateTable>,
@@ -4537,6 +4544,7 @@ impl ParserDB {
         collations: &[CreatedCollationMetadata],
         catalog: &PostgresCatalog,
         preserved: &[PreservedColumnMetadata],
+        mut documentation: Option<&mut TableDocumentation>,
     ) -> Result<ParserDBBuilder, crate::errors::Error> {
         validate_table_schema(&builder, &create_table)?;
         validate_distinct_columns(&create_table, builder.identifier_case())?;
@@ -4561,6 +4569,12 @@ impl ParserDB {
                 preserved,
                 validate_missing,
             )?;
+            let metadata = match documentation.as_deref_mut() {
+                Some(documentation) => {
+                    metadata.with_documentation(documentation.take_column(&column.attribute().name))
+                }
+                None => metadata,
+            };
             builder = builder.add_column(column.clone(), metadata);
         }
 
@@ -5749,6 +5763,7 @@ impl ParserDB {
         mut collation_metadata: Vec<CreatedCollationMetadata>,
         access_resolution: AccessResolution,
         statements: &mut dyn Iterator<Item = Statement>,
+        source: Option<&CommentedSource<'_>>,
     ) -> Result<
         (ParserDBBuilder, Arc<PostgresCatalog>, Vec<CreatedCollationMetadata>),
         crate::errors::Error,
@@ -6742,6 +6757,8 @@ impl ParserDB {
                     }
                 }
                 Statement::CreateTable(mut create_table) => {
+                    let mut documentation =
+                        source.map_or_default(|source| source.table_documentation(&create_table));
                     require_named_in_catalog(
                         &mut create_table.name,
                         crate::errors::ObjectKind::Table,
@@ -6787,6 +6804,7 @@ impl ParserDB {
                     refuse_no_inherit_check_on_partitioned(&create_table)?;
                     record_implied_not_null(&mut create_table);
                     let mut metadata = TableMetadata::default();
+                    metadata.set_documentation(documentation.table.take());
                     metadata.set_inherited_column_names(inherited.columns);
                     metadata.set_inherited_constraints(inherited.constraints);
                     builder = Self::ingest_table_node_with_collations(
@@ -6796,6 +6814,7 @@ impl ParserDB {
                         &collation_metadata,
                         &active_postgres_catalog,
                         &inherited.column_metadata,
+                        Some(&mut documentation),
                     )?;
                 }
                 Statement::CreateView(create_view) => {
@@ -7408,7 +7427,7 @@ impl ParserDB {
         options: ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
         let ingestor = ParserDBIngestor::with_dialect(catalog_name, dialect, options);
-        Ok(ingestor.apply_statements(statements)?.finish())
+        Ok(ingestor.apply_statements(statements, None)?.finish())
     }
 
     /// Parses SQL using the specified dialect.
@@ -7460,22 +7479,13 @@ impl ParserDB {
         let dialect = D::default();
         let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
         let statements = parser.parse_statements()?;
-        let mut db = Self::from_statements_with_options(
-            statements,
+        let source = CommentedSource::new(sql, parser.into_comments());
+        let ingestor = ParserDBIngestor::with_dialect(
             "unknown_catalog".to_string(),
             SqlparserDialect::of::<D>(),
             options,
-        )?;
-
-        if let Ok(documentation) = SqlDoc::builder_from_str(sql).build::<D>() {
-            for (table, metadata) in db.tables_metadata_mut() {
-                if let Ok(table_doc) = documentation.table(table.table_name(), table.table_schema())
-                {
-                    metadata.set_doc(table_doc.to_owned());
-                }
-            }
-        }
-        Ok(db)
+        );
+        Ok(ingestor.apply_statements(statements, Some(&source))?.finish())
     }
 
     /// Constructs a `ParserDB` from a git URL.
@@ -7568,8 +7578,7 @@ impl ParserDB {
         paths: &[&Path],
         options: ParseOptions,
     ) -> Result<Self, crate::errors::Error> {
-        let mut statements = Vec::new();
-        let mut sql_str: Vec<(String, PathBuf)> = Vec::new();
+        let mut files = Vec::new();
 
         for path in paths {
             if !path.exists() {
@@ -7597,29 +7606,23 @@ impl ParserDB {
                 let mut parser = Parser::new(&dialect).try_with_sql(&sql_content).map_err(|e| {
                     crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
                 })?;
-                statements.extend(parser.parse_statements().map_err(|e| {
+                let statements = parser.parse_statements().map_err(|e| {
                     crate::errors::Error::SqlParserError { error: e, file: Some(sql_path.clone()) }
-                })?);
-                sql_str.push((sql_content, sql_path));
+                })?;
+                files.push((sql_content, statements, parser.into_comments()));
             }
         }
 
-        let mut db = Self::from_statements_with_options(
-            statements,
+        let mut ingestor = ParserDBIngestor::with_dialect(
             "unknown_catalog".to_string(),
             SqlparserDialect::of::<D>(),
             options,
-        )?;
-
-        if let Ok(documentation) = SqlDoc::builder_from_strs_with_paths(&sql_str).build::<D>() {
-            for (table, metadata) in db.tables_metadata_mut() {
-                if let Ok(table_doc) = documentation.table(table.table_name(), table.table_schema())
-                {
-                    metadata.set_doc(table_doc.to_owned());
-                }
-            }
+        );
+        for (sql_content, statements, comments) in files {
+            let source = CommentedSource::new(&sql_content, comments);
+            ingestor = ingestor.apply_statements(statements, Some(&source))?;
         }
-        Ok(db)
+        Ok(ingestor.finish())
     }
 }
 

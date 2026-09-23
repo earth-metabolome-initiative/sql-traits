@@ -24,7 +24,6 @@ std = [
     "sqlparser/recursive-protection",
     "geometric-traits/std",
     "thiserror/std",
-    "sql_docs/std",
 ]
 # Adds git-backed construction: `ParserDB::from_git_url*` clones a remote
 # repository into a temporary directory and parses the SQL it contains.
@@ -46,7 +45,6 @@ geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geome
 thiserror = { version = "2.0", default-features = false }
 git2 = { version = "0.20.3", optional = true }
 tempfile = { version = "3.25", optional = true }
-sql_docs = { version = "1.0.11", git = "https://github.com/LucaCappelletti94/sql-docs", branch = "main", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 unicode-normalization = { version = "0.1", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive"], optional = true }
