@@ -4128,7 +4128,7 @@ mod tests {
 
         let mut table_query = query_of("SELECT id FROM users");
         *table_query.body = SetExpr::Table(Box::new(Table {
-            table_name: Some(Ident::new("users")),
+            table_name: Some("users".to_string()),
             schema_name: None,
         }));
         assert!(matches!(
