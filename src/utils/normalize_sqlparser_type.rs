@@ -262,11 +262,13 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> Cow<'_, str> {
             normalize_sqlparser_type(inner)
         }
         // An array's token is assembled from its element's, so unlike every
-        // other token it cannot be a borrow into the input.
+        // other token it cannot be a borrow into the input. A `NOT NULL`
+        // element constraint decorates the element as `Nullable` does a column.
         DataType::Array(ArrayElemTypeDef::None) => "ARRAY".into(),
         DataType::Array(
             ArrayElemTypeDef::AngleBracket(element)
             | ArrayElemTypeDef::Parenthesis(element)
+            | ArrayElemTypeDef::ParenthesisNotNull(element)
             | ArrayElemTypeDef::SquareBracket(element, _)
             | ArrayElemTypeDef::Qualified(element, _),
         ) => format!("{}[]", normalize_sqlparser_type(element)).into(),
@@ -897,6 +899,12 @@ mod tests {
         );
         assert_eq!(
             normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::Parenthesis(element()))),
+            "INT[]"
+        );
+        assert_eq!(
+            normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::ParenthesisNotNull(
+                element()
+            ))),
             "INT[]"
         );
         assert_eq!(normalize_sqlparser_type(&DataType::Array(ArrayElemTypeDef::None)), "ARRAY");
