@@ -108,6 +108,13 @@ use crate::utils::object_name::object_name_part_value;
 /// // so they report the type they wrap.
 /// let low_cardinality = DataType::LowCardinality(Box::new(DataType::Text));
 /// assert_eq!(normalize_sqlparser_type(&low_cardinality), "TEXT");
+///
+/// // A collation decides how values compare, so it reports the type it wraps.
+/// let collated = DataType::Collate(
+///     Box::new(DataType::String(None)),
+///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("UTF8_LCASE"))]),
+/// );
+/// assert_eq!(normalize_sqlparser_type(&collated), "STRING");
 /// ```
 #[must_use]
 #[allow(
