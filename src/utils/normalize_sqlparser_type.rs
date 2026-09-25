@@ -108,6 +108,13 @@ use crate::utils::object_name::object_name_part_value;
 /// // so they report the type they wrap.
 /// let low_cardinality = DataType::LowCardinality(Box::new(DataType::Text));
 /// assert_eq!(normalize_sqlparser_type(&low_cardinality), "TEXT");
+///
+/// // A collation decides how values compare, so it reports the type it wraps.
+/// let collated = DataType::Collate(
+///     Box::new(DataType::String(None)),
+///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("UTF8_LCASE"))]),
+/// );
+/// assert_eq!(normalize_sqlparser_type(&collated), "STRING");
 /// ```
 #[must_use]
 #[allow(
@@ -261,6 +268,8 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> Cow<'_, str> {
         DataType::Nullable(inner) | DataType::LowCardinality(inner) => {
             normalize_sqlparser_type(inner)
         }
+        // Collation decides how values compare, not what type they are.
+        DataType::Collate(inner, _) => normalize_sqlparser_type(inner),
         // An array's token is assembled from its element's, so unlike every
         // other token it cannot be a borrow into the input. A `NOT NULL`
         // element constraint decorates the element as `Nullable` does a column.
