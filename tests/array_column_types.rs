@@ -3,7 +3,10 @@
 #![allow(clippy::expect_used)]
 
 use sql_traits::prelude::*;
-use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
+use sqlparser::{
+    dialect::{DatabricksDialect, PostgreSqlDialect},
+    parser::Parser,
+};
 
 /// Builds a one-table database from `ddl` and returns the declared type of
 /// every one of its columns, in declaration order.
@@ -64,6 +67,36 @@ fn test_array_column_normalized_data_type() {
 
     assert_eq!(column.normalized_data_type(&database), "TEXT[]");
     assert!(!column.is_textual(&database));
+}
+
+/// A Databricks element collation stays with the element, never the column.
+#[test]
+fn test_array_column_collated_element() {
+    let database = ParserDB::parse::<DatabricksDialect>(
+        "CREATE TABLE t (tags ARRAY<STRING COLLATE UTF8_LCASE>, name STRING COLLATE UTF8_LCASE);",
+    )
+    .expect("schema builds");
+    let table = database.tables().next().expect("input declares a table");
+    let column = |name| {
+        table
+            .column(name, &database, IdentifierCase::AsWritten)
+            .expect("lookup runs")
+            .expect("column exists")
+    };
+
+    let tags = column("tags");
+    assert_eq!(tags.data_type(&database), "STRING[]");
+    assert_eq!(
+        tags.collation(&database).expect("collation resolves"),
+        ColumnCollation::DatabaseDefault
+    );
+
+    let name = column("name");
+    assert_eq!(name.data_type(&database), "STRING");
+    assert!(matches!(
+        name.collation(&database).expect("collation resolves"),
+        ColumnCollation::Named(collation) if collation.name().name() == "UTF8_LCASE"
+    ));
 }
 
 /// An array column takes part in a schema fingerprint like any other column,

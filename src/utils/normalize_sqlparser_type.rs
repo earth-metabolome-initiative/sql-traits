@@ -261,6 +261,8 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> Cow<'_, str> {
         DataType::Nullable(inner) | DataType::LowCardinality(inner) => {
             normalize_sqlparser_type(inner)
         }
+        // Collation decides how values compare, not what type they are.
+        DataType::Collate(inner, _) => normalize_sqlparser_type(inner),
         // An array's token is assembled from its element's, so unlike every
         // other token it cannot be a borrow into the input. A `NOT NULL`
         // element constraint decorates the element as `Nullable` does a column.
