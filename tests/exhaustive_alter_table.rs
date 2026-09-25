@@ -14,12 +14,28 @@
 #![allow(clippy::expect_used)]
 
 use sql_traits::{errors::Error, prelude::*};
-use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect};
+use sqlparser::dialect::{ClickHouseDialect, GenericDialect, MySqlDialect, PostgreSqlDialect};
 
 const TABLE: &str = "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT);";
 
 fn parse(tail: &str) -> Result<ParserDB, Error> {
     ParserDB::parse::<PostgreSqlDialect>(&format!("{TABLE} {tail};"))
+}
+
+/// What an ignored operation must leave exactly as the bare table left it.
+fn shape(database: &ParserDB) -> (usize, usize, usize, usize, usize, bool) {
+    let table = database
+        .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
+        .expect("unambiguous lookup")
+        .expect("t survives");
+    (
+        database.tables().count(),
+        table.columns(database).expect("t is in this database").count(),
+        table.unique_indices(database).expect("t is in this database").count(),
+        table.check_constraints(database).expect("t is in this database").count(),
+        database.indexes().count(),
+        table.has_row_level_security(database).expect("t is in this database"),
+    )
 }
 
 /// Each of these changes part of the schema the model represents, so silently
@@ -115,20 +131,6 @@ fn a_dump_naming_an_owner_it_never_creates_needs_the_permissive_setting() {
 #[test]
 fn operations_over_things_the_model_does_not_describe_change_nothing() {
     let bare = ParserDB::parse::<PostgreSqlDialect>(TABLE).expect("the table alone parses");
-    let shape = |database: &ParserDB| {
-        let table = database
-            .table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)
-            .expect("unambiguous lookup")
-            .expect("t survives");
-        (
-            database.tables().count(),
-            table.columns(database).expect("t is in this database").count(),
-            table.unique_indices(database).expect("t is in this database").count(),
-            table.check_constraints(database).expect("t is in this database").count(),
-            database.indexes().count(),
-            table.has_row_level_security(database).expect("t is in this database"),
-        )
-    };
 
     let ignored = [
         // Physical layout and durability.
@@ -172,6 +174,17 @@ fn vendor_operations_parse_under_their_dialects() {
     for tail in generic {
         let parsed = ParserDB::parse::<GenericDialect>(&format!("{TABLE} {tail};"));
         assert!(parsed.is_ok(), "{tail} reported {:?}", parsed.err());
+    }
+
+    // ClickHouse's sorting key orders stored rows and leaves the primary key
+    // alone, so replacing it changes nothing the model describes.
+    let bare = ParserDB::parse::<ClickHouseDialect>(TABLE).expect("the table alone parses");
+    let clickhouse = ["ALTER TABLE t MODIFY ORDER BY (a, b)", "ALTER TABLE t MODIFY ORDER BY a"];
+    for tail in clickhouse {
+        let parsed = ParserDB::parse::<ClickHouseDialect>(&format!("{TABLE} {tail};"));
+        assert!(parsed.is_ok(), "{tail} reported {:?}", parsed.as_ref().err());
+        let database = parsed.expect("the parse succeeded just above");
+        assert_eq!(shape(&database), shape(&bare), "{tail} changed the model");
     }
 }
 

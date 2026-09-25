@@ -6668,6 +6668,7 @@ impl ParserDB {
                             | AlterTableOperation::ClusterBy { .. }
                             | AlterTableOperation::DropClusteringKey
                             | AlterTableOperation::AlterSortKey { .. }
+                            | AlterTableOperation::ModifyOrderBy { .. }
                             | AlterTableOperation::SuspendRecluster
                             | AlterTableOperation::ResumeRecluster
                             // Partitions: the model describes a table, never the
