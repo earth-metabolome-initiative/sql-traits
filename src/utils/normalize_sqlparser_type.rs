@@ -254,6 +254,9 @@ pub fn normalize_sqlparser_type(sqlparser_type: &DataType) -> Cow<'_, str> {
         DataType::Union(_) => "UNION".into(),
         DataType::Tuple(_) => "TUPLE".into(),
         DataType::Nested(_) => "NESTED".into(),
+        // Snowflake's structured object. A bare `OBJECT` parses as a custom
+        // type of that name, so both spellings answer the same token.
+        DataType::Object(_) => "OBJECT".into(),
         DataType::Map(..) => "MAP".into(),
         // A set-returning function declares a row shape rather than a value.
         DataType::Table(_) | DataType::NamedTable { .. } => "TABLE".into(),
@@ -690,6 +693,7 @@ mod tests {
         );
         assert_eq!(normalize_sqlparser_type(&DataType::Tuple(vec![field()])), "TUPLE");
         assert_eq!(normalize_sqlparser_type(&DataType::Nested(vec![])), "NESTED");
+        assert_eq!(normalize_sqlparser_type(&DataType::Object(vec![])), "OBJECT");
         assert_eq!(
             normalize_sqlparser_type(&DataType::Map(
                 Box::new(DataType::Text),

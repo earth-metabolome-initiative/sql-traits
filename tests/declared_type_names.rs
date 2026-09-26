@@ -7,7 +7,7 @@
 
 use sql_traits::{errors::Error, prelude::*};
 use sqlparser::{
-    dialect::{GenericDialect, PostgreSqlDialect, SQLiteDialect},
+    dialect::{GenericDialect, PostgreSqlDialect, SQLiteDialect, SnowflakeDialect},
     parser::Parser,
 };
 
@@ -104,6 +104,24 @@ fn test_sqlite_typeless_column_is_answered() {
         .collect();
 
     assert_eq!(types, vec!["UNSPECIFIED"]);
+}
+
+/// Snowflake's structured `OBJECT(...)` and its semi-structured `OBJECT` are
+/// one type family, the field list dropped as a declared length is.
+#[test]
+fn test_snowflake_object_columns_are_one_family() {
+    let database = ParserDB::parse::<SnowflakeDialect>(
+        "CREATE TABLE t (address OBJECT(city VARCHAR, zip INT), payload OBJECT);",
+    )
+    .expect("schema builds");
+    let table = database.tables().next().expect("input declares a table");
+    let types: Vec<_> = table
+        .columns(&database)
+        .expect("table belongs to the database")
+        .map(|column| column.data_type(&database).into_owned())
+        .collect();
+
+    assert_eq!(types, vec!["OBJECT", "OBJECT"]);
 }
 
 /// A column type that used to abort takes part in a schema fingerprint like
