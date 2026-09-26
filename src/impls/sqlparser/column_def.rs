@@ -52,6 +52,11 @@ impl ColumnLike for TableAttribute<CreateTable, ColumnDef> {
     }
 
     #[inline]
+    fn fixed_binary_length(&self, database: &Self::DB) -> Option<u64> {
+        super::dialect::fixed_binary_length(*database.dialect(), &self.attribute().data_type)
+    }
+
+    #[inline]
     fn collation<'db>(
         &'db self,
         database: &'db Self::DB,
@@ -127,7 +132,8 @@ mod tests {
     use alloc::{string::String, sync::Arc};
 
     use sqlparser::dialect::{
-        GenericDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect,
+        AnsiDialect, DatabricksDialect, DuckDbDialect, GenericDialect, HiveDialect, MsSqlDialect,
+        MySqlDialect, PostgreSqlDialect, SQLiteDialect, SnowflakeDialect, SparkSqlDialect,
     };
 
     use crate::{
@@ -291,6 +297,45 @@ mod tests {
     fn is_uuid_sqlite_integer_is_no() {
         let db = parse_with::<SQLiteDialect>("CREATE TABLE t (id INTEGER);");
         assert_eq!(uuid_of(&db, "id"), TypeMatch::No);
+    }
+
+    // ---------------- fixed_binary_length ----------------
+
+    fn fixed_binary_lengths<D: sqlparser::dialect::Dialect + Default + 'static>() -> [Option<u64>; 5]
+    {
+        let db = parse_with::<D>(
+            "CREATE TABLE t (fixed BINARY(4), bare BINARY, varying VARBINARY(8), blob BLOB, num INT);",
+        );
+        ["fixed", "bare", "varying", "blob", "num"]
+            .map(|name| column_named(&db, name).fixed_binary_length(&db))
+    }
+
+    #[test]
+    fn fixed_binary_length_reads_declared_and_implicit_width() {
+        let widths = [Some(4), Some(1), None, None, None];
+        assert_eq!(fixed_binary_lengths::<MySqlDialect>(), widths);
+        assert_eq!(fixed_binary_lengths::<GenericDialect>(), widths);
+        assert_eq!(fixed_binary_lengths::<MsSqlDialect>(), widths);
+        assert_eq!(fixed_binary_lengths::<AnsiDialect>(), widths);
+    }
+
+    #[test]
+    fn fixed_binary_length_is_none_outside_fixed_width_dialects() {
+        assert_eq!(fixed_binary_lengths::<SnowflakeDialect>(), [None; 5]);
+        assert_eq!(fixed_binary_lengths::<SparkSqlDialect>(), [None; 5]);
+        assert_eq!(fixed_binary_lengths::<DatabricksDialect>(), [None; 5]);
+        assert_eq!(fixed_binary_lengths::<HiveDialect>(), [None; 5]);
+        assert_eq!(fixed_binary_lengths::<DuckDbDialect>(), [None; 5]);
+        assert_eq!(fixed_binary_lengths::<PostgreSqlDialect>(), [None; 5]);
+        assert_eq!(fixed_binary_lengths::<SQLiteDialect>(), [None; 5]);
+    }
+
+    #[test]
+    fn fixed_binary_length_forwards_through_reference_and_arc() {
+        let db = parse_with::<MySqlDialect>("CREATE TABLE t (token BINARY(16));");
+        let column = column_named(&db, "token");
+        assert_eq!(<&_ as ColumnLike>::fixed_binary_length(&column, &db), Some(16));
+        assert_eq!(Arc::new(column.clone()).fixed_binary_length(&db), Some(16));
     }
 
     fn column_named<'db>(db: &'db ParserDB, name: &str) -> &'db <ParserDB as DatabaseLike>::Column {

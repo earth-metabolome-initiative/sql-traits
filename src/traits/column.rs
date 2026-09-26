@@ -312,6 +312,42 @@ pub trait ColumnLike:
     /// ```
     fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str>;
 
+    /// Returns the width in bytes of a fixed-length binary column, or `None`
+    /// when the declared type is not a fixed-length binary type.
+    ///
+    /// MySQL, SQL Server and ANSI SQL pad every `BINARY(n)` value with zero
+    /// bytes to exactly `n` bytes, and read a bare `BINARY` as `BINARY(1)`. A
+    /// consumer receiving such a value without its trailing zero bytes, as the
+    /// MySQL binary log stores it, needs `n` to restore it. `VARBINARY(n)`
+    /// answers `None`, and so does `BINARY(n)` in a dialect where it bounds a
+    /// varying length.
+    ///
+    /// The default answers `None`, so an implementation over a backend with a
+    /// fixed-length binary type must override it.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() -> Result<(), sql_traits::errors::Error> {
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::dialect::MySqlDialect;
+    ///
+    /// let db = ParserDB::parse::<MySqlDialect>(
+    ///     "CREATE TABLE t (token BINARY(16), flag BINARY, payload VARBINARY(8));",
+    /// )?;
+    /// let table =
+    ///     db.table_by_target(TargetName::new("t", false), IdentifierCase::AsWritten)?.unwrap();
+    /// let widths: Vec<_> =
+    ///     table.columns(&db)?.map(|column| column.fixed_binary_length(&db)).collect();
+    /// assert_eq!(widths, [Some(16), Some(1), None]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    fn fixed_binary_length(&self, _database: &Self::DB) -> Option<u64> {
+        None
+    }
+
     /// Returns the builtin scalar family of the column's declared type.
     ///
     /// # Example
@@ -1570,6 +1606,11 @@ where
     }
 
     #[inline]
+    fn fixed_binary_length(&self, database: &Self::DB) -> Option<u64> {
+        (*self).fixed_binary_length(database)
+    }
+
+    #[inline]
     fn collation<'db>(
         &'db self,
         database: &'db Self::DB,
@@ -1629,6 +1670,11 @@ where
     #[inline]
     fn data_type<'db>(&'db self, database: &'db Self::DB) -> Cow<'db, str> {
         (**self).data_type(database)
+    }
+
+    #[inline]
+    fn fixed_binary_length(&self, database: &Self::DB) -> Option<u64> {
+        (**self).fixed_binary_length(database)
     }
 
     #[inline]
