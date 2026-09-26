@@ -243,6 +243,21 @@ fn classify_uuid(dialect: SqlparserDialect, ty: &DataType) -> TypeMatch {
     }
 }
 
+/// Width in bytes of a fixed-length binary type.
+///
+/// `BINARY(n)` holds exactly `n` zero-padded bytes in the MySQL family, SQL
+/// Server and ANSI SQL, where a bare `BINARY` is one byte. Snowflake reads `n`
+/// as a maximum length, and DuckDB, Hive, Spark and Databricks alias `BINARY`
+/// to a varying type.
+pub(super) fn fixed_binary_length(dialect: SqlparserDialect, ty: &DataType) -> Option<u64> {
+    let DataType::Binary(length) = ty else {
+        return None;
+    };
+    (dialect.is_mysql_family()
+        || matches!(dialect, SqlparserDialect::MsSql | SqlparserDialect::Ansi))
+    .then(|| length.unwrap_or(1))
+}
+
 impl DialectLike for SqlparserDialect {
     type DB = ParserDB;
     type Match = TypeMatch;
