@@ -56,6 +56,10 @@ use crate::utils::object_name::object_name_part_value;
 /// );
 /// assert_eq!(normalize_sqlparser_type(&DataType::Set(vec!["a".to_string()])), "SET");
 ///
+/// // A Snowflake structured object drops its fields, answering the same token
+/// // as a bare `OBJECT`, which parses as a custom type of that name.
+/// assert_eq!(normalize_sqlparser_type(&DataType::Object(vec![])), "OBJECT");
+///
 /// // Custom types
 /// let custom = DataType::Custom(
 ///     ObjectName(vec![ObjectNamePart::Identifier(sqlparser::ast::Ident::new("GEOGRAPHY"))]),
