@@ -11,8 +11,7 @@ if [[ -z "$targets" ]]; then
     exit 1
 fi
 
-# the fuzz crate is a workspace member, so it builds into the workspace target dir
-target_dir=target/x86_64-unknown-linux-gnu/release
+target_dir=fuzz/target/x86_64-unknown-linux-gnu/release
 for name in $targets; do
     cp "$target_dir/$name" "$OUT/"
     # the harness skips inputs past 1000 bytes
