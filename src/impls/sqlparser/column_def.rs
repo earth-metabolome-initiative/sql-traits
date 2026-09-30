@@ -505,6 +505,63 @@ mod tests {
     }
 
     #[test]
+    fn collation_supplied_fact_replaces_built_in_of_same_identity() {
+        let catalog = PostgresCatalog::postgres_18()
+            .with_collation(PostgresCatalogCollation::new("C", true).with_deterministic(false));
+        let built_ins = PostgresCatalog::postgres_18().collations().count();
+        assert_eq!(catalog.collations().count(), built_ins);
+        let is_c = |collation: &&PostgresCatalogCollation| {
+            collation.schema() == Some("pg_catalog") && collation.name() == "C"
+        };
+        assert_eq!(catalog.collations().filter(is_c).count(), 1);
+        let newest = catalog.collations().next_back().expect("the catalog holds collations");
+        assert!(is_c(&newest) && !newest.deterministic(), "the replacement is the newest fact");
+
+        let db = ParseOptions::default()
+            .with_postgres_catalog(catalog)
+            .parse::<PostgreSqlDialect>("CREATE TABLE t (name TEXT COLLATE \"C\");")
+            .expect("parse");
+        let column = column_named(&db, "name");
+        let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
+        else {
+            panic!("expected a named collation");
+        };
+        assert_eq!(collation.postgres_deterministic(), Some(false));
+    }
+
+    #[test]
+    fn collation_supplied_type_replaces_built_in_of_same_identity() {
+        let catalog = PostgresCatalog::postgres_18()
+            .with_collatable_type(PostgresCatalogType::new("text", false));
+        let built_ins = PostgresCatalog::postgres_18().collatable_types().count();
+        assert_eq!(catalog.collatable_types().count(), built_ins);
+        let newest = catalog.collatable_types().last().expect("the catalog holds types");
+        assert_eq!((newest.schema(), newest.name()), (Some("pg_catalog"), "text"));
+    }
+
+    #[test]
+    fn collation_catalog_extends_built_ins_with_schema_qualified_type() {
+        let catalog = PostgresCatalog::postgres_18().with_collatable_type(
+            PostgresCatalogType::new("citext", false).with_schema("app", false),
+        );
+        let sql = "CREATE SCHEMA app; CREATE TABLE t (name app.citext COLLATE \"C\");";
+        let db = ParseOptions::default()
+            .with_postgres_catalog(catalog)
+            .parse::<PostgreSqlDialect>(sql)
+            .expect("parse");
+        let column = column_named(&db, "name");
+        let ColumnCollation::Named(collation) = column.collation(&db).expect("collation metadata")
+        else {
+            panic!("expected a named collation");
+        };
+        assert_eq!(collation.postgres_deterministic(), Some(true));
+        assert!(matches!(
+            ParserDB::parse::<PostgreSqlDialect>(sql),
+            Err(Error::ColumnTypeCollatabilityNotInCatalog { .. })
+        ));
+    }
+
+    #[test]
     fn collation_catalog_reaches_parsed_statement_constructors() {
         let catalog = PostgresCatalog::empty()
             .with_collation(

@@ -69,8 +69,8 @@ mod functions_in_expression;
 mod inheritance;
 mod like;
 mod parse_options;
+mod postgres_18_collations;
 mod postgres_catalog;
-mod postgres_icu_collations;
 mod views;
 
 pub use parse_options::{AccessResolution, ParseOptions};
