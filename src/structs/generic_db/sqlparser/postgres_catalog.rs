@@ -270,7 +270,18 @@ impl PostgresCatalogType {
 mod tests {
     use alloc::vec::Vec;
 
-    use super::PostgresCatalog;
+    use super::{PostgresCatalog, PostgresCatalogCollation, PostgresCatalogType};
+
+    /// A borrowed built-in fact and the same fact built from owned text are one
+    /// value, which is what lets a supplied fact replace a built-in.
+    #[test]
+    fn built_in_facts_equal_their_owned_spelling() {
+        assert_eq!(
+            PostgresCatalogCollation::built_in("C", true),
+            PostgresCatalogCollation::new("C", true)
+        );
+        assert_eq!(PostgresCatalogType::built_in("text"), PostgresCatalogType::new("text", false));
+    }
 
     /// `with_collation` replaces by identity, so the built-in table it starts
     /// from must already hold each identity once.

@@ -889,3 +889,13 @@ pub(super) static POSTGRES_18_COLLATIONS: &[PostgresCatalogCollation] = &[
 const fn icu(name: &'static str) -> PostgresCatalogCollation {
     PostgresCatalogCollation::built_in(name, true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PostgresCatalogCollation, icu};
+
+    #[test]
+    fn icu_collations_are_quoted_pg_catalog_facts() {
+        assert_eq!(icu("und-x-icu"), PostgresCatalogCollation::new("und-x-icu", true));
+    }
+}
