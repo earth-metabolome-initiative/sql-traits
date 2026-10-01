@@ -24,7 +24,7 @@ cobertura.xml
 .vscode/*
 build_rs_cov.profraw
 
-# Honggfuzz artifacts
-hfuzz_workspace/
-hfuzz_target/
+# cargo-fuzz output, the committed seeds sit directly in fuzz/corpus
+fuzz/artifacts/
+fuzz/corpus/fuzz_dialect/
 tarpaulin-report.json

@@ -1,6 +1,6 @@
 //! Anti-regression tests for crashes discovered by fuzzing.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)]
-//! This test automatically discovers crash files from the honggfuzz workspace
+//! This test automatically discovers crash files from the cargo-fuzz artifacts
 //! and verifies that they no longer cause panics.
 
 use std::path::Path;
@@ -24,12 +24,12 @@ fn should_not_panic_with_context(sql: &str, crash_file: &Path) {
     }
 }
 
-/// Copies the 'SIGABRT' crash files from the honggfuzz workspace
+/// Copies the crash files from the cargo-fuzz artifacts
 /// to the 'tests/fuzz_dialect' directory for testing and collect
 /// a regression tests suite over time.
 fn copy_crash_files() {
     let toml_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let crash_dir = Path::new(&toml_dir).join("fuzz/hfuzz_workspace/fuzz_dialect");
+    let crash_dir = Path::new(&toml_dir).join("fuzz/artifacts/fuzz_dialect");
     let test_dir = Path::new(&toml_dir).join("tests/fuzz_dialect");
 
     if !test_dir.exists() {
@@ -46,20 +46,20 @@ fn copy_crash_files() {
             continue;
         };
 
-        if path.is_file() && file_name.starts_with("SIGABRT") {
+        if path.is_file() && file_name.starts_with("crash-") {
             let dest_path = test_dir.join(file_name);
             let _ = std::fs::copy(&path, &dest_path);
         }
     }
 }
 
-/// Discover and test all crash files from honggfuzz workspace.
+/// Discover and test all crash files from the cargo-fuzz artifacts.
 #[test]
 fn test_fuzz_crashes() {
     copy_crash_files();
 
     // We load the SQL statements from the 'tests/fuzz_dialect' directory, which
-    // should contain the crash files copied from the honggfuzz workspace.
+    // should contain the crash files copied from the cargo-fuzz artifacts.
     let toml_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let test_dir = Path::new(&toml_dir).join("tests/fuzz_dialect");
     let Ok(entries) = std::fs::read_dir(test_dir) else {
@@ -83,9 +83,8 @@ fn test_fuzz_crashes() {
     }
 
     for (path, bytes) in crash_files {
-        // Use arbitrary to extract the string exactly as honggfuzz does
-        let mut unstructured = Unstructured::new(&bytes);
-        let sql: &str = match <&str>::arbitrary(&mut unstructured) {
+        // Decode the string exactly as the libFuzzer target does
+        let sql: &str = match <&str>::arbitrary_take_rest(Unstructured::new(&bytes)) {
             Ok(s) => s,
             Err(_) => {
                 // If arbitrary can't extract a valid string, skip this file
