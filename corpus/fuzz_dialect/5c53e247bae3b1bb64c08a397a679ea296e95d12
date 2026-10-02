@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+    id UUID PRIMARY KEY DEFAULT _e_totcl#NNNNN(N@>>>C>);

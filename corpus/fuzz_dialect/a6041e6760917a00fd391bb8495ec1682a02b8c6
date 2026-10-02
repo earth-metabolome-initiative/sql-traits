@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+    locimesta99UID PRIMARY KEY DEFAULT gen_random_uuid(2,
+ [T] D'{}',
+;

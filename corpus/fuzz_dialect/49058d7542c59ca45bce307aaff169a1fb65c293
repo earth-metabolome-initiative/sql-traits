@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amDAMt EL(10  2) CHECK (amount > 0),
+ tatNOT NULL REFERENCES ssrue(i) ON DELETE CASCADE,
+    amount DEst
+);

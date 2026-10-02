@@ -1,0 +1,2 @@
+CREATE POLICY user_is ON users   FOR ALL
+    USING (K (<<us33[AL;

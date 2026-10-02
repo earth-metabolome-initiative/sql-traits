@@ -1,0 +1,4 @@
+CREATE INDEX ier_date ON orders(sess_id, DELETE CASC, st, stusBBBB,
+aCASC,ASC, stusBBBB,
+aCASC,xxxxxsBBBB,
+E CA S

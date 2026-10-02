@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SEIMESTAY KEY,
+    CHECK (]mount >[0),ECK (amount);

@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+     UIDdUi PRIMARY KEY DEFAULT _RE,
+    tsv TSVECTOR
+);ý

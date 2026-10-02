@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    auser_id ICADE,
+   URRENT_TI
+);

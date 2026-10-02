@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN pusers Aphone UNIQUE  CONSTRAINT uk_phone UNIQUE (`ROP CBR E

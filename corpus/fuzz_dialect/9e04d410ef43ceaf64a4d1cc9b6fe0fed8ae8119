@@ -1,0 +1,3 @@
+CREATE POLICY wser_is ON users
+   FOR ALL
+    USING (usellllCRJ::ll_user::_id(*)::: ;

@@ -1,0 +1,4 @@
+CREATE FUNCTION calcoulat#_.total(order_id INTEGER)
+RETURNS DECIMAL(10, 2)
+LANGUAGE SQL
+AS $$  TO $$;

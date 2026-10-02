@@ -1,0 +1,2 @@
+CREATE INDEX email ON users(d, created_a: DESC#);
+CREATND

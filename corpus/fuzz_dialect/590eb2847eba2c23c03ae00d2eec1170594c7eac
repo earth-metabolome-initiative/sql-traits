@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+ UUID PRIMARY DEFAULT gen_ra:domC   id ,(UID P

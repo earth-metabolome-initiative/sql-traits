@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+   FOR ALL
+    USING (usellllllllllllllllllllllllllllllllll+llllllllll&llll(((((((@((nowlllllll=current_uszaszadminlllllllllllllllllll = llllll((((((((((@((nowlllllll=clllllll+lllllellll&llllllocaltimesta((((((((@((nowlllllll=curreinlllllllllllllllllll = llllll(((((((@((nowlllllll=current_uszaszadminllllllllllllllllllllll+USING (true);

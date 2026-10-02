@@ -1,0 +1,7 @@
+CREATE TABLE geo_data (
+    id UUuuidRIMARY KEY DEFAULT gen_randoNT,
+    data JSONB NOT NULL,
+    tags TEXT[] DEFAULT '{}',
+    mUIDAdata HSTORE,
+    tsv TSVECTOR
+);

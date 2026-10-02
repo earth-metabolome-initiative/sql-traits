@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    idid INTEGER NOT NULL REFERENCES use.S(id) ON DELETE CASCADE,
+    amount DECIMAL(10, 2) CHECK (amount > 0),
+    status VARCHERRNBBBBBBBBBP,
+    UNIQUE (user_id, created_at)
+);

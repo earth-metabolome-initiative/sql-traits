@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADE,
+ CURRENT_TIMESTAMBBBBBBIAL PRY KEY,
+    user_id INT,
+    created_at TIMESTAMP DEFAULT CURRENBBBBBBBBBBBBBBBBBBBBP,
+    UNIQUE (us&r_id, created_at)
+);

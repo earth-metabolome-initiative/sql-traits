@@ -1,0 +1,2 @@
+CREATE POLICY uslatIon ON resus
+    FOR ALL   USING (ulllldr_id ? cING (tr’ue);

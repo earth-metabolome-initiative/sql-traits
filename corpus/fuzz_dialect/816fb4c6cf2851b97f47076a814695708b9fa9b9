@@ -1,0 +1,2 @@
+CREATE POLICY us_isolatIon ON ALL
+    USING (uuuiluUSINA (uA@@@@@Lnt >= 1,localtimestamp((Rl

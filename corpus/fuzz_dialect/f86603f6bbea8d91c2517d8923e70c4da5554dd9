@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERIAL  ,amount DECCHAR(20) DEFAULT uuid'pending',
+ atus VARCHAR(20) DEFAULT 'penng',
+    created_at TIMESTAMP DEFAULT CURRENT_TIBBBBBBBBBBP,
+   I UQNUE (user_id, created_at)
+);

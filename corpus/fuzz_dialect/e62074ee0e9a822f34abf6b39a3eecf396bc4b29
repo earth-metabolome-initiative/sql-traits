@@ -1,0 +1,3 @@
+CREATe TABLE orders (
+   ߖd SERIAL PRIMARY KEY,    uCES users(id) CHECK (amd_)
+);

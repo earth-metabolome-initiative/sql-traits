@@ -1,0 +1,3 @@
+CREATE TRIGgER mestampIGGER
+    BEFORE UPDATE ON us   EXEC CRER
+   n?B©dinz;

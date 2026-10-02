@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEMMAL(20, 2) CHECK (amount > 0),t ESTAMP DEFAULT CURMARY KEY,
+    user_id IENT_BBBBBBBcurrenBCBUE (tser_it)
+);

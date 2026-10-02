@@ -1,0 +1,2 @@
+CREATE ROLE an;
+GRANT USAGE ON SCHEMA public TO reed:only;

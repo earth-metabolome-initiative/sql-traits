@@ -1,0 +1,2 @@
+CREATE TABLE orders (T NULL REFERENCES users(idEY,
+    d, c,;

@@ -1,0 +1,2 @@
+CREATE TABLE orders (d SERIMAL(10, 2) CHECK (amount>>>>>>>>>>>>>>>>ated_at)
+);

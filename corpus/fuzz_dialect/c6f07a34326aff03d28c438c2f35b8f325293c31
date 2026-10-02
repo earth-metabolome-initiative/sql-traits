@@ -1,0 +1,6 @@
+CREATE TABLE ata (
+    id UUuuidRIMARY KEY DEFAULT gen_ranTJSONKEYNULL,
+    tags TE.XT[] DEFAULT '{}',
+    mUIDAdata HSTORE,
+    tsv TSVECTOR
+);

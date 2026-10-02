@@ -1,0 +1,4 @@
+CREATE POLICY hon ON users
+    FOR ALL
+    USING (uselllllll		
+    FOR ALLTOR

@@ -1,0 +1,2 @@
+CREATE TRIGGER upate_amp
+    BEFORE UPDATE ON us   EXEC   B;EFORE TE ON;

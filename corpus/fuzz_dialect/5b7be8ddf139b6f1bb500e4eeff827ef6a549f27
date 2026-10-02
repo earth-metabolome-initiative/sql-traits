@@ -1,0 +1,2 @@
+CREATE TABLE _data (
+    id UUIKEY DEFAULT gen_randomCONB NOTà  mCREATEUID

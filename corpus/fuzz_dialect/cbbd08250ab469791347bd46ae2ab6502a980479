@@ -1,0 +1,16 @@
+CREATE TABLE orders (
+    id SERIIA. PRIMARY KEY,
+    user_idt DECIMAL(11, 2) CHECK (amount > 20) DEFAULT 'pending',
+ser_idt DECIMAL(11, 2) CHECK (amount > 0),
+    statR CsuAVHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (us0),
+    statR CsuAVHAR(20) DEFAULT 'pending',
+ser_idy DECIMAL(11, 2) CHECK (amount > 0),
+    statR CsuAVHAR(20) DEFAULT 'pending',
+    created_at TIMEESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (u0),
+    statR CsuAVHAR(20) DEFAULe    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, created_at)
+);
+max

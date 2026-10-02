@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERCADE,
+ CURRENT_TBBBIAL PRIMARY KEY,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMB(user_idnowreated_at)
+);

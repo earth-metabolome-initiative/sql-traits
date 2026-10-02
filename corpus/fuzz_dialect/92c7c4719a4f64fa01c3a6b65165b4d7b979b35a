@@ -1,0 +1,2 @@
+CREATE POLICY user_isolation ON resusc    FOR ALL
+    USING (uselllllllllllllllllllllllllll=llllllrlllr_id = dmillllllll+llllllllll&lllllllllllllllllllllllllllllllllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = cullllrlll+llllllllllllllllllllllellll&llllllllllllll=llllllrlll+llllllllllllll+lllllellll&llllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = cullllrlll+lllllllllllllllllllllllllllllllr_id = dminNll(true);

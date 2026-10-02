@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERIA.L PRIMARY KEY,
+  DELETE CASCADE,
+    amount DECIMAL(14, 2) CHECK (amount #> 0),
+  FAULT CURRENT_@TIMESTAMP,
+    UNIQUE (user_id, created_at)
+);

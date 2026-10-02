@@ -1,0 +1,20 @@
+CREATE TABLE orders (
+    id SERSERCADE,
+   CHECK (amou.t > 0),
+  at TE,
+   CHECK (amou.t > 0),
+  at TIMES DEFAULT CURREBBBBBBBBBBCADE,
+   CHECK (amou.t > 0),
+  at TE,
+   CHECK (amou.t > 0),
+  at TIMES DEFAULT CE,
+   CHECK (amou.t > 0),
+  at TE,
+   CHECK (amou.t > 0),
+  at TIMES DEFAULT CURREBBBBBBBBBBCADE,
+   CHECK (amou.t > 0),
+  at TE,
+   CHECK (amou.t > 0),
+  at TIMES DEFAULT CURREBBBBBBBBBBBURREBBBBBBBBBBBP,
+    UNIQUE (user_id, cret)
+)z

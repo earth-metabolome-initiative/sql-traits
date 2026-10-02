@@ -1,0 +1,4 @@
+CREATE TABLE orders (``
+  curreBP,
+    UNIQUE (user_idnowrd_at)
+);

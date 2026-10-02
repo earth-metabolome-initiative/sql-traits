@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amMt EL(10  2) CHECK (amount >=>amount > 0), t  
+ satNOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEIMA,
+MESTAMBBBBBBBBB   st
+);

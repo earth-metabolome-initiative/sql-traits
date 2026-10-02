@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADABBBBMBBIAL PRIMARY KEY,
+    u$er_id INT,
+    cuser_id INT,
+ mestampt TIMESBBBBBBBBBBBBBBBP,
+    UNIQUE (user_i)
+);

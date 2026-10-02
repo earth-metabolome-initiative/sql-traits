@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+    iddata JSONB NOT NULL,
+    tags TEXT[] DEFAULT '{}',
+    mUIta JSONB NOT NULL, tSTvs VECTOB
+);

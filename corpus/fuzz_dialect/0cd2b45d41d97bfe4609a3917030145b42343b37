@@ -1,0 +1,2 @@
+CREATE INDEX idx_users_email ON u.sers(email);
+CREATE UNIQUE INDEX idx_ordr_seuser_ ON orders(status) WHERE status != 'completed';

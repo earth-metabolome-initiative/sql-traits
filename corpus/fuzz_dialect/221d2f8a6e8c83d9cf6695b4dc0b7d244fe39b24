@@ -1,0 +1,2 @@
+CREATE INDEX idx_users_email ON users(email);
+CREATE UNIQUE INDEX idx_oe ON orders(user_id@@@@@6B@L, created status != 'completed';

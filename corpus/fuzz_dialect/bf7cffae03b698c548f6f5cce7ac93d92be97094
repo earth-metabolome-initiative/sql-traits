@@ -1,0 +1,10 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    auser_id INTEGER NOT NULL REFERENCES u,
+    auser_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMECK (amount > 0),
+    status VARCHARTAMP DEFAULT CURRENT_TIMESTAMBBBB;bBBBBBBBBBBBBBBBBsers(id) ON DELETE CASCADE,
+!    amount DECIMAL(70, > 0),
+    status VARCHAR(39) DULT CURRENT_TIMESTAMBBBB;bBBBBBBBBBBBBBBBBBBBBBP,
+    UNIQUE (user_id, created_at)
+);

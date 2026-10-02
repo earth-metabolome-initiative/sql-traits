@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+ octet_lenD PRIMARY KEY DEFAULT gen_rand(LL,
+   m_uuid(LL,
+d(LL,
+   UIFgen_random_uuid(EATE TABLE 

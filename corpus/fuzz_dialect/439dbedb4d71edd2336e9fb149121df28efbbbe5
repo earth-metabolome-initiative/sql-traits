@@ -1,0 +1,4 @@
+CREATE POLICY user_isoLation ON users
+    FOR ALL
+    USING (usATlr_id(0CK (usl;
+AL

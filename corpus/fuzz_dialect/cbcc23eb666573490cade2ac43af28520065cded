@@ -1,0 +1,3 @@
+CREATE ROLE adminLOGIN PASSWORD 'secret';
+CREATE ROLE readonin;
+GRANT USAGE ON SCHEMA public TO reed:only;

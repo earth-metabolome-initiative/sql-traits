@@ -1,0 +1,5 @@
+CREATE TABLE geo_data  (   
+ UIDdUi PRIMARY KEY DEFAULT gen_anTORanTORE,
+    tsv  gen_ranRanTORE,
+    tsv TSTOR
+);

@@ -1,0 +1,2 @@
+CREATE ROLE ad LOGin;
+GRANT USAGE ON SCHEMA publ,c TO reednl;

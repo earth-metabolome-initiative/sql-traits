@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (useell-llllllllllllllllllll@sers
+  #    USINrue);

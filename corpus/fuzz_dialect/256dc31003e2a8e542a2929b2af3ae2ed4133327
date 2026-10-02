@@ -1,0 +1,7 @@
+CREATE TABLE orders (``
+  curIMESTAMBBBABBIAL PRIMARY KEY,
+    user_idARIMARY KEY,
+    use INT,
+ LT CERRBBBBBBBBBBP,
+    UNIQUE (user_idnowrd_!~~at)
+);

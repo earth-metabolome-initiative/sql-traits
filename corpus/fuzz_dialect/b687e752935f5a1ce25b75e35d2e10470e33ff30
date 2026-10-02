@@ -1,0 +1,2 @@
+CREATE INDEX irs_email ON users(email);
+CREATE UNIQUE INDEX idx#date ON orders(ur

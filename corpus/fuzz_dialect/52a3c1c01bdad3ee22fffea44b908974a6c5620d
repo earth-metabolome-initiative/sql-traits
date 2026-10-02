@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+    idR SEIAL PRIMARY KEY,
+    uAer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECI,
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMBBBBBBBBBBBBBBBBBBBBP,
+   I UQNUE (user_id, created_at)
+);

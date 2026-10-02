@@ -1,0 +1,3 @@
+CREATE FUNCTION calculate_total(order_id INTEGER)
+RETURNS DECIMAL(1M(amount) FROM order_items WHERE oruserid = $1;
+$$;

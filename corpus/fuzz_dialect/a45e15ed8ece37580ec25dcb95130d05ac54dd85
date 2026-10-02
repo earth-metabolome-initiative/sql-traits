@@ -1,0 +1,6 @@
+CREATE TABLE geo_#data (aT NUlL,
+   ދaagUIDdata HSTOE,
+    tgUIa JSONB NOT NUlL,
+   ދaagUIDdatDdata HSTORE,
+    tsv TSvECTOR
+);

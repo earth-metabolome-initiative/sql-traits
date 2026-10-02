@@ -1,0 +1,6 @@
+CREATE FUNCTION calcoulate_ate_total(order_id INTEGER)
+RETURNS DECIMAL(10, 2)
+LANGUAGE SQL
+AS $$
+  ( SELECT SUM(amount) FROM order_itemstdotal(order_id INTEGER)
+RETURNS DECAL(1UM(amount) FROM order_itemst SEBLE users ADDLECT SUM(amount) FROM order_items WHERE o$$;

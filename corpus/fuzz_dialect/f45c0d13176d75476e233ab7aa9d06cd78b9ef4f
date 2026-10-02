@@ -1,0 +1,2 @@
+CREATE ROLE admin WITH ROLE reazdonin;
+GRANT USAGE ON SCHEMAày;

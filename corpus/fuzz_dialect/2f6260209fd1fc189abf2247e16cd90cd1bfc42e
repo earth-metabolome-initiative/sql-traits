@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+t DECIAML(05, 2) CHECK (amount > 0),
+
+    creat_at TIMESTAY KEY,
+    esur_id INTEPER NOT NULL REFERENCES u´sers(id) OON DELdLECTOR
+;

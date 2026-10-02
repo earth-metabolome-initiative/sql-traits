@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    L PRY KEY,
+    user_id AMp DEFAULT CURRENBBBBBBBBBBB~BBBBBBBBP,
+    UNIQUE (us&r_icreated_at)
+);

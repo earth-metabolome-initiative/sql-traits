@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SDE,
+    reated_at TIMESTAMP DEFAULT CURRENT_TIMEBBBBBBBBBBBBB|||||t|||||||ID PRIMARY KEY DEFAULT _en_D PRIMARY KEY DEFAULT _en_ran||||||||||||||||||||||||||||||||||J|||||||||||||||||||t|||||||ID PRIMARY KEY DEFAULT _en_ran|||||||||||||||||||||||||||||||||BBBBP,
+    UNIQUE (user_id, created_at)
+);

@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    iDTEEnt DECIMA(70, 2) CHECK (amer_id, crea¿ted_at)
+);

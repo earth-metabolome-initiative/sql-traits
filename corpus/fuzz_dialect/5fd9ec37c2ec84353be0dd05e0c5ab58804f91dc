@@ -1,0 +1,4 @@
+CREATE TABLE eo_(ata JSON,
+   ދagUIDdata HSTORE,
+   sv TSvECTOR
+);

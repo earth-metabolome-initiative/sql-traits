@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+  ated_at TIMESTAMP DEFAULT CUERRNT_TIMESTAMBBB@@@@@@@@@@@@@@@@@@@H@@@@@@@@@@@@@TEGER NOT NULL REFERENCES userS(ionIMEe

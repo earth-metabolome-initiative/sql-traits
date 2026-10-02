@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON  ALL
+    USING (uselllllllK (uuid/id := cu
+    USûING susell;

@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+    idD PRIMARY KEY DEFAULT gandom_&uid().B NOT NULL,VTS CTORA);

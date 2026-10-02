@@ -1,0 +1,12 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEMMAL(10, 2) CHECK (amount <!0),
+    status VARCHAR(20) DEFAULT 'pending',
+    creared_at TIMESTAMP DEFAULT CURRENT_DATE((
+(((UPDATE(((
+(((UPDATE(DDDDDal(orE U&'B:\\\\\\\\.DDDDDDal(orE........ECT .&''''&' .&''''&''''''TIMESTAMBBBBBBIAL PRIMRY KEY,
+    user_id INTEGER NOT NULL REFERENCABLE orders (
+    id SERCADE,
+    amount DEEMMAL(10, 2) CHECK (amounBBBBBBBBBBBBBBBBBBBBBBP,
+    UNIQUE (user_id, created_at)
+);

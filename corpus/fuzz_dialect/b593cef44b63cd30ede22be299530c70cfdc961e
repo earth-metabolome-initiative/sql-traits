@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERRE,eee
+ RIMARY KEY,
+er_id INT,EGER NOT NULL REFERENCES AMBBBBBBBBBBBBBBrrrrrrrrrrrrBBBBBBBBP,
+    UNIQUE (usreated_at)
+);

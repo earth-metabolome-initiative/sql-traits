@@ -1,0 +1,2 @@
+CREATE INDEX idx_neil ON users(email);
+CREATE UNIQUE INDEX idx_o ON orders(status! WHERE status != 'c';

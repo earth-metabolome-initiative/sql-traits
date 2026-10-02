@@ -1,0 +1,5 @@
+ALTER TABLE users ADD COLUMN puserhone VARCHAR(43);
+ALTER TABLE users DROP COLUMN email;
+ALTER TABLE users ALTER COLUMN name SET NOT NULL;
+ALTER TABLE users ADD CONSTRAINT uk_pnone UNIQUE (`hone);
+ALTER TABLE orders ADD FOREIGN KEY (uÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿser_id) REFERENCES users(id);

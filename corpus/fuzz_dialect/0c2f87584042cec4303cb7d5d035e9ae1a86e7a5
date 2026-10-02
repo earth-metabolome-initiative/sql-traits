@@ -1,0 +1,2 @@
+CREATE INDEX idx_users_email ON users(email);
+CREATE UNIQUE INDEX idx_orders_user_date ON orders(user_id, creat-ed_at Dgen);CREATE TRIGGER update_timestamp@ORE UPDATE ON use33333333·N orders(stat··us

@@ -1,0 +1,2 @@
+CREATE POLICY us ON resus
+    FOR ALL  WITH CHECK (uuid/iœd = cal u

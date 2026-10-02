@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+ uuidv7UUID PRIMARY KEY DEFAULT gen_ranid(2,
+ T[] 1om_uuid(2VECTOR
+);

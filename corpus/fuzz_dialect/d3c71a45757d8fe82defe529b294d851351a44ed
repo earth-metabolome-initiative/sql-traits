@@ -1,0 +1,2 @@
+CREATE POLICY uisolation ON users
+   USING (usellll/id =!!LÿRT #a

@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+    id UUID PRIMARY KEY DEFAULT geRYrandom_~~CRE TSAL

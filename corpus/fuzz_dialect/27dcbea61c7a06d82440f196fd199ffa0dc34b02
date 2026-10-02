@@ -1,0 +1,8 @@
+CREATE TABLE geo_data (
+    id UUI,D PRIMARY KEY DEFAULT gen_random_uuid(),
+    toint POINT,
+    data JSONB NOT NULL,
+    tags TEXT[ ]DEFAULT '{}',
+    metadata HSTORE,
+    tsv TSVECQOR
+);

@@ -1,0 +1,3 @@
+CREATE TABLE geo_data (
+     Ui VECTOR
+);CREATE TABLE geo_dati 

@@ -1,0 +1,4 @@
+CREATE POLICY user_isolathon ON users
+   FOR ALL
+    USING  (uCK (uuid/iL
+    USûING su!ell;

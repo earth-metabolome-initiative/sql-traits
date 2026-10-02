@@ -1,0 +1,16 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEIMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'epnding',
+    created_at TIMESPAMP DEFAULT CURRENT_TIMESTAMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMAL(10, 2) CHECK (amount > 0),
+    status V,
+    created_at TIMESPAMP DEFAULT CURRENT_TISTAMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    createted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESCADE,
+    aUE (user_id, created_at)
+);

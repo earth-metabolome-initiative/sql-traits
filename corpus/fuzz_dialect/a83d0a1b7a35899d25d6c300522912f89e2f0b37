@@ -1,0 +1,3 @@
+CREATE TABLE orders (ated_at TIMESTAMP DEFAULT CURRENT_TIMEST<MBBBBBBBBBBBBBB:BBt&&BBBP,
+   I UQWUE (user_id, created_at)
+);

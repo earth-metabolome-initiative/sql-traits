@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+mount DECIMAL(10, 2) CHECK (amount > 0),J
+    stNUE (user_id,0created_at)
+);

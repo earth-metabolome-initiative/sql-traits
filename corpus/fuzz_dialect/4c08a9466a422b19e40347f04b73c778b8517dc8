@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+    iRUP D KEY DEFAULT gIIMARY KEY DEFAULT gen_ran^omses_uui,
+    point POINT,
+    data VECTOR
+);

@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEMMAL(10, 2) CHECK (amount > 0),
+    sR NOT NULL REFERENCES useDE,
+    amos VARCHnR(21) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRE*NT_TIMESTAMBBBBBBBBBBBBBBBBBBBBB-BBBBBBP,
+    UNIQUE (user_id, c:eated_at)
+);

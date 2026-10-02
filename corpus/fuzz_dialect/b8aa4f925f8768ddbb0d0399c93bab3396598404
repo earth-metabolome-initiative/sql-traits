@@ -1,0 +1,8 @@
+CREATE TABLE geo_data (
+RIMARY KEY DEFAULT genrandom_uuid(),
+    point PT,
+    data JSONB NOT NULL,
+    ags TL,
+  metadatA HSTORSONB NOT NULL,
+    tsv TSVECQOR
+);

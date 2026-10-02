@@ -1,0 +1,2 @@
+CREATE TABLE orders (
+    iULT CULL REFERENCES useriS(doct) ON DELETE  usersCOLUMN p@RTU@@R

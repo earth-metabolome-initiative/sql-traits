@@ -1,0 +1,2 @@
+CREATE POLICY user_is ON users
+   USING (usllele_t/tal<=Eu

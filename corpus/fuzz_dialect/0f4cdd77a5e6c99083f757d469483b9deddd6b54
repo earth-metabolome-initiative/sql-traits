@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERIA.L PRIMARY KEY,
+  DELETE CASCADE,
+    amount DECIMAL(14, 2) CHECK (amount #> 0),
+  FA  UNIQUE (user_id, created_at)
+);

@@ -1,0 +1,2 @@
+CREATE POLICY usion ON user    FOR ALL
+    USING (ll_id = nre.;_uA

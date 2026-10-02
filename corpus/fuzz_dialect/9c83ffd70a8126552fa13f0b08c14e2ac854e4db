@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (ata JSOEXT[] DEFAULT+'{}'.OR
+);
+CREATE ROLE ad LOGIN PASSWORD 'secret/*!*';
+CREATE ROLE reGIN PASSWORD 'secret';
+CREATE ROLE rea

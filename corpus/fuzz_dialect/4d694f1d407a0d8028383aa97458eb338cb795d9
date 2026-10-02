@@ -1,0 +1,4 @@
+CREATE TABLE geo_data  (   
+ UItoPRIMARY KEY DEFAULT #gra.TORaT.nRE.
+  5!tsv TSVECTOR
+);

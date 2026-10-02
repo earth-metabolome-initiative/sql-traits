@@ -1,0 +1,4 @@
+
+ CREATE TABLE geOGIN PASSWORD 'secret';
+CREATE ROLE readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO #ry¦SELÿÿE°@+++" !e

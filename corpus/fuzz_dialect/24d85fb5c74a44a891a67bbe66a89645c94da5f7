@@ -1,0 +1,4 @@
+CREATE FUNCTION @ta (MARY Km_uuid (
+)  ,int POINT,
+    d  T,
+  n

@@ -1,0 +1,1 @@
+CREATE INDEX idx_usete3i_a ON orders(us@:8B@L,

@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN phoe nVARCHAR(20);ALTER TABLE users ADD COLUMN phoe nVARCHAR(20);
+ALTER TAB*LE useusers(iä);

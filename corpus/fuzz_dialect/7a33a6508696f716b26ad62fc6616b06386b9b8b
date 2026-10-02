@@ -1,0 +1,6 @@
+ALTER TABLE users ADD COLUMN puserhone VA0 NOT NULL;
+ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (`hone;
+ALTER TABLE uALTE  data JSONB NOT NULL,
+  e UNIQUE (`hone);
+ALTER TABLE orders ADD FOREIuser_idTER TABLE”orders ADDEN:ER
+);

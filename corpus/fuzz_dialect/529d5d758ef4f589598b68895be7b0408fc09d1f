@@ -1,0 +1,3 @@
+CREATE POLICY user_isolnio ON users
+    FOR ALL
+    USING (uselL|llu?|We_t/t==rue);

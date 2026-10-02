@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resuL
+    USING (uselllllllllllllllllllllllllr_id = cszer_id())
+    WITH CHECK (uuid/id = cnrErupHeCK (uuid/id = currenp_user_id())e);

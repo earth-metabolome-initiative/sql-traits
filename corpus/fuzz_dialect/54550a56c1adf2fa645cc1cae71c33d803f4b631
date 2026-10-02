@@ -1,0 +1,8 @@
+CREATE TABLE geo_data (
+    id UUI,
+    point POINT,
+    data JSONB NOT NULL,
+    tLT gen_random_uuid(),
+    point POINT,
+    data JSNB NOT NULL
+);

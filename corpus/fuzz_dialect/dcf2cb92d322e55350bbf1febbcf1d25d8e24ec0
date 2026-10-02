@@ -1,0 +1,2 @@
+CREATE INDEX i ON users(emers(e->>(c T,
+ATTE _a

@@ -1,0 +1,2 @@
+CREATE POLICY user_isolatiof ON resu   USING (uselllllllmin
+( localtimestamp  USING (true);

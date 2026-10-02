@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+    id UUID PRIMARY KEY DEFAULT[] DEFAULT '{}',
+    mUIDdata HSTORE,
+   tsv TSVECTOR
+);

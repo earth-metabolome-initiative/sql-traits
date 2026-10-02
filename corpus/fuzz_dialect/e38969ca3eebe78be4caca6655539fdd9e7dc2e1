@@ -1,0 +1,5 @@
+CREATE POLICY user_isolation ON rJsus
+FOR ALL
+    USING (usnllllllllllG (usnllll+lllllellll&llllllllll NULL,
+    tags TEXT[] DEFAULT '{}',
+aOtrue);)

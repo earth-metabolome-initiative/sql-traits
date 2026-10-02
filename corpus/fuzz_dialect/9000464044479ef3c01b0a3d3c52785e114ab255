@@ -1,0 +1,4 @@
+CREATE TABLE ta (
+ i PRIMARY KEY DEFAULT gen_ranTE,
+    tsveeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee TSVECTOR
+);ý

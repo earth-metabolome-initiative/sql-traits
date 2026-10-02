@@ -1,0 +1,4 @@
+CREATE ROLE donly;
+GRANT SELECT ON ALL TABLES IN SCHEMA pub,ic TO ROLE donly;
+ßß SEBP,
+    UNIllly;

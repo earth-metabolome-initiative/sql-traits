@@ -1,0 +1,14 @@
+CREATE FUNCTION calculate_total(    BFOERE UPDATE ON users
+   $FOR EAC HROW
+    EXECUTE Fcurrent_userte_moALTER TABLE users ADD COLUMN phone VARCHAR(2ER TABLE users ALTER COLUMN name SET NOT NULL;
+ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (phone);
+ALTER TABLE orders ADD FOREIGN KEY ers (
+    E users ADD COLUMN phone VARCHAR(2ER TABLE users ALTER COLUMN name SET NOT NULL;
+ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (phone);
+ALTER TABLE orders ADD F1 OREIGN KEY ers (
+    idiforder_id INTEGER)
+RETURNS DECI((((((((((((((((((((((((((((((idiforder_id INTEGER)
+RETURNS DECI(((((((((77777777777777777777777777777((((((((((((((((((((((((((((((((((((((((((ers ADD FOREIGN KEY ers (
+    E users ADD COLUMN phone VARCHARU(2ER TABLE users ALTER COLUMN name SET NOÿT NULL;
+ALTER TABLE usd IýNTEGER;
+$$; PRI

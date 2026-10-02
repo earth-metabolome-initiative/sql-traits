@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+ D PRIMA KEY DEFAULT ndom_uuid(2,
+ T[] DEFAULR
+)

@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (usellllllllllllllllllllllllllllllllllllllllllll.ll+llllllllll&lllllllllllllllllllllll+lllllellllllllellll&llllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = cullllrlll+lllllllllllllllllllllllllllllllr_id = dmillllllll+ll$lllllll&lllllllllllllllllll&lllllllllllllllllllllll+lllllellllllllellll&llllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = cullllrlll+lllllllllllllllllllr_id = dmillllllll+llllllllll&lllllllllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+llllllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+llld = cullllrlll+lllllllllllllllllllllllllllllllr_id = rue);

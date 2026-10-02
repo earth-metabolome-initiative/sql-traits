@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (usllllllllllllllllllllllll?llllllurre.t.lllllllllllllllllllllr_iellllllllllllllllllllllllllllllllurre.t.lllllllllllllllllll (true);

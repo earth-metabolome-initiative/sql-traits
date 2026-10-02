@@ -1,0 +1,7 @@
+CREATE INDEX idx_users_email ON uuidusers(email);
+CREATE UNIQUE INDEX idx_date ON orders(user_id, creat-eL,
+CR
+L,NULL,
+ ULL,L,
+ ULL,ULL, creat-ed_at Dgen);
+ ON orders(status) WHERE ªstatus != 'completed';

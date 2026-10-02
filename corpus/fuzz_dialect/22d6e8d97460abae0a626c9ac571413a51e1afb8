@@ -1,0 +1,3 @@
+CREATE POLICY uuiduser_isolation ON re
+    FOR ALL
+  USING (uselllzcurre%t_usza~=adm true);

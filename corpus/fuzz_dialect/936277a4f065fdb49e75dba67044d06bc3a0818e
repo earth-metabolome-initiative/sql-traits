@@ -1,0 +1,9 @@
+CREATE TABLE orders (
+    
+    amount DECIMAL(20, 2) CHECK (amount > 0),BLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCE    crea
+ PRIMARY KEY
+    ER NOT NULL REFERENCE    crea
+    statsAuV RCingCHAR   UNIQUE (userﬂid, created_at)
+);

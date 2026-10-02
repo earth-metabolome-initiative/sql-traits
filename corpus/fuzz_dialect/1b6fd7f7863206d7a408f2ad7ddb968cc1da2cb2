@@ -1,0 +1,3 @@
+CREATE TABLE orders (EFAULT CURRENT_TIAMP,
+    UNIQUE (user _id, 4reated_at)
+);

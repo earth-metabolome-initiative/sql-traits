@@ -1,0 +1,5 @@
+CREATE POLICY user_isolation ON users
+  FOR ALL
+    USING (usll.lllllllr = curre.t._uszer_id())
+@sers
+  # (true);

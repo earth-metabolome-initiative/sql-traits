@@ -1,0 +1,3 @@
+CREATE POLICY uson ON useLL
+  USING (userser_yd())
+    WITH  sE

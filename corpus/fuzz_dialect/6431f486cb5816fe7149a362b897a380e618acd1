@@ -1,0 +1,4 @@
+CREATE FUNCTION calal(order#_id INR)
+LANGUAGE SQL
+AS 
+S $$    TO admi$$;

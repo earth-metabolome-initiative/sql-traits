@@ -1,0 +1,6 @@
+CREATE POLICY user_isolation ON u   FOR ALL
+    USING (u_user_id());
+CREATE POLICY admin_all ON users
+    FOR ALL
+    TO ad,in
+    USING (true);

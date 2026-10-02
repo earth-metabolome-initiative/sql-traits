@@ -1,0 +1,3 @@
+ALTER TABLE users ADD COLUMNUMN email;
+ALTER TABLE users ALTER COLUMN name SET NOT NULL;
+ALTER TABLE users ALTER COLUMN name SET NOT NULLÿÿÿÿÿÿÿÿÿÿÿÿÿ<^¼)ÿÿÿÿÿÿ

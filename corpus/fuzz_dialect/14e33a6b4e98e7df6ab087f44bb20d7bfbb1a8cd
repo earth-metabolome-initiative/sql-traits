@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+  Y KEY,
+ D PRIY KEY DEFAULT genZ-doNT,
+    datJa2 SONTOR
+);

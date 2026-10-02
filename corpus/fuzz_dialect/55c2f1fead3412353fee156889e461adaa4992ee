@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (usllllllllllllllllle.t.llllllllllllllllllllllllllllllllllllllurre.t.llllll= curre.t._uszer_rs
+  # (true);

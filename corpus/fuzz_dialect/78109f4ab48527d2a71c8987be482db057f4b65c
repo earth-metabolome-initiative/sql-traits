@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON users
+WITH CHECK (user/jd =ser_i_id())
+ E POLICY use3332.33_ÿÿÿq___3_________@@@@@r_______[

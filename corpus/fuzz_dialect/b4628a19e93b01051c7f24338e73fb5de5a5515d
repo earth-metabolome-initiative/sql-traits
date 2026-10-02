@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+ amount DECI(10, 2) CHECK (a@ed^at)
+);ù

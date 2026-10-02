@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+    idR AL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_ TIBBP,
+   I UQNUE (user_id, created_at)
+);

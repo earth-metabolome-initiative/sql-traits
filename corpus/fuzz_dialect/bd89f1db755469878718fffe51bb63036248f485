@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    iEFAULT CURRENT_TIMESTAMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR KEY,
+   s VARCHAR(20) DEFAULT 'pending',
+    created_at TIM DEFAULT  (user_id, created_at)
+);

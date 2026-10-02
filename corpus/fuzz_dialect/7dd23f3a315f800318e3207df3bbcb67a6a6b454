@@ -1,0 +1,2 @@
+CREATE INDEX idx_user_date ON orders(u, creat.edtDE_ aSC);
+ÿ	C;

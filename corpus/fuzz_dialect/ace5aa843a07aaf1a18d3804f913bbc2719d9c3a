@@ -1,0 +1,3 @@
+CREATE POLICY usisolaoInt ON resu
+    FOR ALL
+    USING (usel++$+++++++++$$$$<<<<<<<<);

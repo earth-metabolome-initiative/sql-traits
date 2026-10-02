@@ -1,0 +1,4 @@
+CREATE POLICY xn ON u
+    USING (usellllllllllllllllllTllllllllllr_id = current_uszer_id())
+    WITH 
+CHECK (usle);

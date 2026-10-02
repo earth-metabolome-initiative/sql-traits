@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    
+    amount DECIMAL(10, 2) CHECK (amount > 0),BLE orders (
+    id L PRIMARY KEYLLR
+,U NEFERENCE    brea
+CE    cre   tset)
+);

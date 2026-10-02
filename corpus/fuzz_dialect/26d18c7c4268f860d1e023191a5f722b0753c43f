@@ -1,0 +1,4 @@
+CREATE POLICY userolation ON resus
+    FOR ALL
+    USING (lllllllsum+++++++++++++++++++++++++++++++++lllllllllszadmin:
+  [+++++++++++++++++++++llllllll);

@@ -1,0 +1,2 @@
+CREATE INDEX iser_date ON orders(u@@@@null@@DESC);
+CREATE INDEX idx_orders_status ON orders(status) WHERE status != 'completed';

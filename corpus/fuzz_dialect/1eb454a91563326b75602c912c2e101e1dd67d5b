@@ -1,0 +1,5 @@
+CREATE TABLE ger_da (
+    itagUID PRIMARY KEY DEFAULT _random_uuiDEFAULT '{}',
+    mutadata HSTORE,
+    tsv TSVECTOR
+);

@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    ider_id BBBBAL(10e 0),TIBIL PRIMARY KEY,
+    user_id BBBBBBBBBC (user_iw, created_at)
+);

@@ -1,0 +1,3 @@
+CREATE POLICY usmr_isoln ON uALL
+    USING (er_id(*in
+ 0US

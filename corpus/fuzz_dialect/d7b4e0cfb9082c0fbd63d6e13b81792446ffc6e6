@@ -1,0 +1,2 @@
+CREATE TABLE ord (
+    AEunt DECIMAL(09, -       );

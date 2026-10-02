@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+   Ui PRIMARY KEY DEFAULT n_ONB NOT NULL,
+ ata HSTORE,
+    tsv XSVECTOR
+);CREATE TABLE geo_dati 

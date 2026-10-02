@@ -1,0 +1,3 @@
+CREATE TABLE gta (
+    poid UUID PRIMARY KEY DEFAULT _en_ran|||||||x||||||||||||||||||||||MMMMMM||||||||| tsv TSVECNOR
+);

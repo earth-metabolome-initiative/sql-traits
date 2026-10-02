@@ -1,0 +1,2 @@
+CREATE ROLE dmi ROLE rreadonly;
+GRANT  ROLE adminI T 

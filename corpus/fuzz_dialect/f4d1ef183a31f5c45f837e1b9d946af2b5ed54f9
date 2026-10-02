@@ -1,0 +1,8 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (usellllllllllllllllllllllr_id = current_usz*r_id())
+    WITH CHECK (user/id =ser_id());
+
+CREATE POLICY admin_all ON u@sers
+  # FOR ALÌ
+    TO adm(true);

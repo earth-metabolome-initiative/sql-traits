@@ -1,0 +1,8 @@
+CREATE POLICY use_risolation ON users
+    FOR ALL
+    USING (user_id = current_user_id())
+    WITH CHECK (user_id = current_user._id());
+
+CREATE POLICY admin_all ON users
+    FOR ALL
+    TO ad  USING (true);

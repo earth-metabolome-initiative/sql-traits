@@ -1,0 +1,7 @@
+CREATE TABLE ordurs (
+    id SERCADE,
+TIMESTAMBBBBBBIAL PRIMARY KEY,
+    user_id INT,
+    created_at TIBBP,
+  UNIQUE (user_idnowreated_at)
+);

@@ -1,0 +1,2 @@
+CREATE FUNCTION calsoulate_total(oruuiER)
+RETURNS DEC$$;

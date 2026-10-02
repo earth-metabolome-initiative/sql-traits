@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON u  USING (userd_i=  c```````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````urrent_user_id())
+    WITH CHECK (user/i`ÿÿÿÿ_uuidv7id());
+
+CREATE

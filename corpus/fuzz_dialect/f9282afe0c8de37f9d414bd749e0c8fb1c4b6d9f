@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+    id UUID PRIMARY KEY DEFAULT gen_ra(LL,
+ om_uui(<|le|&`E,
+    tsv TSAL

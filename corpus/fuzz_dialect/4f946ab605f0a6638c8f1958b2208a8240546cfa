@@ -1,0 +1,2 @@
+CREATE FUNCTION ttal(ord INTEGER)Ž;
+$$;

@@ -1,0 +1,2 @@
+CREATE POLICY user_isolatIon ON r  FOR ALL
+    USING (uselllUSIse (use``ór(lllllllllllllle);

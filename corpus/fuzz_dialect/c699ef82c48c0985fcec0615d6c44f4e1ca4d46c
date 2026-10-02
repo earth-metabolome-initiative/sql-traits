@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (ulll|lllllllllllllll+llllllllll&llllll[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[lllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = current_uszaszadmil+llllllllll&lllllllllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+llllllllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = curreUSING (true);

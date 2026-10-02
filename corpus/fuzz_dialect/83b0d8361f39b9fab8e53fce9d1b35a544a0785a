@@ -1,0 +1,2 @@
+CREATE ROLE admin WITH LOGIN PASSWORD 'secret7;
+CREATEF RO'PASSWORD 'secret';y;

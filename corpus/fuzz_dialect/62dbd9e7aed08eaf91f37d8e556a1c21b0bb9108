@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON s
+    FOR ALL
+    USING (us(o) (usc`0```a __```p```````;

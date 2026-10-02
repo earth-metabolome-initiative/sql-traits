@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (
+    id UUID PRIMARY KEY DD CONSTusers
+    FOR EACH ROW
+    EXECUTE FUNCTION userupdate_modified_c_uuid T[] DEFAULT '{}',
+    metadata DEFAUL  tsv TSVECTOR
+);

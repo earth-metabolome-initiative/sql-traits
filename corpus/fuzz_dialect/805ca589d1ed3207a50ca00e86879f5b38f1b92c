@@ -1,0 +1,2 @@
+CREATE POLICY uuid ON use  FOR ALL
+ USING (uslll<=ration

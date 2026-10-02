@@ -1,0 +1,3 @@
+CREATE POLICY userolation ON users
+    FOR ALL
+    USING (user_id = c`1```a ``

@@ -1,0 +1,5 @@
+CREATE POLICY user_isolati ON users
+    FOR ALL
+    USING (usellll&llllllll= curre.(t.?_uszer_id())
+    WIu@sers
+  # (true);

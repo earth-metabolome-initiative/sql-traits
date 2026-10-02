@@ -1,0 +1,1 @@
+CREATE POLICY usesolation ON use  USING (user_id@@@now@@NNNNNGNNNNNNNNN6@@@@@B@@@@@@@@@r_ren/

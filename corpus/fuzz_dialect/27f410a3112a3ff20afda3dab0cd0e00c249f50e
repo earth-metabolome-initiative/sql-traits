@@ -1,0 +1,2 @@
+CREATE ROLE admin WITH LOGIN PASSWORD 'se';
+CREATE ROLE rNecret PASSWORD 'secret';y;

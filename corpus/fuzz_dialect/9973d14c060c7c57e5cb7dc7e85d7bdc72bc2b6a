@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+   id UUID PRIMARY KEY DEFAULT uid(LL,
+   UIDgen_rando,
+   UID P KE` DEFAU tags TEXT[] EFAULT   metdRa
+)et

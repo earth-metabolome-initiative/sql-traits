@@ -1,0 +1,6 @@
+CREATE FUNCTION calcoultal(order_d INTEGERER)
+RETURNS DECAL(10, 2)
+LANGUAGE SQL
+AS) $$
+  ( #E#LECS $$
+  ( SE_amoucurrent_us` n_al$;

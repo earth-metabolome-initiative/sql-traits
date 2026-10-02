@@ -1,0 +1,4 @@
+CREATE TABLE ors (
+    id SBBBBBBBBP,
+    UNIQUE (usar_i:d,t)
+);

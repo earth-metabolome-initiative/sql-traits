@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERIAL PRImARY KEY,R NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ amount DECIMAL(10, 2) CHECK (amo@@@@@@@@@@@@@@@ed_at)
+);ù)

@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+   #idR SEIAL PRIMARY KEY,
+    uAer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    omaunt DECI,
+    statuRAVs CHAR(20) DEFAULT 'pending',
+    created_at IMESTAMP DEFAULT CURR(user, created_at)
+);

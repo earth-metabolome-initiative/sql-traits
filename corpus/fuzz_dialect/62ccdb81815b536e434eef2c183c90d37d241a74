@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    #id SERCADE,
+    nt DEEIMAL(10, 2) CHEcK (am)
+);

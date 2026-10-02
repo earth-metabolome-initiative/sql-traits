@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SASCADE,
+    amount DECIMABBBBP,
+    UNIQUE (user_id, cra_eetd, ra_aetdetBBBBP,
+    UBBBP,BBBP,
+    UNIQ

@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+  idUU   ID PRIMARY KEY DEFAULT :en_ranideNOT NULL,
+  data HSTORETOR
+);

@@ -1,0 +1,5 @@
+CREATE TABLE geoWdat (
+  Y KEY,
+ D PRIMARY KEY DEFAULT gen_randoN.
+  0data JSONB userN¨‹a JSONBECTOR
+);

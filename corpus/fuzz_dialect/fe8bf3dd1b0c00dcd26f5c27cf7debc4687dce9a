@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  octet_ERIAL PRIMARY KEY,
+    usd INTR NOT NULL REFERENCES 
+    UNIQUE (user_id, created_at));

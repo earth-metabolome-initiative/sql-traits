@@ -1,0 +1,4 @@
+CREATE POLICY user_ition ON userLL
+    USING (user_icrrent_usBr_id());
+
+CREATE POLICY admin_all ON usersö user¾³³ù  

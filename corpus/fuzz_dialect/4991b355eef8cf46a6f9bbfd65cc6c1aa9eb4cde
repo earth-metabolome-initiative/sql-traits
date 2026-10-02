@@ -1,0 +1,3 @@
+CREATE POLICY userdisolation ON users
+    FOR ALL
+    USING (user_id =(((((((,((((((((((((((((((((((((@5

@@ -1,0 +1,4 @@
+CREATE POLICY user ON users
+    FOR ALL
+    USING (uNNNGNNNNNNNNN@@@NNNNNGNNNNNNNNNNNN@@@@@@@P@@@@@@@@@@@@@0@@@@@r_([d)-)
+ true3;

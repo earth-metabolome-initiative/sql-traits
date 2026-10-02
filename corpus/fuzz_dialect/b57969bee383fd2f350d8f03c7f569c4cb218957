@@ -1,0 +1,5 @@
+CREATE POLICY user_isolation ON user  ;
+
+CREATE POLICY admin_all ON u@ser   TO admin
+    USING (tru;
+t)@ÿÿz°ÙÙtruee)_

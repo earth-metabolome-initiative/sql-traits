@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+   edta_ eST@MP DEFAULT CURRENT_TIMESTAMP,
+   Q UI(user_id, created_at)
+);

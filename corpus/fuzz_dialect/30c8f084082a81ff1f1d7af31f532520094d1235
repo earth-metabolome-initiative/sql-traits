@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (
+    id    iEY DEFAULT g DEFAULT '{}' PRIMARY KEY DEFAULT g DEFAULT '{}',
+    metadata HdBUUID PRIMARY KEY DEFAULT g DEFAULT '{}' PRIMARY KEY DEFAULT g DEFAULT '{}',
+    metadata HSTORE,
+    tsv TSVECTOR
+);

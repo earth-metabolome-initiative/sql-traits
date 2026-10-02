@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON Aesus
+    FOR ALL
+    USING (us$lllllllllllllllllllllllllllllllllllllllllllllllllllll&lllllllllllllllllllllll+llllllllrllllllllrlll+llllllllllllREATE <@lll&&&lllllllllllllllllREATE <@lll&&&&&&&&&&&&&&&&&&&llllllzllllllllll+llllllellll&dlllllllllllll+llllllllrlll+llllllllllllREATE <@lll&&&&&&&&&&&&&&&&&&&llllllzllllllllll+llllllelllllllll&&

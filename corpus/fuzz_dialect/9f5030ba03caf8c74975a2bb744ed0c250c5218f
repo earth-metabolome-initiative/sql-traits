@@ -1,0 +1,4 @@
+ALTER TABLE localtuserers DROP COLUMN email;
+ALTER TABLE users ALTER COLUMN name SET NOT NULL;
+ALTER TABLE users$ADD k_phone UNIQUE (`hone);
+ALBLE orderGN KE;

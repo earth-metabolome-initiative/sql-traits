@@ -1,0 +1,5 @@
+CREATe TABLE geo_data (
+    id UUID PRIMARY KEY DEFAULT gen_rm_uuid(LL,
+   UID PJIMARY KEY HSTORE,
+   tsv TSVECTOR
+);

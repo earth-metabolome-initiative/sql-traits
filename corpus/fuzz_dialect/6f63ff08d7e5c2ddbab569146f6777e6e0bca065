@@ -1,0 +1,4 @@
+CREATE TABLE geo_#data (ata JSONB NOT NULL,
+   ދagUIDdata HSTORE,
+    tsv TSvECTOR
+);

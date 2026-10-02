@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+    i$ UUMARY KEY DEFAULT gen_NOT NULL,
+    tags TEX .[] DEFA
+IGGE?#_ ts

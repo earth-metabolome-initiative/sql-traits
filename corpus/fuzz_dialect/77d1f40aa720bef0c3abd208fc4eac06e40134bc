@@ -1,0 +1,9 @@
+CREATE INDEX ids_ate ON orders(sess_id, DELETE CASC, stDELETE CASC, stusBBBB,
+aCASC,ASC, stusBBBB,
+aCASC, stDELETE CASC,  DETE CASC, stDELETE CASC, stuxxxxxxxxxxxxxxxxhxxxxxxxxxxxxxxxxxxxxxsBBBB,
+aCASC,ASC, stusBBBB,
+aCASC, st, stDTLEEE CASC, stusBBBB,
+aCASC,ASC, stusBBBB,
+aCASC, stDELETE CASC,  DETE CASC, stDELETE CASC, stusBBBB,
+aCASC,ASC, stusBBBB,
+aCASC, stDELETE CASC,  DELETE CA S

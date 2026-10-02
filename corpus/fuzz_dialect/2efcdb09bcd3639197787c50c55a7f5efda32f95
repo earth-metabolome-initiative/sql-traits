@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERCADE,t DEEALMM(10, 2) CHECK(21) DEFAULT x'pending',
+reaNT_T  UNIQUE (user_id, creat)
+);

@@ -1,0 +1,2 @@
+CREATE TABLE georn;
+GRANT USAGE ON SCHEMA pububm_uu(

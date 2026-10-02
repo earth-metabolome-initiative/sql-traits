@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (atcT NULL,
+   ދags TEXT[]DEFAULT+'{}',
+    mUIDdata HSTOT NULL,
+   ދags TER
+);

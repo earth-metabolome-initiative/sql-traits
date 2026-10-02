@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amo#unt DEEMMAL(10, 2) CHECK (amou.t > 0),
+  at TIMES DEFAULT CURR^T_TIMESTAMBBBBBBBP,
+    UNIQUE (uFUNCTION caated_a)
+);

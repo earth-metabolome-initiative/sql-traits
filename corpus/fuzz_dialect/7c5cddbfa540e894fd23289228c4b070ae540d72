@@ -1,0 +1,3 @@
+ALTER TABLE users ADD COLUMN puserhone VARCHAR(20);
+ALTER TABLE users DROP COil;
+††

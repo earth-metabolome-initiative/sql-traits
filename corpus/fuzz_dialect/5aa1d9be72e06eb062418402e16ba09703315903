@@ -1,0 +1,2 @@
+CREATE TABLE orders (amount DECgenIMAL(09, 2) CHECK (amo@@@@@@@@@@@@@@@@@  createdt)
+);

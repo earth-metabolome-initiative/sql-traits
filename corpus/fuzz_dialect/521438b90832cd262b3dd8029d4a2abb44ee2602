@@ -1,0 +1,6 @@
+ALTER TABLE users ADD COLUMN pu NOT NULL;
+ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (phone);
+ALTER TABLE orders ADD FOREIGNserhoT NULL;
+ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (phone);
+ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES``````ÔeE ] N email;
+ALTER TABLEusers(id);

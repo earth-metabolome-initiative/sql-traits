@@ -1,0 +1,2 @@
+CREATE TABLE g_data (
+    id UEY DEFAULT grandoAE 

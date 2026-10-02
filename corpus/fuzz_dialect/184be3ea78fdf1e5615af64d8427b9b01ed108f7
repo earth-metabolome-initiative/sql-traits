@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+ amountED CIMAL(18, 2) CHECK (:d_at)
+);ù

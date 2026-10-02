@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (usellllllllllllllllllllllllllllllllllllllllllllll+lllllllllllllllllll+llllllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = cullllrlll+llllllllllllllllllllllellll=llllllrll+llllllllllllllllllllllllllllllllr_id = cullllrlll+lllllllllllllllllllllllllllllllr_id = dmillllllll+llllllllll&lllllllllllllllllllllll+lllllellll&lllllllrlll+llllllllllllllllll+llllllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+llllllllllllllllllllllllllllpllr_id = cullllrlll+lllllllllllllllllllid = cullllrlll+lllllllllllllllllllllllllllllllr_id = dmillllllll+llllllllll&lllllllllllllllllllllll+lllllellllllllllllllllllllr_id = cullllrlll+lllllllllllllllllllllllllllllllr_id = dminNG (true);

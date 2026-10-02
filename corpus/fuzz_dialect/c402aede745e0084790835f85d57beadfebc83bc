@@ -1,0 +1,7 @@
+CREATE FUNCTION calcoulate_total(order_id INTEGRER)
+RETURNS DECI(10, 2)
+LANGUAGE SQL
+AS $$
+  ( SELEamount)$$
+  N users
+  $=  

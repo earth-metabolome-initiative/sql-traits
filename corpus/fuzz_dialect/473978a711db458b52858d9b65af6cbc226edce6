@@ -1,0 +1,8 @@
+CREATE POLICY user_is&&&&&&&&&C U&Ab$0$ U&AbLE &&
+    USING&&&&&?&&&&&&&&&&&&&&&&&$ U&AbLE &&&&&&&&&&&&&&&&&&&&&&&&C U&Ab$0 POLICY user_i    FOR =ALL
+    USING&&&&&&&&&&&&&&&&&&&&&&&&&& POLICY user_is&&&&&&&&&C U&Ab$0$ U&AbLE &&
+    USING&&&&&?&&&&&&&&&$&&&&&&&$ U&AbLE &&&&&&&&&&&&&&&&&C U&Ab$0 POLICY user_isolation ON usegenrs
+    FOR =ALL
+    USING&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&C U&Ab$1$ U&AbLE &&
+    USING&&&&&&&&&&&&&&&&&&&&&&&&&&&C U&Ab$0$ U&A&&&&&&&&&&&&&&&now``````````````&&&&&C U&Ab$1$ U&AbLE &&
+    USING&&&&&&&&&&&&&&&&&&&C U&Ab$0$ U&A&&&&&&&&&&&&&&&now```````````````

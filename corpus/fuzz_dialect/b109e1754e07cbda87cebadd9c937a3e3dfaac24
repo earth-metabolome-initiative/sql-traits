@@ -1,0 +1,3 @@
+CREATE TABLE geo_data  (   DdUi PRY KEY DEFAULT gen_r PRIMARY KEY DEFAULT gen_ranT,
+    tsv TSVECTOR
+);

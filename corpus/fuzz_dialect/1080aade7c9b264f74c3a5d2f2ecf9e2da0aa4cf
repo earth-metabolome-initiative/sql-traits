@@ -1,0 +1,2 @@
+CREATE TABLE users (
+id I1NTEGER PRIMARY KEY,name V);

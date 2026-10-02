@@ -1,0 +1,2 @@
+CREATE INDEX iddae ON orders(ts drC);
+CR

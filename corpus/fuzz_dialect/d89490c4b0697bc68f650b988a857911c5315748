@@ -1,0 +1,3 @@
+CREATE INDEX idx_users_email ON users(email);
+CREATE UNIQUE INDEX idx_date ON orders(user_Id, created_at DESC#);
+CREATE INDEX ius ON orders(status) WHERE status != 'completed';

@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+     status VA REFERENCES users(id) ON DELETE CASCADE,
+    amos VARCHnR(21) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMBBBBBBBBBBBBBBBBBBBBBBB=BBBP,
+    UNIQUE (user_id, c:eated_at)
+);

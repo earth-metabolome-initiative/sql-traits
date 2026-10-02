@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+      statNOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEIMAL(1sum2) CHECK (a~mount > 0),
+MESTAMBBBBBBBB   st
+);

@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+amount DECIMAL(477, 2) CHECK (amo@@@@@+@@@@@@ed
+at)
+);ù

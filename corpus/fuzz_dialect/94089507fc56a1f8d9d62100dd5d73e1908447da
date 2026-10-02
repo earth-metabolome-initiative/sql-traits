@@ -1,0 +1,3 @@
+CREATE ROLE admin WITH LOGIN PASSWORD 'secret';
+CREATE ROLE readonly;
+ÿECT ON ALL TABLER¿ÿ

@@ -1,0 +1,3 @@
+CREATE TABLE order(
+    id SERIAKEY, INTEGER NOT NULL REFERENCES users(idEY,¿
+  

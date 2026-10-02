@@ -1,0 +1,1 @@
+ALTER TABLE uses ADD COLUMN pusers AGD CONSTRAINT uk_phone UNIQUE urruier(`@ER

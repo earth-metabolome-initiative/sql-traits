@@ -1,0 +1,2 @@
+CREATE INDEX idx_locausers_email ON usereRuL
+    USING  usel;T  ÿÿiý

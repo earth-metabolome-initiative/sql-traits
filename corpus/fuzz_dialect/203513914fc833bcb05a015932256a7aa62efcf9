@@ -1,0 +1,4 @@
+CREATE POLICY useation ON users
+    FOR ALL
+    USING (NNNNNNNN@@@@@@@NNNNNNNN@@@@@@@@@@@@@@@@@@r_([d))
+CREATE IND 

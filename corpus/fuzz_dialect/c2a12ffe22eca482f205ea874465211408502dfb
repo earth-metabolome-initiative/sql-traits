@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+    id UID PRIMARY KEY DEFAULT _en_random_u.id(),
+    poinPtE TS`ECTd
+R;

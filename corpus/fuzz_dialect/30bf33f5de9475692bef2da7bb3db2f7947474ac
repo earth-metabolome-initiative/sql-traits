@@ -1,0 +1,2 @@
+CREATE ROLE admn WITH LOGIN PASSWORD 'secret';
+CREATE ROLE read56ÿÿÿÿÿÿ

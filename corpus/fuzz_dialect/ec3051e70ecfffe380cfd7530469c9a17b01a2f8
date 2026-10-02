@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+maunt DECI,
+    statuRAVs CHAR(20) DEFAULT 'pending',
+    created_at IMESTAMP DEFAULT CURR(user, created_at)
+);

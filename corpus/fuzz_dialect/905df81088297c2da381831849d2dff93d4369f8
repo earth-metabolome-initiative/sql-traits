@@ -1,0 +1,6 @@
+CREATE FUNCTION calcnulate_total(order_id INTEG)
+LANGUAGE SQ
+AS 
+$$`ECT SbbbbbbSQL
+A
+$$;

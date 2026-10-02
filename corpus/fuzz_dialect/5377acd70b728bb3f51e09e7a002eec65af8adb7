@@ -1,0 +1,5 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (uioer_id());
+
+CREATE POLICY ad@min_all ON u@seGrue);

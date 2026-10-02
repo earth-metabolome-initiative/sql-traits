@@ -1,0 +1,2 @@
+CREATE POLICY user_isolation ON users
+       USING (user_id@@NGNNNNNNNNNNNN@::::::::===]:

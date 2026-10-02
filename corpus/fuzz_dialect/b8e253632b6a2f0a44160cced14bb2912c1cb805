@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SERI,
+    created_at TIMESTAMP DEFAULT C_TRuudvi7@@@@S^@@D@@@REFERENCES^@@BBBBBB

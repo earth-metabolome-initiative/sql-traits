@@ -1,0 +1,3 @@
+ALTER TABLE users ADD COLUMN puserhone VARCHA;
+ALTER TABLE users DROP CONSTRAINTuk(id);
+ATE TABLE   ! i

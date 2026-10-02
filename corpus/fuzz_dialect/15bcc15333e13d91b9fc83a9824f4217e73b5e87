@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGEVARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CBBBBBBBBBBBBP,
+    UNIQUE (user_id, created_at)
+);

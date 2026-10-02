@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+    auser_id INTEGER NOT NULL REFERENCES users(id.( ON DELETE CASCADM,
+```````````¡Š›¥at)
+);

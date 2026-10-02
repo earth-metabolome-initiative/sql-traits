@@ -1,0 +1,3 @@
+ DELETE CASCADE,
+BBBP,E (user_id, cre,ted_at)
+);

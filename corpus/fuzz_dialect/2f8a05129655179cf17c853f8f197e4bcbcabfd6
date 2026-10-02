@@ -1,0 +1,7 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (user_id = current_user_id())
+    WITH CHECK (user/id =t_user_(di));
+CREATE POLICY admin_all ON users
+TO admin
+   N õseG (true);

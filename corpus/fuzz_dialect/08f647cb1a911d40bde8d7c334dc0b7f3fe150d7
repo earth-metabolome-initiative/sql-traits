@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id IN,
+    amount DECIMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending'&
+    created_at TCREATE POLICY IMET CURRENioT

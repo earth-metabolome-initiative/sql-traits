@@ -1,0 +1,4 @@
+CREATE POLICY user_isoation ON users
+    FOR ALL
+    USING (uslllllllll?llllllurre.t.llllt.lllllllllllllllllllr_id = curre.t._uszer_ru
+true);

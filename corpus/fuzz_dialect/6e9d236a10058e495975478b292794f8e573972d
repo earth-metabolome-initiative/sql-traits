@@ -1,0 +1,3 @@
+ALTER TABLE users ADD COLUMN serhone VARCHAR(20);
+ALTER TABLE use1s DROP COLUMN email;
+ALTER  uTBLEAL name SGN K`EY (user_id) REFERENCES usersd)½õ

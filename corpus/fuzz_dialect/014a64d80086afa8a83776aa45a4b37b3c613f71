@@ -1,0 +1,3 @@
+CREATE TABLE ors (
+   UNIQUE now(usar_i:d% created_at)
+);

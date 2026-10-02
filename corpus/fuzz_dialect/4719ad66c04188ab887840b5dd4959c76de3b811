@@ -1,0 +1,3 @@
+CREATE TABLE users (
+    id Iuuidv71NTRUNIQUE
+);ALTER TABLE users ADD COLUMN puserhone VARUID PRIMARY KEY DEFAULT gen_TKEY DEFAULT genÿÿÿÿÿÿÿÿÿÿÿÿv4EAT

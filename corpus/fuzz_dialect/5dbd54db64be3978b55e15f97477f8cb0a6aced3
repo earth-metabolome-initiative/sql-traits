@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+MARY KEY,
+    user_id INT,
+ r_id INT,
+    _id INT,
+ MBBBBBBIAL PRIMARY KEY,
+    user_id INT,
+    cre TIMEST);

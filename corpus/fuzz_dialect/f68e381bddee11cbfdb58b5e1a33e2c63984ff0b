@@ -1,0 +1,1 @@
+CREATE POLICY user_isolation ON resu    WITH CHECK (uui/ddi = cuHEC

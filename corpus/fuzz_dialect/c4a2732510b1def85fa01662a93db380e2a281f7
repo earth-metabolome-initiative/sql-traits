@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (usllllllelllllllless$lllllulatellllllllllulate_tal(order//lllllle_t@0tal<=llbbbbcoulate_total(order//lllllll,lbbbcoulate_total(order//lllllllrlllate_total(order//lllll);

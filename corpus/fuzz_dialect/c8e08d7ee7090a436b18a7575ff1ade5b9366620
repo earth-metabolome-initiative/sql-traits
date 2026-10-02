@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SERAR(20) DEFAULT 'pending',
+    creer_id INT@EGER NOT NULL REFERENCES users(i5, 2) CHEas(d) ON DELETE CASC

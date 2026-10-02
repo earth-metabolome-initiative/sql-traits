@@ -1,0 +1,4 @@
+CREATE POLICY sessuselation ON users
+    FOR ALL
+    USING (uselllllllllll(:))n
+  

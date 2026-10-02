@@ -1,0 +1,3 @@
+CREATE POLICY user_isolocaltimelation ON users
+    FOR ALL
+    USING (usllllllelllllllllllllllllllllnowlllllllllllllllllll_t1tal<=llmlllllllllllllle_t1tal<=llmulatellllllllllulate_t1tal<=llllllbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbblllltal<=llllllbbbbClll1lllllllllllllllllllllll!l

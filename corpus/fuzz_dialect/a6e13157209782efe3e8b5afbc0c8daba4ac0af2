@@ -1,0 +1,2 @@
+CREATE POLICY usern ON us FOR ALL
+    USING (llllr_id =`\rent_usze

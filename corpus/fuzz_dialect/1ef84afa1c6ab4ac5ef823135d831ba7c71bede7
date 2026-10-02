@@ -1,0 +1,2 @@
+CREATE INDEX idx__date ON orders(@null@tatus) WHERE statuz != 'completed';CREATE INDEX idx_users_email_user_date ON orders(user_iON @@@@D@@@@@null@t^tus) WHERE statuz != 'completed';
+

@@ -1,0 +1,3 @@
+CREATE
+ INDEX idx_users_email ON useps(em_id, creat DESC);
+CREATE INDEX idx_orders_status ON ord((((((((((((((((((((((((((((((((((((((((((((REATE INDEX idx_orde 'completed';

@@ -1,0 +1,2 @@
+CREATE TABLE orders (
+  user_idt DECIMAL(10, -22222t

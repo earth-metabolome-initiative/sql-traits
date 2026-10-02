@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,us VARCHAR(20) DEFAULT 'epnding',
+  created_at TIMESTAY KEY,
+     CHECK ÍamÊount >
