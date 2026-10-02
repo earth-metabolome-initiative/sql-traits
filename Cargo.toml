@@ -1,0 +1,105 @@
+[package]
+name = "sql-traits"
+version = "0.1.0"
+edition = "2024"
+authors = ["Earth Metabolome Initiative"]
+license = "MIT"
+repository = "https://github.com/earth-metabolome-initiative/sql-traits"
+description = "Rust traits describing SQL-like objects"
+readme = "README.md"
+keywords = ["sql", "traits", "parser", "geometry"]
+categories = ["database", "parsing", "geometry"]
+
+[features]
+default = ["std"]
+# Re-enables the standard library and the I/O surface that needs it:
+# filesystem-backed `ParserDB::from_path*` and the
+# `Error::IoError`/`SqlParserError.file` PathBuf carriers.
+# Also forwards `sqlparser/recursive-protection`, which is itself
+# `std`-only — keeping the stack-overflow guard for deeply nested parse
+# trees in std builds, and dropping it (along with the `recursive` →
+# `stacker` → `psm` → `libc` chain) for no_std consumers.
+std = [
+    "sqlparser/std",
+    "sqlparser/recursive-protection",
+    "geometric-traits/std",
+    "thiserror/std",
+    "sql_docs/std",
+]
+# Adds git-backed construction: `ParserDB::from_git_url*` clones a remote
+# repository into a temporary directory and parses the SQL it contains.
+# Pulls in the native `git2` (libgit2) and `tempfile` dependencies, so it
+# is kept out of the default set and implies `std`.
+git = [
+    "std",
+    "dep:git2",
+    "dep:tempfile",
+]
+# Derives `Serialize` and `Deserialize` for the names and collation facts a
+# consumer persists: `TargetName`, `ColumnCollation`, `NamedColumnCollation`
+# and `MySqlCollationPadding`. Kept `no_std`-compatible through `serde/alloc`.
+serde = ["dep:serde"]
+
+[dependencies]
+sqlparser = { version = "0.63", default-features = false, features = ["visitor"] }
+geometric-traits = { git = "https://github.com/earth-metabolome-initiative/geometric-traits", branch = "main", default-features = false, features = ["alloc"] }
+thiserror = { version = "2.0", default-features = false }
+git2 = { version = "0.20.3", optional = true }
+tempfile = { version = "3.25", optional = true }
+sql_docs = { version = "1.0.11", git = "https://github.com/LucaCappelletti94/sql-docs", branch = "main", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+unicode-normalization = { version = "0.1", default-features = false }
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"], optional = true }
+
+# Use the upstream sqlparser from git until a crates.io release ships the
+# `no_std`-compatible `visitor` feature (the published `sqlparser_derive 0.5.0`
+# emits `::std::ops::ControlFlow`, while apache/datafusion-sqlparser-rs main
+# emits `::core::ops::ControlFlow`). Patching at the workspace root unifies every
+# dependent (including `sql_docs`) onto a single `sqlparser`, so dialect types
+# stay compatible across crate boundaries.
+[patch.crates-io]
+sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", branch = "main" }
+
+[lints.rust]
+missing_docs = "forbid"
+unused_macro_rules = "forbid"
+unconditional_recursion = "forbid"
+unreachable_patterns = "forbid"
+unused_import_braces = "forbid"
+unused_must_use = "forbid"
+deprecated = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tarpaulin)"] }
+
+[lints.rustdoc]
+broken_intra_doc_links = "forbid"
+bare_urls = "forbid"
+invalid_codeblock_attributes = "forbid"
+invalid_html_tags = "forbid"
+missing_crate_level_docs = "forbid"
+unescaped_backticks = "forbid"
+redundant_explicit_links = "forbid"
+invalid_rust_codeblocks = "forbid"
+
+[lints.clippy]
+unreadable_literal = "allow"
+missing_panics_doc = "allow"
+new_ret_no_self = "allow"
+struct_excessive_bools = "allow"
+should_panic_without_expect = "allow"
+doc_markdown = "allow"
+clone_on_copy = "forbid"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+pedantic = { level = "deny", priority = -1 }
+
+[dev-dependencies]
+arbitrary = "1.4"
+proptest = "1.7"
+serde_json = "1.0"
+
+[workspace]
+exclude = ["fuzz"]

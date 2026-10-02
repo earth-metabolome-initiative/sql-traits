@@ -1,0 +1,30 @@
+[package]
+name = "sql-traits-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+sql-traits = { path = ".." }
+sqlparser = "0.63"
+
+[[bin]]
+name = "fuzz_dialect"
+path = "fuzz_targets/fuzz_dialect.rs"
+test = false
+doc = false
+bench = false
+
+# Own workspace, so workspace-wide runs such as tarpaulin never start the fuzzer.
+[workspace]
+
+[profile.release]
+debug = true
+
+# Patches do not cross workspace boundaries, so this repeats the parent's.
+[patch.crates-io]
+sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs", branch = "main" }
