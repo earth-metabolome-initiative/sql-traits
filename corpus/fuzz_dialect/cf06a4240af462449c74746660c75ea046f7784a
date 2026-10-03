@@ -1,7 +1,0 @@
-CREATE TABLE geo_data (
-    idD PRIMARY KEY DEFAULT gen_random_uuid(),
- JSONB NOT NULL,
-    tags TEXT[] DEFAULT '{}',
-    metadata TORE,
-    tsv TSVECTOR
-);

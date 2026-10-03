@@ -1,4 +1,0 @@
-CREATE TABLE geoata (
-    id UUID PRIMARY KEY DEFAULT _om_u.id(),
-    GR
-);

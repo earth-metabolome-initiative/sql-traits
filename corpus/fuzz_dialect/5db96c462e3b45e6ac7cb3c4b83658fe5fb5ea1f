@@ -1,2 +1,0 @@
-CREATE POLICY user_isolation ON users
-      USING (uNNNNNNNNN@@@@@@@@@@@@@@@r_(:::::::::::::::::::::ruB);

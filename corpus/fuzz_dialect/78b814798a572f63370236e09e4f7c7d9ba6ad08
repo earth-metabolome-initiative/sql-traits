@@ -1,3 +1,0 @@
-CREATE POLICY u ON users
-       USING (user_id@@@@@NNNNNNNN@@@@@@@@@@@@@@@@@@@@@@@@@@r_([d)-)
-    WITI CHECtruBoctet_len);

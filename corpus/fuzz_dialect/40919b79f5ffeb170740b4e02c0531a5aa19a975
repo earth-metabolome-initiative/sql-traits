@@ -1,1 +1,0 @@
-CREATE POLICY uisolation ON user      USING (use@@@@@@@@@@@@@g_catNNNNN:&nNNNN

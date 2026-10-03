@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX irders_ur_te ON orders( ser!_id, cserr!_iD,cre

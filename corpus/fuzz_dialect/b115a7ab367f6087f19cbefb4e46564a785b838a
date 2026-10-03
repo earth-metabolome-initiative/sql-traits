@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- amount DECIMAL(10, 2) CHECK (am@@@@@@@@@@d@e_at)
-);ù

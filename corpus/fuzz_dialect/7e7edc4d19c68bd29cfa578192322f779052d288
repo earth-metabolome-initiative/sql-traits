@@ -1,4 +1,0 @@
-CREATE POLICY usetion ON users
-    FOR ALL
-    USING (user_id@@@@@@@@@@@@@@@@@@@@@@r_([d@)-)
-   ;

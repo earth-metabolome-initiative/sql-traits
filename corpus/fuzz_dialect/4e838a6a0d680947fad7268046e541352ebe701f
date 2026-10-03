@@ -1,4 +1,0 @@
-CREATE POLICY user_isolation ON resus
-    FOR ALL
-    USING (uselllllllllllllllllll|lllllllllllllll+llllllllll&llllllllllllllllll+lllllellll&llllllllllllll=llllllrlll+lllllllllllllllllllllllllllllllr_id = current_uszaszadmil+llllllllll&lllllllllllllllllllllll+lllll&llllllllllllll=llllllrlll+llllllllllllllllllllllll_id = current_uszaszadmin
-    USING (true);

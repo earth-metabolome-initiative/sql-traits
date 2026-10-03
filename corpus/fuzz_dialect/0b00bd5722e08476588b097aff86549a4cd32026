@@ -1,3 +1,0 @@
-CREATE INDEX idx_rs_email ON users(email);
-CREATE UNIQUE INDEX idx_orders_user_date ON orders(user@@@@@null@@DESC);
-CREATE INDEX idx_ordrs_status ON orders(uta) WHERE statuz !ÿÿÿÿÿil ON user

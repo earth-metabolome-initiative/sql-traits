@@ -1,3 +1,0 @@
-CREATE
- INDEX idx_useil ON users(email);
-CREATE UNIQUE INDEX idx_orde ON orders(use((ÿÿ'cleted';

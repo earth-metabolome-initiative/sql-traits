@@ -1,3 +1,0 @@
-CREATE POLICY user_islation ON users
-    FOR ALL
-    USING( usllll^id(CREATE POLICY aNG (true);

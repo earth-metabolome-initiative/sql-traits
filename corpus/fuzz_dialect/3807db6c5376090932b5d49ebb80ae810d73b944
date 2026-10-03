@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERIADE,
-    amount DIMA(L50, 2) CHECK (amount > 0),
-    status VARCHAR(20) KEY,
-    user_i dINTEGE REFERENCES users(idusC,d,dog@,doACRg@,doomomAmount EDCIMAL(05, 2), cearted_at)
-);

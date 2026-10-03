@@ -1,4 +1,0 @@
-CREATE TRIGGER CEOLIC@@update_times UPDATE ON users
-  FOR EACH ROW
-    EXEC localtimestamp();rŒž²
-º

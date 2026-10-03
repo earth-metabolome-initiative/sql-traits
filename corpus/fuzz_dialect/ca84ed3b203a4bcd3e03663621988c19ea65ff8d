@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-   
-    aount DECIMAL(00, 2) CHECK (ˆ amountDECIM);

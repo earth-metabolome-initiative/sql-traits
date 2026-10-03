@@ -1,6 +1,0 @@
-CREATE TABLE geo_data (
-     UIDdUi PRIMARY KEY DEFAULT gen_rando+T,
-    da JSONB NOT NULL,
- ata HSTORE,
-    tsv TSV
-);

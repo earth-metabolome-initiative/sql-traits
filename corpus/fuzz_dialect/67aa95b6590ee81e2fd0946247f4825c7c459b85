@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT gen_rand@mu.oid(),
-    point POL,
-   a SVTECQOR
-);

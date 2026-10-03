@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES useNTEGER NOT NULL REFERENCES usE,
-    amount DECIMAL(05, 2) CHECK (amount > 0),
-    status UE (user_id, cearted_at)
-);

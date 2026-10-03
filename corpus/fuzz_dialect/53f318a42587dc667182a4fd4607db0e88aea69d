@@ -1,2 +1,0 @@
-CREATE InDEX idx_users_email ON users(email @( 
-    idON ord

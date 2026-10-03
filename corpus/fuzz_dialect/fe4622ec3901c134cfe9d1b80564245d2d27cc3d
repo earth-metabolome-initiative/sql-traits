@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT gen_ra:domCONBgen_ra:do+mCONB NOT NULL,
-  IMARY KESoctTGR
-);

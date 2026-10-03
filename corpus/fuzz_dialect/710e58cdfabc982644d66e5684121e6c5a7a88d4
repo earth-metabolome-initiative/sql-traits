@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERRE,ee
- eRIMARY KEY,
-  GER NOT NULL REFERENCES AMBBBBBBBBBBBBBBBBBBBrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBBBBBBBBP,
-    UNIQUE (user_id, created_at)
-);

@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amount DEEIMAL(10, 2) CHECK (amount > 0),
-    status VAESTAMP DEFAULT CURRENT_TIMESTAMAL(10, 2) CHECK (amount > 0),
-    statu L REFERENCES users(id) ON DELETE CASCADE,
-    amount DEEIMAL(10, 2) CHECK (amount > 0),
-    status VARSHAR(20) DEFAULTBBBIA께께께께께콼,
-    amount DEeated_at TIMESTAMP DEFAULT CUR

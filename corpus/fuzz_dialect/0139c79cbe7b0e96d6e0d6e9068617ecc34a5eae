@@ -1,9 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount DECIMAL(05, 2) CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
-    crea_at TIMESTAY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount DECIMAL(05, 2) CHECK (amount > 0),
-    status VARCˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆˆCREAˆˆˆˆˆˆˆT

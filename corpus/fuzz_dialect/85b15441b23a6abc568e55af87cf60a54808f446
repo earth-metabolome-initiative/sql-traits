@@ -1,3 +1,0 @@
-CREATE ROLE adm LOGIN PASSWORD 'secret';
-CREATE ROLE readonly;
-GRANT SELECT ONÿÿÿÿÿÿÿNCTI

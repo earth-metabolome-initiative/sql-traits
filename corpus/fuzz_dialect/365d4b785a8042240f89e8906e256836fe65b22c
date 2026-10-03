@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERIA.L PRIMARY KEY,
- DELETE CASCADE,
-    amount DECIMAL(10, 2) CHECK (amoueated_at)
-);

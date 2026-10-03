@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERIA.L PRIMARY KEY,TE CASCADE,
-    amount DECIMAL(10, 2) CHECK (amount #> 0),
-    status VARADE,
-    amount DCIMEA1L(0, 2) CHECK (amount #> 0),
-    stèamount DECIMAL(10);

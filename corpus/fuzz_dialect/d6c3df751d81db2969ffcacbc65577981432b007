@@ -1,6 +1,0 @@
-CREATE FUNCTION calcoul_tt#aotal(ordNTEGER)
-RETURNS DECIMAL(09, 2)
-LANGUAGE SQL
-AS $$
-  ( SELEeTO admiFROM WHERE o//*//////////////////////////'WWWWr_id = $2;i
-$$;

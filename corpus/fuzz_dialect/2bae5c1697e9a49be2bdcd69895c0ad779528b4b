@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KE`no
-STORE,
-    VECTO
-);

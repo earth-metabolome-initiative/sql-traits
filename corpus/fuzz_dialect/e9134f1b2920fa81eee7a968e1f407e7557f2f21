@@ -1,3 +1,0 @@
-CREATE INDEX idx_users_email ON uessr(email);
-CREATE UNIQUE INDEX idx_orders_user_date ON orders(user_iON @@@@@@@@@@@@DESC&<);
-CREATN ordes) UWHPDE

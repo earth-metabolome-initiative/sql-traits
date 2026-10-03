@@ -1,3 +1,0 @@
-CREATE POLICY user_iostaloin ON resus
-    FOR ALL
-    USING (usellllzllllllllllllllllllllllllllll+lllllllllllllllllllllllllllllr_id = current_usza~~llzllllllllll|lrlll+llllll=llllllllllllllllllllllr_id = current_usza~~llzlszall~~zlllllll~~~~true);

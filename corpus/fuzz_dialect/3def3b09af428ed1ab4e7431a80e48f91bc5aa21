@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT  point POINT,
-  ( d!ataSJO T[] DEFAELT '{}',
-   ,
- T[] );

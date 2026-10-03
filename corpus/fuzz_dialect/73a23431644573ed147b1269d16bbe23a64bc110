@@ -1,3 +1,0 @@
-ALTER TABLE usres ADD COLUMN xuserhone VARCHAR(20);
-ALTER TABLE users ADD CONSTRAINT uk_pER TABLE users$AUEt (phone9;
-ALTER TABLE orders ADD FR`EY (user_id) R users(id);

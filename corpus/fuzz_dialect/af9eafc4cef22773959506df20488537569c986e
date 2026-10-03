@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    auser_id IEG NULL REFERENCES u,CADE,
-    amouE (`hone);
-ALTE)
-);

@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amount DEEMMAL(10, 2) CHECK (qmount > 0),
-    sMARY VARCHnR(20) DEFAULT 'pe?ding',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESNIQUE (user_id, c:eated_at)
-);

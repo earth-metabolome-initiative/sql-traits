@@ -1,8 +1,0 @@
-CREATE FUNCTION calculate_total(ordeICREKEY DEFAUlT neg_random_uuid(),
-    point     n= current_use());
-
-CREATE POLICY admin_all ON users
-    º°­ß¾³³ù    TO admin
-  ame VARLERCid 
-t)
-);

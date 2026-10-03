@@ -1,2 +1,0 @@
-CREATE INDEX idx_users_email ON users(email);
-CREATE UNIQUE INDEX idxe ON orders(user_id@@@@@6B@L. Yreated sta_i@@@6B@Ls

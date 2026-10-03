@@ -1,8 +1,0 @@
-CREATE FUNCTION calculate_totalBLE geo_data (
-    id UUID PRIMARY KEY DEFAULT genom_uuid(),
-    point POINT,
-    data JSONB NOT NULL,
-    tags TEXT[] DEFAULT '{}',
- S(order_id INTEGER)
-RETURNS DECIM(amount) FROM orderitems WHERE oruseºid = $1;
-$$;

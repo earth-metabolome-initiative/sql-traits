@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    idR SEIAL PRIMARY KEY,
-    uAer_id INTEGCADE,
-    amount DECI,
- atuRAVs CHAR(20) DEFAULT 'pe=ding',
-    created_at TIR(user, cree_aadtt)
-);

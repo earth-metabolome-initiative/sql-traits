@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
-     UIDdUi PRIMARY KEY DEFAULT gen_rando+T,
-   tags TEXT[] DEFAULT '{}', mUIDtsv TSVECTOR
-);

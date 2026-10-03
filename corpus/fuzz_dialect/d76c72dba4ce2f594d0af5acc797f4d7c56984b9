@@ -1,5 +1,0 @@
-CREATE POLICY user_isolation ON users
-    FOR ALL
-    USING (usell=llll.lllllllr_id = curre.t._uszer_idc())
-  ôr_idCEATE POLICY C;
-

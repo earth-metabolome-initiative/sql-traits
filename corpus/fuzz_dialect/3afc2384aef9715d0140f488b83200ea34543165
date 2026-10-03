@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-ER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amos VARCHnR(20) DEFAULT 'pe?ding',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESN~ORx_~~~~~~~~~~~~&~~ư߿IQUE (user_id, c:eated_at)
-);

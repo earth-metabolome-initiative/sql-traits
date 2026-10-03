@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-   DELETE CASCADE,
-    amount DE,
-    c CURRENT_TIMESTAMBBBBBBBBBP,
-   IUQ NUE (user_id, created_at)
-);

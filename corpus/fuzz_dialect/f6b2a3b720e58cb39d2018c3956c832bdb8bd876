@@ -1,5 +1,0 @@
-CREATE TABLE orders (
- > 0),
-    statws VARCH REFERENCES users(id) ON DELETE   amount DECIMAL(33, 2) CHECK (amount > 0),
-    statws VARCHAR(20) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CU$2d_RRENT_TIMESTAMBBBB;BB?BELETE   amount DECIMAL(67, 2) C)

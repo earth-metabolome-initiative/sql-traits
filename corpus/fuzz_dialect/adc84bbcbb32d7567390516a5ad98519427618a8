@@ -1,2 +1,0 @@
-CREATE TABLE geo_data (   zid UUID PRIMARY KEY DEFAULT _en|||||||||||t||||||||  POINT,
-    d€t   zid U

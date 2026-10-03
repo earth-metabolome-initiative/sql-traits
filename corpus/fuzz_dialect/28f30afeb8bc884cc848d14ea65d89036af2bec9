@@ -1,2 +1,0 @@
-CREATE TABLE orde(
-    ount DECIMAL(05, 2) CHECK (amount. > 0)RECREATE TABFELR

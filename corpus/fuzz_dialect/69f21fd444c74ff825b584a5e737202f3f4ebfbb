@@ -1,5 +1,0 @@
-CREATE TABLE ohgers 
- (   id SERIA.L PRIMARY KEY,
-    usedt DECIMAL(10, 2) CHECK (a*m$unt > 0),
-    stat VARCHRRENT_TIMESTAMP(user_id, created_at)
-);

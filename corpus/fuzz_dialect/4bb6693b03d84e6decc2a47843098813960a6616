@@ -1,3 +1,0 @@
-CREATE POLICY usr_isolation ON users
-    FOR ALL
-   WITH CHECK` (ue/sisi_rolat ON us   FEc= 

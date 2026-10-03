@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-RRENT_TIMESTAMBBBBBBIAL PRIMARY KEY,
-  estampt TIMESBBBBBBBBP,
-    UNIQUE (user^id, cre.ated_at)
-);

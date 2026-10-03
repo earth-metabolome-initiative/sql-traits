@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amount DEEIMAL(10, 2) CHECK (amou:nt > 0),
-    status VARTABB$UE (user_id, created_at)
-);

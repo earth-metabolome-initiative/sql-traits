@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-nIEDAMt EL(10  2) CHECK (am/unt >>aamount >mount > 0),
-    statNOT N REFERENCES uSCADEIMA,
-MESTABBB   st
-);

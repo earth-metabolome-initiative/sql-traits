@@ -1,3 +1,0 @@
-CREATE POLICY useI_isolatIon ON rsus
-    FOR ALL
-    USING (ING (uselllN&

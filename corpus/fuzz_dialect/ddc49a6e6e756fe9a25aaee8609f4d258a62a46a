@@ -1,2 +1,0 @@
-CREATE INDEX idx_users_emal ON users(email);
-CREATE UNIQUE INDEX id_user_datu ON orrs(user_id, created status != 'completed';

@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amo#unt DEEMMAL(10, 2) CHECK (amou.t > 0),
-    sELETE CASCADE,
-    amos VARCHAR(21) DEFAULT x'pending',
-reated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMBBBBBBBBBBBBBBBBBBBBBBBBBBBP,
-   UNIQUE (user_id, created_at)
-);

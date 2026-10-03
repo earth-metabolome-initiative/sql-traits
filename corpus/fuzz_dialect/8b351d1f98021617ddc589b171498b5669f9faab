@@ -1,3 +1,0 @@
-ALTER TABLE users ADD C@aOLUMN phoULL;
-ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (pne);
-ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES users×iä);

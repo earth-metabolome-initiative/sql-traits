@@ -1,3 +1,0 @@
-CREATE POLICY user_is ON useZ
-    FOR ALL
-    USING (usell*llll*lll;

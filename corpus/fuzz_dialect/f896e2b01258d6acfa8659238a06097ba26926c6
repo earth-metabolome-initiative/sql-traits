@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERIA.L PRIMARY KEY,
-    user SERIA.L PRIMARY KEY,
-    atus VARCHAR(20) DEFAULT 'pending',
-    created@_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (user_id, created_at)
-);

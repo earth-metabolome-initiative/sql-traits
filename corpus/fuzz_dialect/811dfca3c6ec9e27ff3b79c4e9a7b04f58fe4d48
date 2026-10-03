@@ -1,2 +1,0 @@
-CREATE INDEX idx_users_em_id_date ON osderr(user_id, created_at LESC#);
-CREATE INDEX iers_status ON orders(status. 'comp';

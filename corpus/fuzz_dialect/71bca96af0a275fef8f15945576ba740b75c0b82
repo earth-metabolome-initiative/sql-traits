@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERIADE,
-    amount DEsessioCIMAL(05, 2) CHECK (amount > 0),
-    st VARCHAR(20) KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount EDCIMAL(05, 2), cearted_at)
-);

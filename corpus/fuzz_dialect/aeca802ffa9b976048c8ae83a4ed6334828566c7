@@ -1,3 +1,0 @@
-CREATE POLICY user_isoln ON resus
-    FOR ALL
-    USING (us@@@@@@@@@@@@@@@@@calþÿÿ (t

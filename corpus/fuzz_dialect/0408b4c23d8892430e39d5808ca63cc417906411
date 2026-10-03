@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    iNB NOT [] DEFAULT+'{}',
-    ta RE,
-    ts@ TSVECTOR
-);

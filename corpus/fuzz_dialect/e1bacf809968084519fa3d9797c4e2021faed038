@@ -1,8 +1,0 @@
-CREATE TABLE orders (
- _id INTEGERADE,
-    amount DECIMAL(05, 2) CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
-    created_at TIMESTAY KEY,
-     CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
-    created_at TIMESTAM);

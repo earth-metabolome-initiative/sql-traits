@@ -1,5 +1,0 @@
-CREATECREATE POLICY user_isolation ON users
-    FOR ALL
-    USING (user_id = current_user_CREATE INDEX idx_users_e-mail ON users( FUNCTION @@email);
-Cid())
-    WIT@AoH CHECuuiuser_idREATE UNIQUE INDEX idx_orders_user_date ON orders(user_id, created_at DESC)ers(smta

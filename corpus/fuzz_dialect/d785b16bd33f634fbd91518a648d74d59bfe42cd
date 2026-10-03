@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amounestatNOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    oanumt DEEAL(1sum2) CHECK (a~mount > 0),BBBBBBB@   st
-);

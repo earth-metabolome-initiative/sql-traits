@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id NULL REFERENCES uVARCHAR(20) 'pending',
-  a
-  s

@@ -1,1 +1,0 @@
-CREATE POLICY uloc_ ON use USING (user_[^(;

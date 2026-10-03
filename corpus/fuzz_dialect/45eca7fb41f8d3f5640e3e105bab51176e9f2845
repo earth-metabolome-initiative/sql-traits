@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
-    tags TEXT[] DEFAULT '{}',
- tsv TSVECTOR
-);

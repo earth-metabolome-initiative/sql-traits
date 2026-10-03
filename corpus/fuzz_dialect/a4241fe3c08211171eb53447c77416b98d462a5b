@@ -1,6 +1,0 @@
-CREATE TABLE ge (
-    id UUID PRIMARY KEY DEFAULT _en_random_uuid(
-  email;
-
-id));
-;

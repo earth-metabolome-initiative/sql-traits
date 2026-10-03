@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    
-    amount DECIMAL(10, 2) CHECK (amount > 0),BLE orders (
-    id SERIAL PRIMARY KEY,
-NULL REFERENCE    crea
-    statsAuV RCingCHAR    INTEGER NOT NULL REFERENCE    creaULL R_at)
-);

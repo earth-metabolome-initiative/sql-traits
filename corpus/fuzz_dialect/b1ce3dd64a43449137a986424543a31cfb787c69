@@ -1,5 +1,0 @@
-CREATE TABLE geo_da (
-    id UUID PRIMARY KEY DEFAULT gen_rando+T, dAAAAAAAAAAAAAAtnags PET[] DEFAULT '{}',
-    mUIDAdata HSTORE,
-    tsv TTOR
-);

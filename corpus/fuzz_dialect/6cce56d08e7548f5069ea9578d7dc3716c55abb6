@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (u
- uidv7UUID PRIMARY KEY DEFAULT gen_random_uuid(
- 2,T[*] 1DEO

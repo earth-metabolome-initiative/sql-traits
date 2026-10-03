@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-   t DECIMAL(10, 2) CHECK (@ (user_id, cre1REATE TABL;

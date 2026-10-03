@@ -1,4 +1,0 @@
-CREATE TABLE geo_uata (
-  tags TEXT[] DEFAULT 'tags{}',
-    
-);

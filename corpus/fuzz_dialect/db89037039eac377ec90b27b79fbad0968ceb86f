@@ -1,7 +1,0 @@
-CREATE POLICY ur_isolation ON users
-    FOR ALL
-    USING (user_id = current_use());
-
-CREATE POLICY admin_all ON users
-  º°­³³ù    TO admin
-    USINl ON users

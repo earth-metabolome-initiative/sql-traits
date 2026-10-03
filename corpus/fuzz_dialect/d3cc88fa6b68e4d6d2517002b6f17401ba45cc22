@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT _e_NN(N(NNNN:(N(NNN:NECTOR
-);

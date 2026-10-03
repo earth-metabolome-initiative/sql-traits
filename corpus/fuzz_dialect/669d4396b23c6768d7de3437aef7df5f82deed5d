@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERIgen_raIMARY KEY,
-    user_idt DECIMAL(05, 2) CHECK (amount > 0),
-    status VARC_TIMESTA);

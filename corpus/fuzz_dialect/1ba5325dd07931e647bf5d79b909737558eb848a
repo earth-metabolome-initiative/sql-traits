@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-   user_id INTEGER NOT NULL REFERENCES userS(i) ON DELETE CASCADE,
-    amount DECIMAL(10, 2) CHECK (a-ount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CUERRNT_TIMlocESTAMBBB@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@unt > 0)@@@@@@@@@@@@@BBBBBBBBBBBBBBBB(user_id, created_a‹)
-);

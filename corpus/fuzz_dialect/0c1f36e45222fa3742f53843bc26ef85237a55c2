@@ -1,3 +1,0 @@
-CREATE TABLE orderw (
- amount DIL(ECAM18, d2) CHECK (amo@@@<@at)
-);ù

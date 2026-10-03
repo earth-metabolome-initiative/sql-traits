@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER DEFAULT CUERRNT_TIMESTAMBBB@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@B@@@@@@@@@@@@@@@@@@@@@@@@@@BBBBBBBBBB2BBBBBBBBBBBBBP,
-    UNIQUE (user_id, created_a‹)
-);

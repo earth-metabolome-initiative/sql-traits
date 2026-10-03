@@ -1,6 +1,0 @@
-CREATE FUNCTION calcoulate_tol(order_id INTEGER)
-RETURNS DE
-AS $$user_id());
-
-CR E$$;
-

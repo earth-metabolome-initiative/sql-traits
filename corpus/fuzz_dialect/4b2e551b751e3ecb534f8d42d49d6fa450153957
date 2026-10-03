@@ -1,2 +1,0 @@
-CREATE FUNCTION calcula1otal(order_id INTR)
-RETURNS DECIMAL(01)‡R$$;

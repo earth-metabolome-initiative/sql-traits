@@ -1,5 +1,0 @@
-CREATE TABLE orders (eNOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    unt DECIMABBBBP,
-    UNIQUE (user_id, cradetBBBBP,
-    UNIQ$FL$MAARY KEY,
-    user_id INTEGER NOT NULL REDEL    UNIQ

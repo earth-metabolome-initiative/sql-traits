@@ -1,4 +1,0 @@
-CREATE+@
-'CR@E@
-    emaCREATE FUNCTION calculate_total(order_id INTEGER)
-RETURNS DECIMil TEXT UAL(0M(amounNt) FROM order_items WHERE oruseºid =;:

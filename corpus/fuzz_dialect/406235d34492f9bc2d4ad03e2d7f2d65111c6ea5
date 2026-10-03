@@ -1,3 +1,0 @@
-CREATE POLICY un ON resus
-    FOR ALL
-    USING (uselll@@@@@@<@@@@RNSÿDECtrue);

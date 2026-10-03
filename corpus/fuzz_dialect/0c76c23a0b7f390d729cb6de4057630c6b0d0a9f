@@ -1,3 +1,0 @@
-CREATE POLICY user_isolation ON user   FOR ALL
-  USING (_us);
-!!!!!!  Spuse.rhone);

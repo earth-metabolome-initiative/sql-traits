@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-  Y KEY,
- D PRIMARY KEY DEFAULT gen_randoNT,
-    data JSONTOR
-);

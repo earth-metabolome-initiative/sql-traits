@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT _en_random_uugd(
-    data JSONB NOT NLL,
-    tags TEXv T
-);

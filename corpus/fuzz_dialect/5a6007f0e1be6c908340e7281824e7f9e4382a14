@@ -1,3 +1,0 @@
-CREATE FUNCTION calcoulate_total(orderR(20) DEFAULT 'pending',
-  WWWWWWtatus VARCHAR(0) DEFAULT 'pending',
-  WWWWWWW----

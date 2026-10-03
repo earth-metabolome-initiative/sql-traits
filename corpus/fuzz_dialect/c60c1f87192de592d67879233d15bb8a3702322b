@@ -1,6 +1,0 @@
-CREATE TABLE geodata (
-    id UUuuidRIMARY KEY DEFAULT gen_randoNT,
-    data JSONT NULL,
-     mUIDAdata HSTORE,
-    tsv TSVECTOR
-);

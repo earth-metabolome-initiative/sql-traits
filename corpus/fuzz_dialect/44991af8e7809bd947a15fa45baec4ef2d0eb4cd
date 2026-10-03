@@ -1,3 +1,0 @@
-CREATE POLICY us#r_in ON nulls
-    FOR ALL
-    USING (usellllllllllll.lllllllllll.lllllllr_id = urrent._su

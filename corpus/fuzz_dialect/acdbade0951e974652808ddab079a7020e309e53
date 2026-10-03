@@ -1,3 +1,0 @@
-CREATE POLICY ustion ON users
-    FOR ALL
-    USING (usellllCRJ::ll/id = cuUrrenp_userd(*):::u;

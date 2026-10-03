@@ -1,4 +1,0 @@
-CREATE POLICY user_isolatIon ON re
-    FOR ALL
-    USING (uuuillUSINA@@@Lnt >= 0,
-  lllllllllllll

@@ -1,3 +1,0 @@
-CREATE INDEX idx_ksers_email ON users(email);
-CREATE UNIQUE INDEX idx_orders__datg ON orders(user_id, created_at DESC);
-CREATE INDEWHE= 'ce,mpe';

@@ -1,8 +1,0 @@
-CREATE TABLE orders (
- RIMARY KEY,
-   DELETE CASCADE,
-    amount DEEIMAL(11, 2) CHECK (amount > 0),
-    status VARCHCR(20) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMBBBBBBBBBB#BB,
-    UNIQUE (user_CHA created_at)
-);

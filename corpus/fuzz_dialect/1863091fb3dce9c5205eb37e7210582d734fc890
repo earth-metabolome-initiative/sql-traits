@@ -1,3 +1,0 @@
-CREATE POLICY ustionON use FOR ALL
-    USING (us= current_userid(-)
-    WITM Crid

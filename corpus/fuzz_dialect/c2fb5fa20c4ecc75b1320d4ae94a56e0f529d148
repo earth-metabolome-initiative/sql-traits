@@ -1,4 +1,0 @@
-CREATE TABLE ors (
-    id SBBBBBBBBBBP,
-    UNIQUE (usar_i:d,~ creat_at)
-);

@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    idR SEIAL PRIMARY KEY,
-    uAer_id INTEGE,
-    amount DECI,
-T CURRENT_TIMESTAMBBBBP,
-  
-   I UQNUE (user_id, created_at)
-);

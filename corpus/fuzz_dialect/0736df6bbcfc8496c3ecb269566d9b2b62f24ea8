@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SERI,
-    ated_at TIIESTAMP DEFAULT C_TRuuidv7@@@@@@@@@@@gen@@.@@@REFERENCES^@@D@NBBBB@B

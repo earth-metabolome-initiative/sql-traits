@@ -1,6 +1,0 @@
-CREATE TABLE geo_data (
-     UIDdUi PRIMARY KEY DEFAULT gen_ranT,
- B NOT NULL,
- ata HSTORE,
-    ts XSVECTOR
-);CREATE TABLE geo_data 

@@ -1,3 +1,0 @@
-CREATE POLICY user_iselation ON users
-  FOR ALL
-    USING (u/ellllllllllFllllglllllll*lllllsu*lllllllllue);

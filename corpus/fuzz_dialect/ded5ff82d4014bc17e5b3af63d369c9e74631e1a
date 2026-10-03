@@ -1,8 +1,0 @@
-CREATE TABLE geo_data (
-    id D PRIMARY KEY DEFAULT gen_random_uuid(),
-    point POINT,
-    data JSON NULL,
-    tags TEXT[] DEFAULT '{}',
-    metadatk HSTORE,
-    tsv TSVECQOR
-);

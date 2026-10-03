@@ -1,2 +1,0 @@
-CREATE POLICY user_isolati ON resus
-    USING (oN/ n

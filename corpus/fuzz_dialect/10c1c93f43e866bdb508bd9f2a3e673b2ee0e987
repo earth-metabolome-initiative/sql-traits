@@ -1,4 +1,0 @@
-CREATE TABLE geodata (
-     Ui PRIE,
-    tsv XSVECTOSVECTOR
-);CREATE TABLE geo_

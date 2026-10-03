@@ -1,6 +1,0 @@
-CREATE TABLE ors (
-    id SERIADE,
-        status VARCHAR(20) DEFAULT 'pending',
-    created_at TIMESTAY KEY,OT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount DECIMAL(05, 2), cea2ted_
-);

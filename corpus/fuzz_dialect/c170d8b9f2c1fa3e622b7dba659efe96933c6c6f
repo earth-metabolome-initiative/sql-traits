@@ -1,5 +1,0 @@
-CREATE TABLE geo_dava (ataT NULL,
-   ދags TEX#[] DEFAULT+'{}',
- UIDdata HSTORE,
-    tsv TSVECTOR
-);

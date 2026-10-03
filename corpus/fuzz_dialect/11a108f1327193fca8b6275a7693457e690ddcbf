@@ -1,2 +1,0 @@
-CREATE TRIGGER update_uuitestamFORE UPDATE ON us   EXEC   BOFE
-p N 

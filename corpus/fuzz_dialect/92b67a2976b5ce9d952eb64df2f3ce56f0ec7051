@@ -1,4 +1,0 @@
-CREATE ROLE ad WITH LOGIN PASSWORD 'secret';
-CREATE ROLE reanly;
-GRANT SELECT ON A;
-GRAeedonly;

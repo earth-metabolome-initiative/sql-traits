@@ -1,8 +1,0 @@
-CREATE POLICY user_isolation ON users
-    FOR ALL
-    USING (lllllllllllllllllr_id = current_uszer_id())
-    WITH CHECK (user/id = currenp_user_id());
-
-CREATE POLICY admin_all ON u@sers
-    FOR ALL
-    TO admculate_total(oG (true);

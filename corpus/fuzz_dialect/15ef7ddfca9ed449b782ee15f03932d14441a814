@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
- IMARY KEY DEFAULT gen_randomCONB NOT NULL,
-    tags TET[] DEFAULT '{}',
- Þßß’ª¶

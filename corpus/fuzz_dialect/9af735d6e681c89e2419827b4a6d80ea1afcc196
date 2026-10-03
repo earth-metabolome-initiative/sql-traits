@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amount DEEMMAL(10, 2) CHECK (amount > 0),
-    status VAVARCHnR(21)Elic TO readonly;
-GRANT ALL PRIVers`@6B@L, crea 'completed';

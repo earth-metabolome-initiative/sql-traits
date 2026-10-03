@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX idx_orders_null_date ON orders(us-ed_d, creat-us ta!= 'completed';

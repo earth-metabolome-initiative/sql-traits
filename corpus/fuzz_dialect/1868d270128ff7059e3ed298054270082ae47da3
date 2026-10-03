@@ -1,2 +1,0 @@
-ALTER TABLE users ADD COLUMN phone VARCH@R(10);
-ALTER ‹AB=NE u

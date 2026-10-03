@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERIA.L PRIMARY KEY,
-    user_id INTTIMESTAMP DEFAULT CURRENT_TIMEST(MP,
-    UNI(user_id, created_at)
-);

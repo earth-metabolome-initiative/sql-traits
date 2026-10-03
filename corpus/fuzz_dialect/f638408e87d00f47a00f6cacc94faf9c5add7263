@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id ERCADER(21) DEFAULT x'pending',
-reated_at TIMESTAMP DEFAULT CURBBBBBBBBBBBBBBBBBBBBP,
-    UNIQUE (user_id, created_at)
-);

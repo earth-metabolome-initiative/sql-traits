@@ -1,3 +1,0 @@
-CREATE TRIGGER BEFORE UPDATE ON rs
-    FOR EACH ROW
-  ate_modified_hol''''''#''''===ionumn();

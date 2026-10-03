@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- OT NULL REFERENCES users(id) CHECK (amo@@@@@@@  #  »reat	MESTAMP,
- 

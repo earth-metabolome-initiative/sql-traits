@@ -1,4 +1,0 @@
-CREATE TABLE geR_data                                            (
-    id UUID PRIMARY KEY DEFAULT gen                       (
- VECTOR
-);

@@ -1,3 +1,0 @@
-CREATE POLICY user_in ON resus
-    FOR ALL
-    USING (usellllllllllllllllllll@@@lllllll

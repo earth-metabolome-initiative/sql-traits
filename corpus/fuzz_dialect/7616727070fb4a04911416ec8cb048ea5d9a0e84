@@ -1,3 +1,0 @@
-CREATE TABLE geo_$ata (
-    localt RIMARY KEY DEFAULT gen_random_uuid(localtime[[[ ,
-  timeA

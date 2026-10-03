@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
- CU PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES u.sers(id) ON DELETE CASCADE,
-  os VARCHAR(20) DEFAULT 'pending',
-   created_at TIMESTANIQUE (user_id, created_at)
-);

@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount DECIM³(10, 2) CHECK (amount%> 0),
-
-    cULT CURRENT_TIMESTAMP,
-    UNIQUE (user_id, created_at)
-);

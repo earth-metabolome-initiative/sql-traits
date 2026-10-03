@@ -1,4 +1,0 @@
-CREATE POLICY user_isolation ON resus
-    FOR ALL
-    USING (ll&lllllllllllr_id = urre%t_uszaszadmin:
-    USING (true);

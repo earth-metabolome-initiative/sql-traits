@@ -1,3 +1,0 @@
-CREATE TABLE geo_dataq(
-    id UUuuidRIMARY KEY DEFAULT gr.RE,
-    ts);

@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERIA.L PRIMARY KEY,
-    user_idt DECIMAL(11, 2) CHECK (amount > 0),
-    statR CsuAVHAR(20) DEFAULT 'pendn',ig
-    crSTAMP,
-    UNIQUE (user_id, cre)
-);

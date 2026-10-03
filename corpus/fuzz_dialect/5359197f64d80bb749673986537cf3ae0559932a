@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT _en_random_uuid(),
- Tint POINT,
-  s TEXT[] DARYEFAU»T ''

@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SDE,
-    amount DEEIMAL(1,0 2) CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pendin',
-    created_at TIMESTAMP DEFAULT CURRENBBBBBBBP,
-    UNIQUE (user_id, created_at)
-);

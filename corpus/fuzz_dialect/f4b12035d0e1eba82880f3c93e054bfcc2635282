@@ -1,7 +1,0 @@
-CREATE POLICY user_isolation ON resu   FOR ALL
-    USING (uselllllllllllllllllsllllllllllllllr_id = current_id())
-    WITH CHECK (uuid/id = currenp_user_id());
-
-CREATE POLICY admin_all ON u@seòs
-    FOR A   TO admin
-  ! USING||true);

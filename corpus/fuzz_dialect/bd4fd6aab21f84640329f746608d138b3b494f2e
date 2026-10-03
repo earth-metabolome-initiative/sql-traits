@@ -1,4 +1,0 @@
-CREATE TABLE geota (   
- UIDdUi PRIMRY KEY DEFAULT gen_ORE,
-    ts vTSVECTOR
-);

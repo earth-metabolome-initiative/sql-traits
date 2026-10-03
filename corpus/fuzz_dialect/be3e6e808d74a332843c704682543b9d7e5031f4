@@ -1,1 +1,0 @@
-CREATE TRIGGER updatm uPDATE ON u UPDATE E ON();

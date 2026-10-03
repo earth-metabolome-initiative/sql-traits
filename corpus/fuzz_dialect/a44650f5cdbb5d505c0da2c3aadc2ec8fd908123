@@ -1,5 +1,0 @@
-CREATE FUNCTION calate_total(order_id INTEGER)
-RETURNS DECIMAL(10, 2)
-LANGUAGE SQL`
-AS $$
-    SEE@$$;

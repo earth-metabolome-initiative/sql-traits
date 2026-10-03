@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-AMt EL(10  2) CHECK (amount >amoun:t > 0),
- T NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount Dders (
-1sum2) CHECK (amount > 0),
-MESTAMBBBBBBBBBB    st
-);
