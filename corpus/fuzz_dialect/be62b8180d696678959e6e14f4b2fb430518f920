@@ -1,0 +1,2 @@
+ALTER TABLE useYrs ADD COLUMN phone VAR NULL;
+ALTER TABLE users ADD CONSTRAINT CREA INDEX ix_users_emaiN used

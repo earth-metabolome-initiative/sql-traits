@@ -1,0 +1,2 @@
+CREATE POLICY er_ihation ON uses
+    USING (user_id@@@@@N<^N;

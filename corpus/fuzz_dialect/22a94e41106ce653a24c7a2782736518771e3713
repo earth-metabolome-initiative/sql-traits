@@ -1,0 +1,2 @@
+CREATE INDEX ml ON users(email)
+  USING el;lllÿÿ

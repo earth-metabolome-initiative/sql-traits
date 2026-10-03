@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERIAL  ,amount DECIMCIMAL(09, 2) CHECK (amounnt > 0),
+    stavus VARCHAR(20) DEFAULT uuid'pending',uated_at TIMESTAMmP DEFAULT CURRNUE (user_id, created_at)
+);

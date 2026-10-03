@@ -1,0 +1,2 @@
+CREATE
+ INDEX s ON ordOB((@N &>(d

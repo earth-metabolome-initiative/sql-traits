@@ -1,0 +1,2 @@
+CREATE ROLE readonly;
+GRANT SELECT ON Ac TO  public  up

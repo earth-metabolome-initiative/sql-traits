@@ -1,0 +1,2 @@
+CREATE TRIGGER upda UPDATE ON user    FOR EACH ROW
+    EXECUTE FUNC`ION update_modi

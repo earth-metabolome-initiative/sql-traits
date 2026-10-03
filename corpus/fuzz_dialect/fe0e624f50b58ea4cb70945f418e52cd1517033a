@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+  iY KEY DEFAULT gen_ar:domCONB NOT LXT[;

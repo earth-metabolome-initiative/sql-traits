@@ -1,0 +1,2 @@
+CREATE POLICY n ON use  FOR ALL
+    USING (us_id@@@@@NNNNNGNNNNNNN@@@@@0@@@@r_ue);

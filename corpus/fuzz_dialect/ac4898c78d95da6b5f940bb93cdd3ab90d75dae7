@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    idid INTEGNULL REFERENCES use.NBBBBBBBBBP,
+    UNIQUE (user_id, rcea)
+);

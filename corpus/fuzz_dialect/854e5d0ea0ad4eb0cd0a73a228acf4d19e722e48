@@ -1,0 +1,4 @@
+CREATE POLICY uuid_isolatIon ON resus
+    FOR ALL
+    USING (u~slllllCHAmaxlllllll(
+  &<||!(

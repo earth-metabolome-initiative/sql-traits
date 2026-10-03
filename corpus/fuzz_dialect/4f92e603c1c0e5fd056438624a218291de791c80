@@ -1,0 +1,2 @@
+CREATE POLICY user_isoltaion ON r   USING ((ll+lllllll&llllladmin:
+    USING (true);

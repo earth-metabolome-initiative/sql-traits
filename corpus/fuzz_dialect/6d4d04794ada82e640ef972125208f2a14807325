@@ -1,0 +1,3 @@
+ALTER TABLE users DROP COLUMN email;
+ALTER TABLE users ALTER COuser(`hone);
+A?LTERN KEY (us);

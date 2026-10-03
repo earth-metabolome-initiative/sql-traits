@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id KEY,
+RY KEY,
+EFAULT CURRENT_TIMESTAMBBBBJBBBBBBBBBBBBBP,
+    UNIQUE (user_.:d,i [creahted]_at)
+);

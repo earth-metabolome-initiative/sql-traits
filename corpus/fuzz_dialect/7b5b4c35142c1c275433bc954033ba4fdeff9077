@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  moloc DEEIL(35, 2) ,
+    staVtu sARCHQUE (user_id, created_at)
+);

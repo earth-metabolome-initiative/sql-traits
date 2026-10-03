@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERCADE,
+ CUMBBBBBBIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES u.sers(id) ON DELETE CASCADE,
+    amos  UNIQUE (user_id, t)
+);

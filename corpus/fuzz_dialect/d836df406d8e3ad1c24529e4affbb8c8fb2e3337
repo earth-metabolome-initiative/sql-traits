@@ -1,0 +1,7 @@
+CREATE TABLE rders (
+    id SERIAL PRIMARY KEY,
+   nt DE CHECK (a-oun),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT @@@@@@@*@@@@@@@@@@@@BBB:=BBBBP,
+    UNIQUE (userlen_id, crE)
+);

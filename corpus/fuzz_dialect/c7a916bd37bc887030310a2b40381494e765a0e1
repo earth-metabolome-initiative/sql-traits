@@ -1,0 +1,4 @@
+CREATE TRIGGER CEOLIK@@ute_ti UPDATE ON users
+    FOR EACH ROW
+    EXEC localtimeamp();Žxž²
+º

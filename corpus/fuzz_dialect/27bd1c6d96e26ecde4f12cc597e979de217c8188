@@ -1,0 +1,2 @@
+CREATE TABLE orderso(
+    id SERIAL  ,amount DECIMAL(0, .2) CHEl

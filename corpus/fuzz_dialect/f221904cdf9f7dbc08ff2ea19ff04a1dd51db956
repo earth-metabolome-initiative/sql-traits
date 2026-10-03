@@ -1,0 +1,4 @@
+CREATE TRIGGER upmestamp
+    BEFORE UPDATE ON users
+    FoR EACH ROW
+    EXECUTE FmNU_oumn();

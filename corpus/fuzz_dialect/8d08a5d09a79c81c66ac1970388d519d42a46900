@@ -1,0 +1,1 @@
+ALTER TABLE ders ADD FOREIGN KEY (loca_id) REFERENCES usrs(id);

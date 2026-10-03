@@ -1,0 +1,3 @@
+CREATE ROLE adTH LOGIN PASSWORD 'szcret';
+CREATE ROLE eadonly;
+GRANT SELECT ON Ac TO  public TO rea

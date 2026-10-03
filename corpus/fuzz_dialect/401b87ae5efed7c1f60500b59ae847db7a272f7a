@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+   FOR ALL
+    USING (usellll|llllllllllllllllllllllllnlllllllllllllllllՉlll->#lellll&l|lllll&lllllՉlll->#lellll((nowllllllllllllll$lllllllllllllllllnlllllllllllllllllՉlll->#lellll&llՉlll->llnllnlllllllbllllllՉlll->#,ellll&ll0lllll((((((((((@((nowlllllll=current_uszaszadm&nlllllll->#ll=current_uszaszadminlllllllllllllllllll =lllll&lllllnllnllllllllllllllՉlll->#,elllll->#lellllll+USING (true);

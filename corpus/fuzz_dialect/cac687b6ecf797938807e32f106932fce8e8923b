@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  moloE EDcIL(35, 2) ,
+    statu sARCHQUE (user_id, created_at)
+);

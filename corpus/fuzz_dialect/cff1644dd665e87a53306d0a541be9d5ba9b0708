@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERRE,
+ RIMARY KE,
+    user_iR NOT NULL REFERENCES AQUE (user_id, created_at)
+);

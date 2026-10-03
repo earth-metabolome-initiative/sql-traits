@@ -1,0 +1,2 @@
+CREATE TABLE ojders (
+    id SERIALLL REFERENCES users(idEY,  d,c

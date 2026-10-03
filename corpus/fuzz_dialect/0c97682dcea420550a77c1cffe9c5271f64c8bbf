@@ -1,0 +1,2 @@
+CREATE INDEX idx_users_email ON users(er_id, created_at DEs) WHERE status != susALL
+    USING (A ( TABLE TABLE |>>gelllll'completed';

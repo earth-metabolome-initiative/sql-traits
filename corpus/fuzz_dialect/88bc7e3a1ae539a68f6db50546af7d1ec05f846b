@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    user_id@@@JJJ INTHA DEFAULT 'pending',
+ EFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user _id, 2reated_at)
+);

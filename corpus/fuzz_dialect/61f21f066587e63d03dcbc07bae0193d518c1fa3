@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERPRIMARY KEY,
+ user_iNd INT,
+    created_at TIMEST___________MARY KEY,
+    user_id INT,er_iNd INT,
+,
+    cr

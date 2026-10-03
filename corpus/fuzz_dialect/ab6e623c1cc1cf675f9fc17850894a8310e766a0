@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (usellllllhl:ll.llllllllll.lllklll4ereHAR@sers

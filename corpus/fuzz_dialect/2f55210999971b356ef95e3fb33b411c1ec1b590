@@ -1,0 +1,2 @@
+CREATE POLICY maxuuid_isolation ON resus
+  USING (usellllllllr_id = curren&t_usza~~

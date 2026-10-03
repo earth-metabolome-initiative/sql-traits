@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    idR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amouT IMESTAMP DEFAULT CURR(user, created_at)
+);

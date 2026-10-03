@@ -1,0 +1,2 @@
+CREATE INDEX ils_email ON e(email);
+DESC ON;eesu( 

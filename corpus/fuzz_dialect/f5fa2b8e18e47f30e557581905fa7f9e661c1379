@@ -1,0 +1,4 @@
+CREATE TABLE orders (amount DEC,
+    created_at TIMESTAMP DEFAULT CURBB?BBBBBBBBBBBBBBBBBBBBBP,
+   I UQNUE (_ireusd, creaued_at)
+);

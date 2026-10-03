@@ -1,0 +1,10 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES userS(idoct) ON DELETE CASCADE,
+    amount DECIMAL(10, 2) CHECK (a-ount >F0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CUERRNT_STAMBBB@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@TEGER NOT NULL REFERENCES userS(idoct) ON DELETE CASCADE,
+    amount DECIMALL REFERENCES uCASCADE,
+    amount DECIMAL(10, 2) CHECK (a-ount >F0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CUERRNT_TIMESTAMBBB@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@TEGER NOT NULL REFERENCES userS(idoct) ON DELETE CAS T)honIMEe

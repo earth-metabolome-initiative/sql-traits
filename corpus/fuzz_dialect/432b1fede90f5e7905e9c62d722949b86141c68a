@@ -1,0 +1,2 @@
+CREATE POLICY user ON LL
+    USING (usSA #-OSA #-ODllº

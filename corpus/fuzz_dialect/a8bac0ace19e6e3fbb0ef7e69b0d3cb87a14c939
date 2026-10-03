@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+    id$S$RIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMAL(10, 2) CHECK (a/mount > 0),
+    statusFUN VARCHAR(20) DEFAULT 'pending',
+    creaDEFAULT CURRENT_TIMESTAMBBBP,
+   I UQNUE (uscreated_at)
+);

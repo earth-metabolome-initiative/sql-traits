@@ -1,0 +1,2 @@
+ALTER TABLe users ADD CONSTRAINT uk_phone UNIQUE (phone);
+;Duser_`dBLES

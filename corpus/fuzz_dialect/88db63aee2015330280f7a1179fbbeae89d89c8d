@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (uselllLllllll<<2<<lLlll<<2<<<<<<<l<<2<<<<<<<<(ill&llll;

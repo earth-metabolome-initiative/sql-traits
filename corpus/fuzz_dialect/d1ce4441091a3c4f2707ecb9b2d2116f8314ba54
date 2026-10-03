@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+ SERIAL PRIMARY KEY,
+    r_id REEMMMMMMMR)
+--RUN

@@ -1,0 +1,4 @@
+CREATE ROLE a;
+GRANT SELECT ON Aublic TO readonly;
+;
+GRANT USAGE ON SCHEMA public TO readonly;

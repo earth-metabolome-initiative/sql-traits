@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGMESTAMP DEFAULT CUERRNT_TIMESTAMBBB@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@TEGER NOT NULL REFERENCGS userS(iIMEe

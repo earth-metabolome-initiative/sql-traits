@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERBBBBBBP,
+    UNIQUE(user_:d,i [created]_at)
+);

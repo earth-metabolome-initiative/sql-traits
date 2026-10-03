@@ -1,0 +1,1 @@
+CREATE INDEX idx_u_email ON users(email, cr5at-ed_at DESC)s(stats ta

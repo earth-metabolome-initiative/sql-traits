@@ -1,0 +1,1 @@
+CREATE POLICY userion ON re  FOR  DELETE  BISU

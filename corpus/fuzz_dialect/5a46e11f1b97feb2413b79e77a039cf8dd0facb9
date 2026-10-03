@@ -1,0 +1,11 @@
+CREATE TABLE geo_data (
+    id UUID PRIMARY KEY DEFAULT _en_ran|||||||||||||t|||cu|||||||||||||VECNOR
+||O DEFAULT _en_ran||||||||||||||||||||||||||||||||||J||||||||user|||||||||||u|||||||||||||VECNOR
+||O DEFAULT _en_ran||||||||||VECNOR
+||O DEFAULT _en_ran||||||||||||||||||||||||||||||||||J||||||||||||user|||||||||||u|||||||||||||VECNOR
+||O DEFAULT _en_sumran||||||||||||||||||||||||||||||||||J||||||||||||user||||||||||||||VECNOR
+|||||user||||||||||C||MMMMMMMMMMMMMMMM|||||||T||||||||MMMMMMMMMCNOR
+|||||user||||||||||C||MMMMMMMMMMMMMMMM|||||||T||||||||MMMMMMMMMMM||||||||||||||||||||||||||||||||||J||||||||||||user||||||||||||||VECNOR
+|||||user||||||||||C||MMMMMMMMMMMMMMMM|||||||T||||||||MMMMMMMMMCNOR
+|||||user|||||||||||||||||T||||||||MMMMMMMMMMM-MMMM|||||||||||||||||||||x||T||||||||MMMMMMMMMMMMMMMM|V|||ENOR
+);

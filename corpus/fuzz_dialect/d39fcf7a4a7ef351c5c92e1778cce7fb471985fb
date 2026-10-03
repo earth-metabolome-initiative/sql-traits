@@ -1,0 +1,2 @@
+CREATE FUNCTION @ta (MARY Kmd ,int POINT,
+    d  Tsessn

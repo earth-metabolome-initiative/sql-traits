@@ -1,0 +1,1 @@
+CREATE POLICY userion ON u  USING (usN @@@@E^@I;

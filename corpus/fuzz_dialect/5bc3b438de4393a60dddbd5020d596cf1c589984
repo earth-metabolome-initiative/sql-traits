@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+   unIEDAMt EL(1  20) CHECK (amount >amount > 0),
+    statNOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEIML(1sum2) CHECK (amount > 0),
+MEST@MBBBBBBBBBB    st
+);

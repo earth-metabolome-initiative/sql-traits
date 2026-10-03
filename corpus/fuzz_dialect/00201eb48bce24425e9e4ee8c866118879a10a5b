@@ -1,0 +1,12 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEIMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',MBBBBBBIAL PRIMARY KEY,
+    user_id INTEGE NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEIMAL(10, 2) CHECK (amount > 0),
+    statusreated_at TIMEAMBBBBBBBBBBBBBBBBBBBBBBBBBBBP,
+    UNIQUE (user_id, created_at)
+);

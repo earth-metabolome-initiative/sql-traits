@@ -1,0 +1,3 @@
+CREATE TABLE ords (
+    id SERCA444444MESTAMP DEFAULT  (user_id, created_at)
+);

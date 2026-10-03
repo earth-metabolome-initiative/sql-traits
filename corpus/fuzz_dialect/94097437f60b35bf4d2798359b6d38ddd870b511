@@ -1,0 +1,4 @@
+CREATE ROLE ad0min WITH LOGIN PASSWORD 'secret';
+CREATE ROLE readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonadonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly;µµµ»ly;

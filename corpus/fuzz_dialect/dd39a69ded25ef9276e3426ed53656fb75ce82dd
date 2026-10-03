@@ -1,0 +1,2 @@
+CREATE ROLE admin WITH ROLE readonly;
+GRANT ALL ON TABLE userCEãããããããããããã

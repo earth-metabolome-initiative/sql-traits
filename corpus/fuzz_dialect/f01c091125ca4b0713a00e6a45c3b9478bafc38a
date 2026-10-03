@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERAL PRIMARY KEY CHECK (amo^unt > 0), 
+   status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAY KEY NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMAL(05, 2) CHECK (amt > 0),
+    status VARNNT_TIMESMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_i

@@ -1,0 +1,4 @@
+CREATE TABLE geo_ (
+    id UUIEY DEFAULT gen_random_uuid(2,
+ T[] 0DEa HSTORE,v TTOR
+);

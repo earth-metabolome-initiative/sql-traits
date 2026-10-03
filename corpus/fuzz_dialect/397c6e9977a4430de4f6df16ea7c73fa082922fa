@@ -1,0 +1,3 @@
+ALTeR TABLE users ADD CONSTRAINT uk_phne UNIQUE (ph&ne);
+ALTER TABLE orders ADD FOR NULL;
+ALTER  POLICY uwer_iolation ON lllle

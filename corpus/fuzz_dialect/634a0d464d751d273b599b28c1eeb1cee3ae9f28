@@ -1,0 +1,4 @@
+CREATE TABLE geo (
+    id UID PRIMARY KEY DEFAULT _en_randomu.id(),
+S`ECTd
+R;

@@ -1,0 +1,2 @@
+CREATE POLICY user_isotion ON user
+      WITH CHECK ¥(u cuRtrue);

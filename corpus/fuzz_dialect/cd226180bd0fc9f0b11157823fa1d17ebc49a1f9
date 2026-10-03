@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEIMAL(61, 2) CHECK (amom?-ount >`0),status VARCHAR444444444 CHECK (amount > 0),
+  HAR KEYlllllllllllllllllllllllllllllllllllllllllTI);

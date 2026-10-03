@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON user  ;
+
+CREATE POLICY admin_all ON u2@  USING

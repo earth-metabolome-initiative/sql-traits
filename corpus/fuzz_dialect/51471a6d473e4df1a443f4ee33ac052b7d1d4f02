@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+ Y KEY DEFAULT g DEFAULT '{}',
+    met#dEATE TABLE,
+    tsv TSVECTOR
+);

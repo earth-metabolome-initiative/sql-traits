@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+ OT NULL REFERENCES users(id) ON DELETE 
+    amAL(09,  PDATCE(

@@ -1,0 +1,4 @@
+ALTER TABLE users DROP COLUMN email;
+ALTER TABLE users ALTER COuser(`hone);
+A?LTER TABLE orde•s (`hone);
+A?LTER TABLE orde•s ADD FKREIGN KEY (us);

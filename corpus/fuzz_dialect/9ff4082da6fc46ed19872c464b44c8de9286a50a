@@ -1,0 +1,2 @@
+CREATE POLICY useIon ON r   FOR ALL
+    USING (lllllllllllllllllllllr_id ? cid ? cullr_id ? ;

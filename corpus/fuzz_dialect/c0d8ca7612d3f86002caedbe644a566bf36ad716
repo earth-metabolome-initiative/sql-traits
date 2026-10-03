@@ -1,0 +1,3 @@
+CREATE TABLE or(
+Ùžmont DECIMAL(05, 2) CHECK(mD@@uuid@dat)
+);ù

@@ -1,0 +1,6 @@
+CREATE TABLE orders ( amount DEEIMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR4444444444444444444444444444444444444444444444444(2 0),
+    status VARCHAR KEY,
+   s VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT  (user_id, created_at)
+);

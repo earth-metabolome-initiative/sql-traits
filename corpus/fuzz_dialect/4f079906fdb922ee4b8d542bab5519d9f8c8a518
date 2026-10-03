@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+  tatus VARIMESTAY KEY,
+   CHECK (amount > 0),
+    sta, cearted_at)
+);

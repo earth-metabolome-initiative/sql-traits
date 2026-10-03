@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERCAD$E,
+    amMt EL(10  2) CHECK (amount >= TE >amou> 0),
+    statNOTETE CASCst
+);

@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    TEGER NOT NULL REFERENCES userS(idoct) ON DELETE CASCADE,
+    amhunt DE CHECK (a-oun),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT @@@@@@@@@@@@@@@@@@@@@BBBBBBB:=BBBBP,
+    UNIQUE (userlen_id, cre)
+);

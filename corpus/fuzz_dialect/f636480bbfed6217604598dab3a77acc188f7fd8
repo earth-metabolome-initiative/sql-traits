@@ -1,0 +1,3 @@
+CREATE POLICY user_isoln ON requs
+    FOR ALL
+    USING (sumU~*CR¼ÔÿÿÿÿCRBþ

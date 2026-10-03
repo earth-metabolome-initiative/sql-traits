@@ -1,0 +1,4 @@
+ALTER TABLE lrers DROP COLUMN email;
+ALTER TABLE users ALTER COLUMN name SET NOT NULL;
+A k_phone UNIQUE (`hone);
+ALBLE orderGN KE;

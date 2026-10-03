@@ -1,0 +1,6 @@
+CREATE TABLE users (
+    id I1ARYKEY,
+    nam NOT NULL KEY,
+    nam NOT NULL,
+    email TEXT UNIQUE
+);

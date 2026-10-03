@@ -1,0 +1,8 @@
+(UPDATE((
+(((UPDATE((
+(((((
+(((( DELETE CCREATE TABLE order„ (
+    id SERIA.L PRIMARY KYE,
+    user_id INDEGER NOT NULL REFERENCES MAL(10, 2) CHECK ¼amount #> 0),
+ 
+((ÿÿÿÿ DELETE AL(10, 2) CHCDELETE AL(10, 2Eÿ

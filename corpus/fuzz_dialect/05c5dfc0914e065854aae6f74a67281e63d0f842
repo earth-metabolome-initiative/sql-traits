@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id ST NULL REFERENCES users(id) ON DELETE CASCADE,
+    amos VARCHnR(20) DEFAULT 'pe?ding',
+    created_at TIMESTAMP DEFAULT CURRENT_SNIQUE (user_id, c:eatt)
+);

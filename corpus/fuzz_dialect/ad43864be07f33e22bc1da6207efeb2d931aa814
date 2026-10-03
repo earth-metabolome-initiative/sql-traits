@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SE,
+   CHECK (amou.t > 0),
+  at TIMEBBBBBBBBBBBBBBBP,
+    UNIQUE (user_iBated_at)
+);

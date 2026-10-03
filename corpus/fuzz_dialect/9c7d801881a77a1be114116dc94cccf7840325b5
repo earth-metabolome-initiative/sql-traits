@@ -1,0 +1,4 @@
+CREATE TABLE ers (
+   tus VARA$DE,
+ amount DCIMEA1L(0, 2) CHECK (am(ount #> 0),
+    status VARCHAR(20) DE;

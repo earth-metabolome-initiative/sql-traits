@@ -1,0 +1,3 @@
+ALTeR TABLE users ADD COLUMN puserhoeARCne UHIQUE (phon ON localtimestne);
+ALTER TABLE orders ADD FOR NULL;
+ALTER TABLE user ADD C_phone UNIQone Á e

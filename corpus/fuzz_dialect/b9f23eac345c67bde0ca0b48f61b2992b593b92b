@@ -1,0 +1,3 @@
+CREATE ROLE ad;
+CREATE ROLE Aadoin;
+GRANT USAGE ON SCHEMA public TO ru,adonl~;

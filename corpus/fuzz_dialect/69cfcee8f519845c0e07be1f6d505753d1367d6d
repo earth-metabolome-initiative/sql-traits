@@ -1,0 +1,4 @@
+CREATE TABLE geo_da   (
+    id UUID PRIMARY KEY DEFAULT gen                         (
+                                                                                UUI DEFAULT g   ECTOR
+);

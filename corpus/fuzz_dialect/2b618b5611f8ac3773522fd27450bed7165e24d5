@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON users
+       USING (usellllll/id = r_id(*);
+
+CB (`l ON FO@  Ru ;

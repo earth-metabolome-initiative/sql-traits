@@ -1,0 +1,3 @@
+CREATE FUNCTION lauettotal(ordeICRd(),
+    point T,
+    dON, NOT NU );

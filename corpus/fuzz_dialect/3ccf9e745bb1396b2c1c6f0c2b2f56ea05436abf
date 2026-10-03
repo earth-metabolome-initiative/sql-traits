@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERRE,ee RIMARY KEY,
+r_idR NOT NULL REFERENCES AMBBBULL REFERENCES AMBBBBBB(rrr_id, created_at)
+)Â;

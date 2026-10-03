@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    d L REFERENCES usersE,
+    amount D$FL1ECIMAL(20) CHECK (a@P@@@@@@@rek>t)
+);ù

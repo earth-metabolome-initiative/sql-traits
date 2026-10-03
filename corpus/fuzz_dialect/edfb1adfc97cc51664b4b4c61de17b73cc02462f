@@ -1,0 +1,3 @@
+CREAtE TABLE geo_data (
+RIMRY KEY DEFAULT:en_,
+);

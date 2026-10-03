@@ -1,0 +1,1 @@
+CREATE POLICY ucurrent_ation ON users    USING (ON @@@@E((((((WITH :TH ui);

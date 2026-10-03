@@ -1,0 +1,3 @@
+CREATe TABLE ers (
+   ߖd SERIAL PRIMARY KEY,    uCES urs(id) CHECK (amd_)
+);

@@ -1,0 +1,3 @@
+ALTER TABLE users ADD COLUMN puse UNIQUE (`hone);
+ALTERBLE rsrdeo oc`hone);
+ALTER TABLE orders ADD FOREIGN KEY (user_id) REd);

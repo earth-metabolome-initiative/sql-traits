@@ -1,0 +1,4 @@
+CREATE FUNCTION calcoulate_total(order_id ER)
+RETURNS DECIMAL(10, 2)
+LANGUAGE SQL
+AS $$[////**////@?/**///// EFA{' LTU}/A//+/RCR$$;

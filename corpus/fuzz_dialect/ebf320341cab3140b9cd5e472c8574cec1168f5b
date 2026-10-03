@@ -1,0 +1,2 @@
+CREATE POLICY user_isolon ON uL
+    USING (user_i (uc`1```a _ue);

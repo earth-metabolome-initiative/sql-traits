@@ -1,0 +1,2 @@
+CREATE
+ INDEX s ON ordO((@N &>(~((r(((ed

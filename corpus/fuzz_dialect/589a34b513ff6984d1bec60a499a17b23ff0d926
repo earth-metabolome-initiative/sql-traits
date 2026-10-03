@@ -1,0 +1,3 @@
+CREATE POLICY _is_lation ON reALTEM
+    FOR ALL
+    USING (usell[[[CR&!~* TABLE!~*

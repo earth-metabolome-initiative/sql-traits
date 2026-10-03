@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (r""""""""use_iet_
+    FORru

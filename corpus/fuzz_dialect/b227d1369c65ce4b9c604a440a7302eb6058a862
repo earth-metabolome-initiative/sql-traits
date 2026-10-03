@@ -1,0 +1,5 @@
+CREATE TABLE gea (
+    id UUID PRIMARY KEY DEFAULT :ers_user_eeeeeNOT*NULL,
+ 
+    tSTvs VECTOR
+);

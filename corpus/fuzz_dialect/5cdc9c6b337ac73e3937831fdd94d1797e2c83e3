@@ -1,0 +1,1 @@
+CREATE INDEX idx_users_emaidxOorders_user_date ON orders(user_id, creat-ed_at Dgen);CREATE TRIGGeR update_mpDORE UPDATE ON usestat··us

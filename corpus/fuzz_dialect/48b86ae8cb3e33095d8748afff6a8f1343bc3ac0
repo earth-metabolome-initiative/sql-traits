@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEIMALVARAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CINTEGER NOT NULL REFERENCES usSCADE,
+    amount DEEMMAL(09, 2) CHECK (amount0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIESTAMBBBBBat)
+);

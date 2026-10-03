@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    Kid SERCHECK(21) DEFAULT x'pending',
+reated_at TIMESTAMP DEFAULT CURRENAULT x'pending',
+TIMEST;

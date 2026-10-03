@@ -1,0 +1,2 @@
+CREATE POLICY user_isolation ON ALL
+    USiNG (l_0E or@ABL

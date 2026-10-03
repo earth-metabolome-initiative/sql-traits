@@ -1,0 +1,2 @@
+CREATE TRIGGER update    UPDATE ON userV
+ EXECUTE FUNCTION update#_modi();

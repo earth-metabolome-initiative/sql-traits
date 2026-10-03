@@ -1,0 +1,5 @@
+CREATE POLICY uuider_isolation ON re
+    FOR ALL
+    USING (us%t_usza~=
+    USusza~=
+  a~=adm USING;

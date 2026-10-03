@@ -1,0 +1,3 @@
+CREATE INDEX idx_locausers_email ON eRuL
+  
+    USING  l1;T  ÿÿý

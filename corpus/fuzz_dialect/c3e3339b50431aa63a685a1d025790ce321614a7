@@ -1,0 +1,2 @@
+CREATE POLICY usern ON us FOR ALL
+id =`eu_e

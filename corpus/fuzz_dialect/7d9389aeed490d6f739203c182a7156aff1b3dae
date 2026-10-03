@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (usellllzllllllllllllllllllllllllllllllr_id = current_usza~~llzlllr_id = current_usza~~llzl = currentusza~~llzllllllllll=l~~llll.l_ll

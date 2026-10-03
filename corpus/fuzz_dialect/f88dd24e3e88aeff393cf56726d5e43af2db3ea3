@@ -1,0 +1,7 @@
+CREATE TABLE ordernows (
+    id SDE,
+    amounount DEEIMAL(1,0 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTA PRIMARY KEY DEFAULT _en_ran|||||||||||||||||||||||||||||||||BBBBP|Y DEFAULT _en_ran||||||||||||||||||||||||||||||||||||||||||||||||||||||||||BBBBP,
+    UNIQUE (us=ertatus reated_at)
+);

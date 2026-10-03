@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  id SERIAL  ,amount DEC,
+   at TIUQNUE (u,e_sridt)
+);

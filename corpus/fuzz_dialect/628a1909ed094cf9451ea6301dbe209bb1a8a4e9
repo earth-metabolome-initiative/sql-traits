@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SAL(10, 2) CHECK (amount > 0),
+    status VARCHRENTESIQUE (user_id)
+);

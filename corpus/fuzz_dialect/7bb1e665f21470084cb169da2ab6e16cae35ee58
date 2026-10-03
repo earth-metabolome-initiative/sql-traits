@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERCP,
+    UNIQUE (user_idcurrentt > 0),ETE CASBBBBBBBP,
+    UNIQUE (user_id< ed_at)
+);

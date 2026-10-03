@@ -1,0 +1,2 @@
+CREATE ROLE admin  ROLE readony;
+GRANT SELECT (ON  reado’“†Å

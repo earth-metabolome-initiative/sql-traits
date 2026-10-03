@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+    id UUY DEFAULT $d$RY KEY$d$_ON=OO

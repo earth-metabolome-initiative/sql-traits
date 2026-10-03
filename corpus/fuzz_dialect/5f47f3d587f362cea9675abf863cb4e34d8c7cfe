@@ -1,0 +1,4 @@
+CREATE POLICY uisolation ON users
+
+    USING (uel._wser@d_(¨
+    TO admin;

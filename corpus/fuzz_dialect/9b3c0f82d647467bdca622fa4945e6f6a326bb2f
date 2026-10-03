@@ -1,0 +1,3 @@
+CREATE TABLE orders (s VARCHAR(20) KEY,
+    user_i dINTEGE REFERENCES users(idusC,d,dog@,doACRg@ > 0),
+ , cearte);

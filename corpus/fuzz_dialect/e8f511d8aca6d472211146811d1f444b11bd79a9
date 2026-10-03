@@ -1,0 +1,3 @@
+CREATE TABLE geo_data (
+ Y KEY DEFAULT gm_uu(
+    id -SERIALnt >=  to_dat

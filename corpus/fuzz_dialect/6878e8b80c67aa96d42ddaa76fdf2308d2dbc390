@@ -1,0 +1,3 @@
+CREATE INDEX idx_usersl ON users(email);
+CREATE UNIQUE INDEX id@_ordes_user_date ON orders(usdtDE_ aSC)%
+ÿ	CRMAa

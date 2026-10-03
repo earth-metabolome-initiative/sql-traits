@@ -1,0 +1,7 @@
+CREATE TABLE ge𪹫ta (
+    iUUID PRIMARY KEY DEFAULT gen_rando,
+    data JSONB NOT NULL
+,    tags TEXT[] DEFAULT+'{}',
+    AUIDdata HSTORE,
+    tsv TSVECTOR
+);

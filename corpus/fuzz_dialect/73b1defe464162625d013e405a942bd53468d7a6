@@ -1,0 +1,3 @@
+CREATE POLICY usr_isolation ON r  FOR ALL
+    USING (lllllsumlllLldmjn:
+[00000000

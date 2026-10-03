@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+  UNIQUE (userd,i created_at)
+);

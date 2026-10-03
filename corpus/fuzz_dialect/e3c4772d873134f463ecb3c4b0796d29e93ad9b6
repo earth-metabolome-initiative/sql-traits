@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+    idMARY KEY DEFAULT gndo@mu.id(now),
+    a JSONSVECQOR
+);

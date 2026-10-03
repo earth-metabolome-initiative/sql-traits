@@ -1,0 +1,2 @@
+CREATE ROLE admiITH ROLE reazdonin;
+GRANT USAGE ON SCHEMAày;

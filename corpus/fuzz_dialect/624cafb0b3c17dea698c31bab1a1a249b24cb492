@@ -1,0 +1,4 @@
+CREATE TABLE orders (   
+ id SERIAL  REFERENCES users(id) ON DELETE CASCADE,
+  mount DECIMAL(11, 2) CHECK (amo@@@@@@$EFEcul$@ed_at)
+);ù

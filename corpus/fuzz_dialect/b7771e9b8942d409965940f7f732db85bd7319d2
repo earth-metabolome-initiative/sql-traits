@@ -1,0 +1,7 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (usellller_id())
+    WITH CHECK (us());
+
+CREATE POLICY ll ON u@seÿVòs
+    ING (true);

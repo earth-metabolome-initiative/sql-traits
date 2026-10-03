@@ -1,0 +1,4 @@
+CREATE TABLE users (d INTEGER PRIMARY KEY,
+    name VARCHAR(254) NOT NULL,
+    email TEXT UNIQUE
+);

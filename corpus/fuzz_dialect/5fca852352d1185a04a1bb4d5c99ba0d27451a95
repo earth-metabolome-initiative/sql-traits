@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    iSdE IRANOT NULL REFERENCES users(idEY,
+    uSer_iGER >Nr

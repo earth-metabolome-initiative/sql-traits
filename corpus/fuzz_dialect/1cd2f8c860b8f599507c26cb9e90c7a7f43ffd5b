@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (uselllllllllll(lllllllll=llllllr,ll+llll+lllllllN As
+   Olllllllllll+llll,lllllll+ll,lllmlll&llllllllllllr,ll+llllllllllllllellll|lllllllllllrue);

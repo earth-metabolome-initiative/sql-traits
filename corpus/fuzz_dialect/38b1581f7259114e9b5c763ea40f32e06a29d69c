@@ -1,0 +1,2 @@
+CREATE INDEX mail ON users(e-ail);
+CREATE UNIQUE INDEX idx_o ON #rR

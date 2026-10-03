@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+ ARY KEY DEFAULT  point *  sv ;

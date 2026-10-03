@@ -1,0 +1,3 @@
+CREATE TABLE gea (
+    id PRIMARY KEY DEFAULT gen_ra:doT NULL,
+  IM UUD,PRIMARY KEY DEFn id);

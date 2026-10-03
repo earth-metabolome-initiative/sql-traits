@@ -1,0 +1,2 @@
+CREATE INDEX i_d@xu_uersl ON usu(email);
+DESC ON uC);

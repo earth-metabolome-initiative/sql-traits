@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+     amount DECIMAL(14, 2) CHECK (amount #> 0),
+  FAULT CURRENT_@TIME);

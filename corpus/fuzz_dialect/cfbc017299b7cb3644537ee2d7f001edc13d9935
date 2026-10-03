@@ -1,0 +1,2 @@
+CREATE ROLE rein;
+GRANT USAGE ON SCHEMu,c TO reed

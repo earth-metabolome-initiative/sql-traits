@@ -1,0 +1,2 @@
+CREATE POLICY user_on ON res
+USING (lG(true?-|')-E';

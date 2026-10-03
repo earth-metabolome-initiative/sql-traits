@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    iat TIMESTAMP DEFAULT CBBB$EFEcul$UNIQUE (BBP,_id, createdd, created_at)
+);

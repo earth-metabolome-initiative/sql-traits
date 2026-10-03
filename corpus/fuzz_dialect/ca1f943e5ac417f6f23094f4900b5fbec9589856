@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (u(elllllll[llll+lllnulliflleszadm:n:
+    USINlll]llllllll0

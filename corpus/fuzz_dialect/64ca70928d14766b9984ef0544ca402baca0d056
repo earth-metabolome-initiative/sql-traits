@@ -1,0 +1,2 @@
+CREATE INDEX  ON orders(DSC);CREATE INDEX  ON orders#(ESC);
+CREATE Id

@@ -1,0 +1,3 @@
+CREATE ROLE onin;
+GRANT USAGE ON SCHEMA pu,l,c TO relyadonin;
+GRANT USAGE ON SCHEMA publ,c TO rÿÿe)edonly;

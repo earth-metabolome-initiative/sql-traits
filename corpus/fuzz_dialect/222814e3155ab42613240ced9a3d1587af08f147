@@ -1,0 +1,3 @@
+CREATE ROLE admin WITH LOGIN PASSWORD 'secret';
+CREATE ROLE read;
+GRANT SELECT (ON)  reado’“†Å

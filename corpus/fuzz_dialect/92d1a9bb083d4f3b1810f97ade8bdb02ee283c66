@@ -1,0 +1,5 @@
+CREATE TABLE orders (  id SERCADE,
+  o#unt DEEMMAL(10, 2) CHECK (amount > 0),
+    statu$s VARCHAR DEFAULT CURRENT_TImESTAMBBBBBBIAR NOT NULL REFERENCES usersBBBBP,
+    UNIQUE (user_id, created_at)
+);

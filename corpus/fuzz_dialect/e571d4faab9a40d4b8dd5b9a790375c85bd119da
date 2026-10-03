@@ -1,0 +1,11 @@
+CREATE TABLE orders (
+    id ER NOT NULL REFERENCES users(id) ON DELETE CASCADE,  
+  
+ INDEX idx_users_emailADE, 
+  
+ INDEX idx_ULL REFERENCES R NOT NULL REFERENCES unullEGER NOT NULL REFERENCES userE,  
+  
+ INDEX idx_users_emailADE, 
+  
+ INDEX idx_users_mailNOT NULid INTEGER NOT NULL REFE
+);

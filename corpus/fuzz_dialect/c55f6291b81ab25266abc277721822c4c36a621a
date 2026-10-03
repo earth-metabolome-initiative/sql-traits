@@ -1,0 +1,3 @@
+CREATE INDEX idx_usail ON users(email);
+CREATE UNIQUE INDEX id@_orders_u_dearste ON ders(us_reid, creat-ed_at DESC);
+ÿ	CREDEX idx_or'ÿÿÿÿÿÿÿ3ÿÿÿÿ

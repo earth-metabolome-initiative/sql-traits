@@ -1,0 +1,6 @@
+CREATE TABLE orde (
+    idPRIMARY KEY,
+    user_id@@@JJJ INTHAR(19) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user _id, created_at)
+)

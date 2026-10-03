@@ -1,0 +1,2 @@
+CREATE INDEX iil ON u(eOAT#);
+CREATE INDEX idx_or

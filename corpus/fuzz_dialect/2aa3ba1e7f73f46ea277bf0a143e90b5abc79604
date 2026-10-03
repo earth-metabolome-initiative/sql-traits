@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amo#unt DEEMMAMP DEFAULT CURRENT_TIMESTAcT- -LE/C::LMGBBBBBBBBBP,
+    UNIQUE (user_id- ed_at)
+);

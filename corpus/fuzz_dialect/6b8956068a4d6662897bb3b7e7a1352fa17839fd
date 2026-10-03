@@ -1,0 +1,4 @@
+CREATE TRIGGER pmsuetamp
+    BEFORE UPDATE ON users
+    FoR EACH ROW
+    EXECUTE FmNþþþU_ou

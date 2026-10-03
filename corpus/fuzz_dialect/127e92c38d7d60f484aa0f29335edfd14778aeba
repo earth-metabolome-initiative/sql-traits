@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERIIMESTAY KEY,
+ unt DECIMAL(26, 2) CHECK CREATE FUNCUE t…
+);

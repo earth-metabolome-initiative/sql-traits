@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+        ue_irsd INTE@ NULL REFERENCES users(id) ON DELETE CASED
+,C A;
+
+))taCRREAE

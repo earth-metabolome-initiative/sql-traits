@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+ d UUID PRIMARY KEY DEFAULT g@mu.id(),
+    point #OINT, 
+    ta TSVECQOR
+);

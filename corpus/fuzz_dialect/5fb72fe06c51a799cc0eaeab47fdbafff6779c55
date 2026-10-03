@@ -1,0 +1,4 @@
+CREATE TABLE orde(
+   edta_ eST@MP DEFAULT CURRENT_TIMESTAMP,
+   Q UI(useted_at)
+);

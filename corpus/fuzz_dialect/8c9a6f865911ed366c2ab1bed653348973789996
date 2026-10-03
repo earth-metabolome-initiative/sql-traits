@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (usllllllelllllllllllll_total(order//lllllle_t@1tal<=llbbbbcoulate_total(ollllllllllllulatellllllllllulate_t@2tal<=llbbbbcoulate_total(order//lllllle_t@1tal<=llbbbbcoulate_total(order//llllllllllllllllllll<=llbbbbcoulate_total(order//lllllle_t@2tal<=llbbbbcoulate_total(ollllllll_t@2tal<=llbbbbcoulate_total(order//lllllle_t@1tal<=llbbbbcoulate_totalllllulatellllllllllulate_t@2tal<=llbbbbcoulate_total(orSELEcTder//lllllle_t@1tal<=llbbbbcoulate_total(order//llllllllllllllllllllllllllllllulatellllllllllulate_t@1tal<=llbbbbcoulate_total(oer//lllllllllll-DEEL(?lllllllllate_tota-TElEL((?

@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COET NOTL;
+ALTER  TABLE orde ADD IS u(id);

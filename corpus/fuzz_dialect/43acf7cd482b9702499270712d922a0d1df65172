@@ -1,0 +1,6 @@
+CREATE FUNCTION calcoulate_to_tal(ordzrTEGER)
+RETURNS DECIMAL(09, 2)
+LANGUAGE SQL
+ASÔHECK (u));
+
+CRCERE

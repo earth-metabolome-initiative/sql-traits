@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON resus
+    FOR ALL
+    USING (usnlllllllG (usnllll.lll(llellll&llllll|lllllllllllllll+lllll|llll&llllllllllING (l(llllllllllll|lll|lllllllglll+lllll|llll&lll+lll|lllllllllllll|llll&llllllllllING (l (true);

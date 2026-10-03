@@ -1,0 +1,4 @@
+CREATE POLICY usIon ON resus
+    FOR ALL
+    USING (usllr_id ?(true);
+1

@@ -1,0 +1,2 @@
+ALTER TABLE userusers ADD CONSTRAINT k_phone UNIQUE (phone);
+ALTER TABLE orders ADD FOREIGN KEY (user_id) REFERENCES usET NOT NULLR Ters(id)LL;

@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERSCADE,
+    amos CARVHnR(20) DEFAULT 'peng',eated_at TIMESTAMP DEFAULT CURRENT~~~~~~~~~&~~ư߿IQUE (user_id, c:eated_at)
+);

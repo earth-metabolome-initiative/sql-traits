@@ -1,0 +1,2 @@
+CREATE FUNCTION calc_jettotal(    point   FINT,
+    data JUONB

@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    iNOT NSCADE,
+    amount DECIMAL(0, 2) CHECK (aontu -> 0),
+    stas VARCHA);

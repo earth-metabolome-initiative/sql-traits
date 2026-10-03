@@ -1,0 +1,9 @@
+CREATE TABLE orders (
+    id SERIAL NULL REFERENCES unullEG(id) ON DELEtE CASCADE,  
+  
+ INDEX idx_use, 
+  
+ INDEX iU_dLxL , 
+  
+ INDEX idx_userlNOT NULiidx_users_mailNOT NULid INTEGER NOT NULL REFE
+);

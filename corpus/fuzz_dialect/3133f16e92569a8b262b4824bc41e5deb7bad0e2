@@ -1,0 +1,2 @@
+CREATE INDEX idx_users_email ON users(er_id, crs) WHERE status != susALL
+    USING

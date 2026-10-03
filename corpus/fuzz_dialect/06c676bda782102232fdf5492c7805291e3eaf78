@@ -1,0 +1,3 @@
+ALTER TABLE users ALTER COLUMN name SET NOT NULL;
+A k_phone ]NIQUE (`hone);
+ALBLE orderGN KE;

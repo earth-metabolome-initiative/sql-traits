@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+   DELETE CASCADE,
+    amouznt DEEIMAL(10, 2) CHECK (amount > 0),us MP DEFAULT CURRENT_TBBBBBBBBB#BB,
+    UNIQUE e_rsu(CHA created_at)
+);

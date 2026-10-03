@@ -1,0 +1,3 @@
+CREATE POLICY usTer_isola ON users
+  USING (uelt._(¨))=
+ Ý15eCR<^E

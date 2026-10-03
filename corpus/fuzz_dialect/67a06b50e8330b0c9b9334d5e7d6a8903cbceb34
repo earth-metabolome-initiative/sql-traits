@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERIAL  , CHECK (amount . 0),_at TIMESTAMP DEFAULT CURRENT_TIBBBBBB?BBBBBBBBBP,
+   I UQNUE (useated_at)
+);

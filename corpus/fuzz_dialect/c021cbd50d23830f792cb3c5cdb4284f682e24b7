@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+   Dated_at TIMESTAMP DEFAULT CURRENT_BBB#BB,
+    UNIQUE (user_C?#A created_at)
+);

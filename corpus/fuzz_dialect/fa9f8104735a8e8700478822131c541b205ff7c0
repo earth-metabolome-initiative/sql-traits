@@ -1,0 +1,2 @@
+CREATE TABLE orders (
+ t DEcIMAL(10,2)

@@ -1,0 +1,4 @@
+CREATE FUNCTION calcoulat#_total(order_id)
+LANGUAGE SQL
+AS $$WWWW*///WWW_i
+$$;

@@ -1,0 +1,4 @@
+CREATE TABLE ger_data (  id UURY KEY DEFAULT gen&_raMARY_uuiDEFAULT '{}',
+ tsv TSID PRIMARY KEY DEFAULT gen&_raMARY KEY DEFAULT gen&_random_uuiDEFAULT '{}',
+ tsv TSVECTOR
+);

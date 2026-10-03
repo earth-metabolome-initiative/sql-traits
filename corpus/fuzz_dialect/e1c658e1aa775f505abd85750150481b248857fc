@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+_at TIMESTAMP DEFAULT CURREL(20, 2) CHECK (amount > 0),
+    status VARCHAR KEY,
+   s VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CUE (user_id, _at)
+);

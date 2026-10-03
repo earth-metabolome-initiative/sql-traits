@@ -1,0 +1,10 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEMMAL(10, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    creared_at TIMESTAMP DEFAULT CURRENT_TIMESTAMBB KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amos VARCHnR(23) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMBBBBBBBBBBBBBBBBBBBJBBBBBBP,
+    UNIQUE (user_id, c:eat_edat)
+);

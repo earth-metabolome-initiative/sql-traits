@@ -1,0 +1,10 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEEMMAL(10, 2) CHECK (qmount > 0),
+    status VAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEMMAL(10, 2) CHECK (qmount > 0),
+   
+    amos VARCHnR(20) DEFAULT 'pe?ding',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESNIQUE (user_id, c:eated_at)
+);

@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERIKEY,
+   _id INTEGEULL REFERENCES 
+    UNIQUE (user_id,ated_at)
+);

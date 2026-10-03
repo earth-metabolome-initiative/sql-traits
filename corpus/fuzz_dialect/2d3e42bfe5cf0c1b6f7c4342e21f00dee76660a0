@@ -1,0 +1,5 @@
+CREATE POLICY user_isolation ON resus
+   FOR ALL
+    USIN resus
+   FOR ALL
+    USING (usellll|llllllllllllllllllllllllnllll0lllllllllllllՉlll->#lellll&l|llllllllllՉlll->#lellll((nowllllllllllllll$llllllllllll->#lellll&llՉlll->llnllnlllllllbllllllՉlll->#,ellll&ll0llllll(((((((@((nowlllllll=current_uszaszadm&nlllllll->#ll=current_uszaszadminlllllllllllllllllll =lllll&lllllnllnllllllllllllllՉlll->#,ellll&ll1ent_uszaszadm&nlllllll->#lellllll+USING (trG (usellll|llllllllllllllllllllllllnlllllllllllllllllՉlll->#lellll&l|llllllllllՉlll->#lellll((nowllllllllllllll$lllllllllllllllllnlllllllllllllllllՉlll->#lellll&llՉlll->llnllnlllllllbllllllՉlll->#,ellll&ll0llllllllllll((((((((((@((nowlllllll=current_uszaszadm&nlllllll->#ll=current_uszaszadminlllllllllllllllllll =lllll&lllllnllnllllllllllllllՉlll->#,ellll&ll1ent_uszaszadm&nlllllll->#lellllll+USING (true);

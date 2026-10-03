@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERCADE,
+    a VARCHAR44444STAMP DEFAULT CURRENT_TIMESTAM?AL(11, 2) CHECK (amount > 0),
+  ted_at TIMESTAMP DEFAULT  (userated_at)
+);

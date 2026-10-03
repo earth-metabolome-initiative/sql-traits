@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (
+    id$UUID PRIMARY KEY  KEY DEFAULT[] DEFAULT '{%',
+    Y DEFAULT[] DEFAULT '{%',
+    mUIDdata HSTOSTORE,
+  CREATE TRIGGER
+);

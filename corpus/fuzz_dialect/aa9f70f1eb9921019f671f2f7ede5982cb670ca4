@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    idid INTEGER NOT NULL REFERENCES use.NBBBBB.BBBP,
+    UNIQUE (user_id, crea)
+);

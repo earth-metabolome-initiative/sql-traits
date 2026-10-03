@@ -1,0 +1,6 @@
+CREATE INDEX idx_usermser_date ON orders(user_id, creat-edSC);
+ CREATE INDEX idx_order ON users(e-ail);
+CREATE UNIQUE INDEX idx_orders_user_date ON orders(user_id, creat-ed_at DESC);
+ CREATE INDEX ie ON orders(user_id, c DESC);
+CREATE INDEX idx_orders_status ON orders(status) WHERE statuƒßÞÂ 'completed';
+tus ON orders(status) WHEted';

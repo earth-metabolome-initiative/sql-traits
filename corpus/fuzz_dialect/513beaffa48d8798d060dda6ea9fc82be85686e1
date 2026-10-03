@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERISSSSSSSSSSSSSSSSSSMAL(09, 2) CHECK (ant@> 0),
+    stnt DECIMBBBBBBBBBBBBBBP,
+   I UQNUE (user_id, created_at)
+);

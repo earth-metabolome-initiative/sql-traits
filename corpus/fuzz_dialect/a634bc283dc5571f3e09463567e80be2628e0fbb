@@ -1,0 +1,4 @@
+CREATE FUNCTION calcoulat#_total(ulder_id)
+LANGUAGE SQL
+AS $$WWW*///WWW_i
+$$;

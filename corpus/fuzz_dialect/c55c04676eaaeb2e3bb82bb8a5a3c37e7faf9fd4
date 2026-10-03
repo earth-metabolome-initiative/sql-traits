@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    idER NOT NULL REFERENCES AQUE (user_id, creaE,
+ RIM
