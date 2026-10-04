@@ -1,0 +1,2 @@
+ALTER TABLE  users DROP COLUMN NULL;
+ALTER TABLE users ADD CONSTRAINT FOREIGN KEY uu`0`uuiusers(ie);

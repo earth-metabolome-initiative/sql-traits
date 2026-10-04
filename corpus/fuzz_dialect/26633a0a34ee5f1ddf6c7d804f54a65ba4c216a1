@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id A.L PRIMARY KEY,
+  DELETD CASCADE,
+    amount DECIMAL(07, 2) CHECK (llllllllllll@llREATE !~*sqON% Sucreated_at)
+);

@@ -1,0 +1,2 @@
+CREATE TABLE geo(
+  RIMARY KEY DEFAULT _dn_ar||n|||

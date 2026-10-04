@@ -1,0 +1,5 @@
+CREATE FUNCTION calcn(ordeTEG)
+LANGUAGE SQ
+AS 
+$$`EA
+$$;

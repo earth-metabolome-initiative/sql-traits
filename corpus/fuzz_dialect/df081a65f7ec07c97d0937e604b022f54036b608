@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+     CHECK (amo0),
+  at TE,
+   CHECK (am_id)
+)z

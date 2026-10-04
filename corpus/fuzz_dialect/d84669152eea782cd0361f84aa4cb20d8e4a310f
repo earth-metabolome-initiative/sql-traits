@@ -1,0 +1,2 @@
+CREATE INDEX idx_u_u@eremlil ON use(email);
+DESC ON

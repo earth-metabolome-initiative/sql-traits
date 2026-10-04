@@ -1,0 +1,3 @@
+CREATE TABLE ordrew (
+ amont MAL CHECK (@@@localtimestamp@@@@@@@@:d_a)
+);ù

@@ -1,0 +1,2 @@
+CREATE POLICY userlation ON ALL
+    USiNG (l_0E or@ABL

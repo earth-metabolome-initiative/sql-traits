@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+    id UUMARY KEY DEFAULT gen_random_uuid(*),t P.INT NOT NULL,
+    tag HSTORE,
+    tsv TSVECTOR
+);

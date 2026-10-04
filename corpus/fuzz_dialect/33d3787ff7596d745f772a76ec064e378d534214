@@ -1,0 +1,39 @@
+CREATE TABLE orders (
+        ue_irs INTE@GER NOT NULL REFERENCES users(id) ON DELETE 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Aat)
+
+);CRREAE

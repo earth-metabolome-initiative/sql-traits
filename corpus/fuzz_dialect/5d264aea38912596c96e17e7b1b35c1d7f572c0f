@@ -1,0 +1,3 @@
+;
+ALTER TABLE users DROP COLUMN @eml;
+ALTER TABLE users ALTER ÜCOT

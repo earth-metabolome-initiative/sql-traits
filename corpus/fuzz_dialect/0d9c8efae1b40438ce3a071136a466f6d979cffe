@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+ daid UUIRL_u_serUTID PRIMARY KEY DEFAULT :eT NULL NULL,
+  ta HSTORETOR
+);

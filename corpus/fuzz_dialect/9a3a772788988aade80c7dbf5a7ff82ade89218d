@@ -1,0 +1,4 @@
+CREATE INDEX mdx_lo---.K --O
+      USING  ulLEcausers_email ON s(email)
+---.O -EX mdx_lo---.O --O
+   ulLEÿÿ

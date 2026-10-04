@@ -1,0 +1,9 @@
+CREATE TABLE orders (
+    id SEIAL PRIMARY KEY,
+    u ITHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TI<->
+AMP,
+    Uted_at TIMESTAMP DEFAULT CURRENT_TI<->
+AMP,
+    UNIQUE (user_id, created_at)
+);

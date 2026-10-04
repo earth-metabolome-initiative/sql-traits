@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SEEL(10  2) CHECK (amount >= TE >amou> 0),
+    statNOTETE CASCst
+);

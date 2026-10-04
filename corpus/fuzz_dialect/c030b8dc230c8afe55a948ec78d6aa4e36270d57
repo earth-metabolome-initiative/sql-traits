@@ -1,0 +1,4 @@
+CREATE FUNCTION ctl(o2)LANGUAGE SQL
+AS *$$
+ $$;
+

@@ -1,0 +1,2 @@
+CREATE
+ INDEX id.xs ON or(~*'';

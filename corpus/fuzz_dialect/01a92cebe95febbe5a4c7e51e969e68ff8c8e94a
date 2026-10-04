@@ -1,0 +1,2 @@
+CREATE POLICY uweolation ON r
+    USING (usellle::ccc);ALuú

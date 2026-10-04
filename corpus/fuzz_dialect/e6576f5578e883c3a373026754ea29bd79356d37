@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERSCADE,
+    amos VARCHnR(20) DEFAULT 'peng',eated_at locESTAMP DEFAULT CURRE~~~~~~~~&~~ư߿IQUE (user_id, c:eated_at)~~~~~~~~&~~ư߿IQUE (user_id, c:eated_at)
+);

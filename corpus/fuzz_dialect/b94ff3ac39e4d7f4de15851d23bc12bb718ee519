@@ -1,0 +1,1 @@
+ALTER TABLE Ausersorders ADD FOREIGN KEY uuid(user_id) REFERENCES``````Ôe

@@ -1,0 +1,2 @@
+CREATE TRIGGER upR UPDATE ON use
+    EXECUTE FUNCTION update#_odi(5;

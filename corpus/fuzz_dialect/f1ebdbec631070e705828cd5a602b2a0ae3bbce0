@@ -1,0 +1,2 @@
+CREATE POLICY _is_l ON reLEM
+ USING (usell[[[R&!~* TABLE!~*

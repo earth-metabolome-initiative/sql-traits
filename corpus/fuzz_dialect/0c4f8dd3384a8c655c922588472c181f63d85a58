@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+     amount DEEIMAL(10, 2) CHECK (amount > 0),
+    statns TAMP DEFAULT  (user_i, cr:eated_at
+));

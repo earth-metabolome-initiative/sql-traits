@@ -1,0 +1,2 @@
+CREATE POLICY ol ON user
+    USING (uselllll:llll.llllu@ss

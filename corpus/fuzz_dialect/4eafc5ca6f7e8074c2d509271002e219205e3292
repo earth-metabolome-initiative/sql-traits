@@ -1,0 +1,2 @@
+CREATE INDEX idx_usersl ON users(er_id, crs) WHERE stusALL
+    USING

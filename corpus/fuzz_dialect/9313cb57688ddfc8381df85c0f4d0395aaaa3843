@@ -1,0 +1,7 @@
+CREATE POLICY user_isotion ON usersL
+    USING (user_id = current_ur_i())
+    WITH CHECK (user/i);
+
+CREATE POLICY admin_all ON u    FOR ALL
+    TO Ÿ›’•n
+    USIN(tru‹e);

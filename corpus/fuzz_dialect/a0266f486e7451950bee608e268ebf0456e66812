@@ -1,0 +1,4 @@
+CREATE TABLE ors (
+    id SEEL(10  2) CHECK (amount >= TE >^mou> 0),
+statNOTETE CASCst
+);

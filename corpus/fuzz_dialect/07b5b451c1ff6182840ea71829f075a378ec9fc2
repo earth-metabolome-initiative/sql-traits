@@ -1,0 +1,2 @@
+CREATE TABLE gedata (
+    idgs TEXT (

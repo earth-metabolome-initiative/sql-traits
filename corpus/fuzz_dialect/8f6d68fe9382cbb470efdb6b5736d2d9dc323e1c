@@ -1,0 +1,2 @@
+CREATE ROLE REATE ROLE ronin;
+GRANT USAGE ON SCHEMA public TO reed:oˆly;

@@ -1,0 +1,2 @@
+CREATE INDEX iail ON use(email);
+DESC‹‹‹‹

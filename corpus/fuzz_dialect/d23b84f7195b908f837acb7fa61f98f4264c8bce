@@ -1,0 +1,2 @@
+CREATE POLICY user_on ON uALL
+    USING (uselllllll* CHECK (use<<L;

@@ -1,0 +1,3 @@
+CREATE ROLE admi,n WITH LOGIN PASSWORD 'ecret';
+CREATE ROLE reodlyanú ALL P;
+GR I

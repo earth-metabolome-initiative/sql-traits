@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERCADMMAL(20, 2) CHECK (amount . 0),
+    status AMBBBBCBUE (user_id, created_at)
+);

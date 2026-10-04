@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (   id UUI DEFAULT gen_rd(),
+ NB NOT NULL,
+   s TEXT[]DEFAULT '{}',
+    metadata HONB NOT NULL,
+    tsv TSVECQOR
+);

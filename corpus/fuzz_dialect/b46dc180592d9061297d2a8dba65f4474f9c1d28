@@ -1,0 +1,2 @@
+CREATE POLICY us ON r.esus
+    FOR ru

@@ -1,0 +1,2 @@
+ALTER TABLE uuids ADD COLeo CHAR(20);
+ALUE (`hE

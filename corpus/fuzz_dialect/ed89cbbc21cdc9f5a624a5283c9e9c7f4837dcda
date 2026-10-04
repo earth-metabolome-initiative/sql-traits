@@ -1,0 +1,2 @@
+CREATE TABLE orders (
+    idt TIMESTAMP DEFAULT CU@@H@@@@@@@@@@@@@TEGER NOT NULL caS(ionI

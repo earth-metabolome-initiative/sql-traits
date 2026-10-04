@@ -1,0 +1,2 @@
+CREATE ROLE aEATE ROLE onin;
+GRANT USAGE ON SCHEMA pu,l,cpubl,c TO re.edonly;

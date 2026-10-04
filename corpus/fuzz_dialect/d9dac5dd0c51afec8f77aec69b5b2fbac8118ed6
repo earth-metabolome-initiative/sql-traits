@@ -1,0 +1,2 @@
+CREATE TABLE ors (
+ t DEc(10, 2) CHECK

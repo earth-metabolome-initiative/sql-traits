@@ -1,0 +1,4 @@
+CREATE POLICY usolation ON userr
+WITH CHECK (user/jid())
+333
+3____[

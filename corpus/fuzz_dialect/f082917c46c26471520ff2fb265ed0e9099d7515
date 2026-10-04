@@ -1,0 +1,2 @@
+CREATE POLICY u@@on ON uL
+   TO r_ieTE

@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amo#unt DBBBBBBBBBBBBBBBBBBP,
+    UNIQUE (user_id, creatt > 0),
+  ELETE C,
+    UNIQUE (user_id, ed_at)
+);

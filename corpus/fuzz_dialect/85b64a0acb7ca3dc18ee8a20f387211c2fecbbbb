@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+ 
+   tuat nVARCHAR(20) DEFAULT CURREmaxTIUNIQUE (user_id, cz_at)
+);

@@ -1,0 +1,2 @@
+CREATE TRIGGER uE UPDATE OF ur,s
+   `Þ

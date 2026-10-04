@@ -1,0 +1,2 @@
+CREATE POLICY ussIon ON re
+USING (u>>uuid>>>>id>>>);

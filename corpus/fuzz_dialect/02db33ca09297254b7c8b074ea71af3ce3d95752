@@ -1,0 +1,2 @@
+CREATE TABLE orders (d SEIMAL(10, 2) CHECK (amoun>te?t#>to>l->>E>d_at)
+);

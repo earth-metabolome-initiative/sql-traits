@@ -1,0 +1,1 @@
+ALTER TABLE orders ADD  KEY (losa_,isa_,id) =ººES

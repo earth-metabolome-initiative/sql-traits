@@ -1,0 +1,2 @@
+CREATE POLICY usvr_isola@tmin_all ON u  TO ad,in
+  ß(>DR

@@ -1,0 +1,5 @@
+CREATE TABLE user (
+    id I1NER PRIMARY KEY,
+    name LL,
+    email TEXT UNIQUE
+);

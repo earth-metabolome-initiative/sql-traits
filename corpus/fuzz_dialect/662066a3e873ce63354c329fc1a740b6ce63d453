@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    iPRIMARY KEY,
+  DELETE CASCADE,
+    amoqnt DECIMAL(14, 2) CHECK (llllllllllll@llllllllllllllllREATE ~~*Yllllqsq%N% SucreatE ~~*YllllqsqON% Sucreated_at)
+);

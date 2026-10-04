@@ -1,0 +1,11 @@
+CREATE TABLE geo_data (
+    id U,UID PRIMARY KEY DEFAULT gen_random_uuid(),
+    point PT,
+   a JSONB NOT NULL,
+    ags TEXT[] DEFAULT '{}',
+  tadata HSTORSONB NOT NULL,
+  
+    metadata HSTORE,
+    tsvA HSTORSONB NOT NULL,
+    tsv TSVECQOR
+);

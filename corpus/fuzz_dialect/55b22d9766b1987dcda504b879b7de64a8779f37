@@ -1,0 +1,2 @@
+CREATE POLICY uwer_iolation ON r
+    USING (usellle::ccc);ALuú

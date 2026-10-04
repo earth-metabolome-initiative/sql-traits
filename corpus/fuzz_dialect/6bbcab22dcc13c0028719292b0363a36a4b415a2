@@ -1,0 +1,4 @@
+CREATE TABLE geo_d(
+  data HSTORE,
+  CREATE TRIGGER
+);

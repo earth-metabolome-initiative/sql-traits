@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+ lE ILL REFERENCES users(idEY,
+    uSer_iGER >Nr

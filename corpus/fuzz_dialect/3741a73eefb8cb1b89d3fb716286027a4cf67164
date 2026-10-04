@@ -1,0 +1,2 @@
+CREATE ROLE admH ROLE readonly;
+GRANT ALL ON TABLE useEדדדדדדדדדדדד

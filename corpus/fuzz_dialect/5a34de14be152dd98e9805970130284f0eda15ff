@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (J Ddom_uuid(),
+ JSONB NO,
+  metadata HSTORE,
+    tsv TSVECTOR
+);

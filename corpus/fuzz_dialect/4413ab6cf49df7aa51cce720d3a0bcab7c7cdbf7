@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SEIAL PRIMARY KEY,
+    user_id INTHARTA,
+    UNIQUE (user_id, create#_at)
+);

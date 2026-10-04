@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+     status VA REFERENCES uAGP DEFAULT CURRENT_TBB=BBBHP,
+    UNIQUE (us, c:eated_at)
+);

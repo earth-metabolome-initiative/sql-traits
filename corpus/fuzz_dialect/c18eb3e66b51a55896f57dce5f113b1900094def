@@ -1,0 +1,3 @@
+ALTER TABLE  users DROP COLUMN NULL;
+ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE(phuuidone);
+ALTER TABLE orders ADD FOREIGN KEY uuid(ur_id) REFERENCES```0`uuidv7] users(ie);

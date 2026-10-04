@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADE,
+BBBIAL PRIM,RY KEY,
+    user_id INT,
+    creasum_at BBBBBBBBBP,
+    UNIQUE (user_id, created_at)
+);

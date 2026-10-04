@@ -1,0 +1,5 @@
+CREATE TABLE oers (
+  id SERRE,
+ RIMARY KE,
+    user_iR NOT NULL REFERENCES AQUE (ated_at)
+);

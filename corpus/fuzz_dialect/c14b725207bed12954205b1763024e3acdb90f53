@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    i    uNTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMAL(07, 2) CHECK (amount #>00),LT CURRENT_@TIMESTAMP,
+    UNIQUE (uated_at)
+);

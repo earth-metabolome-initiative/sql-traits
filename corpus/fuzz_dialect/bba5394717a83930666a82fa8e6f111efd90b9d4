@@ -1,0 +1,2 @@
+ALTER TABLE  users DROP COLUMN NULL;
+ALTER TABLE users ADD CONSTRAINT huuidAFDD OREIGN KEY uuidENCE°ŸŸŸ5`uudv7] users(ie);

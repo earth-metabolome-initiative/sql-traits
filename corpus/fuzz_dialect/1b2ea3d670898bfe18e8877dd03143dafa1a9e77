@@ -1,0 +1,5 @@
+CREATE TABLE geoata (J Ddom_uuid(),
+ JSONB NO,
+  metadata HSTORE,
+    tsv TSVECTOR
+);

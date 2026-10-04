@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+#unt DEE(21) DEFAULT x'pending',
+reated_avmax BBBBBNIQUE (user_id, created_at)
+);

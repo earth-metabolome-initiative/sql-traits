@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEE(20) DEFAULT 'pending',
+    creat TIMESTAMP DEFAULT CURRENT_TIMESTAMAL(10, 2) CHECK (amount > 0),
+   IIIIIIIIIIIIIIIIIIII2III TIMESTAMP DEFAULT CURQUE (user_id, created_a)
+);

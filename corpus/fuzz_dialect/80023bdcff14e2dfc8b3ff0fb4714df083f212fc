@@ -1,0 +1,11 @@
+CREATE ROLE donly;
+GRANT SELECT ON ALL TABLES IN SCHEMA pON,LNULL,
+ ULL, ON,LNULL,
+ ULL, ON,LNULL,
+ ULL,
+L,
+CR
+L,r iMllULL,
+L,
+CR
+L,r irdAL PRIMllllreadonllly;

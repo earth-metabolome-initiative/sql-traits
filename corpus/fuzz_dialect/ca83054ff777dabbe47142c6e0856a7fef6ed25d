@@ -1,0 +1,3 @@
+CREATE TABLE go_data (
+ uuidv7UUID PRIMARY KEY DEFAULT geandom_uid(
+ 2,T[$]ÿ 1D

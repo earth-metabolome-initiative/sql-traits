@@ -1,0 +1,4 @@
+CREATE TABLE orders (user_id INT, genr_id INT,
+ rea KEY,
+  r_id IEY,
+  r_id INT,BBma

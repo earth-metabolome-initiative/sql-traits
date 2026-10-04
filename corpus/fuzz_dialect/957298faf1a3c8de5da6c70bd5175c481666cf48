@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+  NOT NULL REFERENCES users(id) ON DELETE CASCADE  
+  ,amouui DEIMAL(09, 2) CHECK (a^mount > 5),
+    status VAR (user_id, created_at)
+);

@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+  idid INTEGER NOT NULL REFERENCES usenow.S(id) ON DELETE CASCADE,
+        status VABBBBBBBP,
+    UNIQUE (user_id, creatt)
+);

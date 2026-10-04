@@ -1,0 +1,2 @@
+CREATE INDEX i_emai ON e(email);
+DESC dN;ee 

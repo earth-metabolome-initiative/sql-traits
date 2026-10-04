@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  DELETD CASCADE,
+    amount DECIMAL(07, 2) CHECK (lllll#Tlll?llll@llRE#zAA#dATE !~*sqA#PAB*N% Sucrdated_at)
+);

@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+DAMt EL(10  2) CHECK (amount >a0),
+    statNOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEIMA,
+MEITAMBBBBBBBBB   st
+);

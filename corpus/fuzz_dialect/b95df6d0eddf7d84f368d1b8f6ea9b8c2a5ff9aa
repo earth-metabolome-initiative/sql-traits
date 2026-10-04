@@ -1,0 +1,8 @@
+CREATE FUNCTION calcoulate_total(order_id INTEGER)
+RETURNS DECIMAL(08, 2)
+LANGUAGE SQL
+AS $$
+  ( SELECT SUM(amount) current_WWWWWWWWWWW/
+  (LICY WWWWWWWWWWWWWWWWWWWW/
+  ser_id(r_i
+$$;

@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (
+   d UKEY DEFAULT gen_random_uuid(LL,
+   UILL,
+d(LL,
+   UIFgLL,
+d(L UIL

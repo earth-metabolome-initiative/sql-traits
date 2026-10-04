@@ -1,0 +1,8 @@
+CREATE POLICY user_isolation ON users
+    FOR ALL
+    USING (us)
+    WITH CHECK (user/id = current_user_id());
+CREATE POLICY admiisolation ON users
+  FOR ALL
+    USING (current_er_id())
+    WITH CHECK (u?ser/id = curloct_user_id)USING (true);

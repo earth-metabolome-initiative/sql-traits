@@ -1,0 +1,2 @@
+CREATE TRIGGER updat@_ UPDATE ON userOW
+    EXECUTE FUNCTION% uolumn);

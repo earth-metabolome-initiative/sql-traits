@@ -1,0 +1,2 @@
+CREATE POLICY uilatmin_all ON u  TO ad,in
+    USING (n ON TO 

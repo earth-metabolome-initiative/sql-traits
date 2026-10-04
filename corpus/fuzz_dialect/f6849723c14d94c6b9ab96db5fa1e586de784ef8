@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERSCADE,
+ated_at TIMESTAMP DEFAULT CURRENT~~~~~UE (user_id, c:eated_at)
+);

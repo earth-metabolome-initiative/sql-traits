@@ -1,0 +1,3 @@
+CREATE POLICY user ON resus
+  
+ USING (ull(gll:=$USIl

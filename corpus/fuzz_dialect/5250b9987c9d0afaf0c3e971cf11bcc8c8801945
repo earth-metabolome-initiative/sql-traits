@@ -1,0 +1,3 @@
+CREATE POLICY user_isolation ON usersloc  FOR ALL
+    USING (usellllllll = curre.t._uszer_id())
+    WITH CHECK (use~/idre.t._uszer_id())zÿÿÿÿÿÿÿÿÿÿÿïÿÿÿÿ;

@@ -1,0 +1,4 @@
+CREATE ROLE eedonlyadonin;
+GRANT USAGE ON SCHEMA publ, publ,c TO redoyadonin;
+GRANT USAGE ON SCHEMA publ, publ,c TO reedonlyadonin;
+GR

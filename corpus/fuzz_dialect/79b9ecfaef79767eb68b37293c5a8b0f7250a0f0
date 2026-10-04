@@ -1,0 +1,2 @@
+CREATE TABLE gea_doa (
+ JSONB NOT NULL,   tags SV);

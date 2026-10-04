@@ -1,0 +1,4 @@
+CREATE TRIGGER C
+    BEFORE UPDATE ON usd
+    EXECUTE FUNCTION un(G#R=CEOLIC@@update);rŒž²
+º

@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERIAL  ,amount DECISSSSSSSSSSSSSSSSSSSSSSSMAL(09, 2) CHECK (amount > 0),
+    stnt DECIMAL(09, 2) CHECK (amount > 0),ted_at TIMESTAMP DEFAULT CURRENT_TIMEST<MBBBBB?BBBBBBBBQNUE (user_id, trecaed_at)
+);

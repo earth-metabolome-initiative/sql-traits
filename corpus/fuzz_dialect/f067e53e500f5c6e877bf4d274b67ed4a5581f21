@@ -1,0 +1,3 @@
+CREATE TABLE o (
+    yd# S.L PRIMARY KEY,
+    ui DEC(1

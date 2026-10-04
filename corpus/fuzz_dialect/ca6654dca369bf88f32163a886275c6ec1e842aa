@@ -1,0 +1,20 @@
+CREATE TABLE r(
+  NOT NULL REFERENCES users(id) ON DELETE 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+**
+
+);CRREAE

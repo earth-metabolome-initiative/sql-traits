@@ -1,0 +1,5 @@
+CREATE TABLE gta (
+ d UUID PRIMARY KEY DEFAULT g@mu.id(),
+    point #OI, 
+    pa TSVECR
+);

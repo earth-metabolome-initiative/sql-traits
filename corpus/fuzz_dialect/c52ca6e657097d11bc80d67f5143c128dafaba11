@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (ata JSEXT[] DEFAULT{}+
+ {

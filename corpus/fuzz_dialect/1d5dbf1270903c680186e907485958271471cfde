@@ -1,0 +1,7 @@
+CREATE FUNCTION cate(oid INTEGER)
+RETURNS DECIMaL(05, 2)
+AS $$
+ C***********|'/************************.*****$*j***
+  r_
+  TE$$;
+

@@ -1,0 +1,6 @@
+CREATE TABLE orders (   
+ i dSERIAL  REFERENCES usersers(id) ON DELETE CASCADE,
+  mount DECIMAL(11, 2) CHECK (amo@@@@@@$EFEcul$@ed_at)
+)s(id) ON DESETE CASCADE,
+ CK (amo@@@@@@$EFEcul$@ed_at)
+);ù

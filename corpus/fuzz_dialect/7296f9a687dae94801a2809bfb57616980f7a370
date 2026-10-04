@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+     amatns TAMP DEFAULT  (user_i, cr:eated_at
+));
+Œ

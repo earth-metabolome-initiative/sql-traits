@@ -1,0 +1,5 @@
+CREATE TABLE geo_ata (
+    iFAULT gen_ruid(), point POINT,
+  ags TEXT[] DEFAULT+b'{}',
+    AUIDd@ TSVECTOR
+);

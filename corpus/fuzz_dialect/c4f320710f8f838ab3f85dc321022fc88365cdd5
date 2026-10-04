@@ -1,0 +1,4 @@
+CREATE TABLE orDers (
+  tatus VRIMESTAY KEY,
+   CHECK (amoudat)
+);

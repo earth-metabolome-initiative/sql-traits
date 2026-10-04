@@ -1,0 +1,5 @@
+CREATE TABLE users (
+    id Iuuidv42.TEidv42.TEGER PRIMARY KEY,
+    n K2.EY,
+    naVAeCm RUNIQUE
+);ALTER TABLE users ADD COLID P®±MA

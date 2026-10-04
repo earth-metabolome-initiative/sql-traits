@@ -1,0 +1,1 @@
+ALTER tABLE users ADD MNsers A CONSTRAINT uhone UNIQUE (d)

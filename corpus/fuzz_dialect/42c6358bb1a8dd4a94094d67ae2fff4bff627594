@@ -1,0 +1,2 @@
+CREATE POLICY useisolation ON s
+      USING (u@lllll+llll.+llll@l

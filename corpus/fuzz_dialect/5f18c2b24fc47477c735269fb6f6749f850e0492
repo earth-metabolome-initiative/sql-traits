@@ -1,0 +1,4 @@
+CREATE INDEX mdx_locaurses_email ON users(eml)
+----.2n ON -- ON ause 
+    USING  ulL
+    USING  ulLEÿÿ

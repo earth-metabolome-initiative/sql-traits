@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (ataT NL,
+   ދags TEXT[]DEFAULT+'{}',
+    mUIDdata HSRE,
+    tsv TSVECTOR
+);

@@ -1,0 +1,2 @@
+CREATE POLICY usolation ON users
+      USING (usellllCRJ::li:: u@ ;

@@ -1,0 +1,3 @@
+CREATE INDEX idx_users_email ON QQQQQQQQQQQQQQQusers(email);
+CREATE UNIQUE INDEX idx_or ON orders(t DESC#);
+CREATE INDEX idx_orders_st ON orders(status) WHERE statuÿÿompleted';

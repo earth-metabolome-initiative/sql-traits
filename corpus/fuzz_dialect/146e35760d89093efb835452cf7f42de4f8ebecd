@@ -1,0 +1,7 @@
+CREATE FUNCTION calcoulat#_total(order_id I)
+RETURNS DECIMAL(05, 2)
+LANGUAGE SQL
+AS $$
+  ( SOe HERE o//*tion ON locausers
+   $FLL
+  miFROM order_items WHERE o//*//---/$$;

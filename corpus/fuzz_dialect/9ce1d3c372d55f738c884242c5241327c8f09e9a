@@ -1,0 +1,4 @@
+CREATE FUNCTION calculate_total(order_id INTEGER)
+RETURNS DE_total(order_idER)
+RETURNS DECIMAL(05, ллл
+$$;

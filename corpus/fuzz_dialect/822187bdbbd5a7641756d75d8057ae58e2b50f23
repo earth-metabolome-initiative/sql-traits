@@ -1,0 +1,2 @@
+CREATE POLICY user_isolqon ON r FOR ALL
+    USING (usnll( ((((((((rent_uAL))))))))))´ºÿÿÿÿ

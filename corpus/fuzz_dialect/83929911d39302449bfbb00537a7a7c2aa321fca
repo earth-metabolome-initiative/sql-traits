@@ -1,0 +1,2 @@
+CREATE ROLE aEATEdonin;
+GRANT USAGE ON SCHEMA publ,c TO re)edonly;

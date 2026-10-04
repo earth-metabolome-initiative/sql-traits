@@ -1,0 +1,2 @@
+CREATE TABLE geata (
+    id UU DEFAULT gen_r_u(TABLE :@ TABLE gY 

@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+    iEFAULnoint POINT,
+   ags TEXT[] DEFAULT+b'{}',
+    DdS TvVECTOR
+);

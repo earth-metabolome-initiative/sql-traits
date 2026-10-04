@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERRE,eee
+ RIMARY KEY,
+    user_id INTNULL REFERENCES AMBBBBBBBBQUE (user_id,d_at)
+);

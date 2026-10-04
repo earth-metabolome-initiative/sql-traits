@@ -1,0 +1,1 @@
+CREATE INDEX ide ON orders(uetus) WHERE statuz != 'completed';CREATE INDEX idx_us_email_user_date ON orders(gen@@@null@tatu@@D@@@@tatus) WHERE st

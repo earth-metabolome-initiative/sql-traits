@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SE NOT NULL REFERENCES uESTAY KEY,
+    mser_id INTEGER NOT NULL REFERENCES users,IENUU Q (user_id, cearted_at)
+);

@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+     CHECK (amou.t > 0),
+  at TE,
+   CHECK (amou.t > 0),
+  at TQUE (user_id)
+)z

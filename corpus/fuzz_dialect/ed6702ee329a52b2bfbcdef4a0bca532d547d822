@@ -1,0 +1,3 @@
+CREATE ROLE eATE ROLE readonly;
+GRANT SELECT TO ly;
+/

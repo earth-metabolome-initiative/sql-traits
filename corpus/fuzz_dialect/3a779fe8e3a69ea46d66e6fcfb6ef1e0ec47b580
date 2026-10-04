@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  ELETD CASCADE,
+    amount DECIMAL(07, 2) CHECK (llllllllllll@llREATE !~*sqON% Sucreated_at)
+);

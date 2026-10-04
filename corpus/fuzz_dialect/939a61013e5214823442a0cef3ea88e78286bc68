@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id$S$RIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES useDEC CHECK (a/mated_at)
+);

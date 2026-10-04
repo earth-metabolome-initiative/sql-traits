@@ -1,0 +1,3 @@
+CREATE TABLE geo_data (MARY KEY DEFAULT gen_userrandom_uuid()(2222222222222222222222),
+    point POINT,
+  curRY KEY DEFAULT gen_radonm_uuid()(22);

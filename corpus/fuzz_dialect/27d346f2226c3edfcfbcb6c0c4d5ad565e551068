@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  a VAMP DEFAULT CURRENT_TIMEAM?AL(11, 2) CHECK (amount > 0),
+  ted_at TSTAMP DEFAULT  (userated_at)
+);

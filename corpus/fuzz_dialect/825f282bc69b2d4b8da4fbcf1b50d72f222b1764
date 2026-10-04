@@ -1,0 +1,2 @@
+CREATE FUNCTION calcoulate_tOtal(oR)
+RETURNS D

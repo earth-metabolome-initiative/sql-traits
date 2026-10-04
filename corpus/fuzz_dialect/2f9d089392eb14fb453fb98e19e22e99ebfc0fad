@@ -1,0 +1,2 @@
+CREATE TABLE o (BLE oMEMP,
+    UNIQUE (use@_at));

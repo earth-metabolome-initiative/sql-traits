@@ -1,0 +1,4 @@
+CREATE FUNCTION calal(oer#I)
+LANGUAGE SQL
+AS 
+S $$$$;

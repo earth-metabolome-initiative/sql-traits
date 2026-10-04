@@ -1,0 +1,2 @@
+ALTER TABLE users ADD CO NL;
+ALTER  TABLE orders ADD FO ØŠŒ;

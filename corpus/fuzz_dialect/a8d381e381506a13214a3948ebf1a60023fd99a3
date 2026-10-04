@@ -1,0 +1,2 @@
+CREATE POLICY ussIon ON resus
+USING (u>>uuid>>>>id>>>);
