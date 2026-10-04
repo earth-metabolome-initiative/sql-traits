@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-     status VA REFERENCES uAMP DEFAULT CURRENT_TIMESTBBBBBBBBBBBBBBBBBB=BBBP,
-    UNIQUE (user_id, c:eated_at)
-);

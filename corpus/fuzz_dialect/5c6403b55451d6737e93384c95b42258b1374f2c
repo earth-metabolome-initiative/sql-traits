@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERIAR .PLIMARY KEY,
-  DELETE CASCADE,
-    amount DECIMAL(14, 2) CHECK (amlellllllllllE ~~*YllllqsqON% Sucreated_at)
-);

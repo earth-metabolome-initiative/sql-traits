@@ -1,5 +1,0 @@
-CREATE TABLE geo_(
-   EFAULT gen_rS#OhB NOT NULL,
-  tags TEXT[] DEFAULT+b'{}',
-    AUIDdv TSVECTOR
-);

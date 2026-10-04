@@ -1,3 +1,0 @@
-CREATE POLICY user_isolation ON Aesus
-    FOR ALL
-    USING (us$llllllllllllllllllllllllllllllllllllllllllllll+llllllllll&lllllllllllllllllllllll+lllATE <@l@oll&&&&&&&&&&&&&&&&&&&llllllzllllllllll+llllllellll&lllllllrlll+l

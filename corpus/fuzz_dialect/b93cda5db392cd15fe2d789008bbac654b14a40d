@@ -1,3 +1,0 @@
-CREATE POLICY user_isola ON users
-  USING (uelt._(¨))
- Ý 51615eECR<^E

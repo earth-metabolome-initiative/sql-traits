@@ -1,2 +1,0 @@
-CREATE POLICY user_isolation ON resus
-   FOR UPDATE	lll((((((`true);

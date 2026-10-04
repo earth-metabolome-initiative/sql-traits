@@ -1,1 +1,0 @@
-CREATE POLICY user_isolation ON  ` 																		order_ue`;

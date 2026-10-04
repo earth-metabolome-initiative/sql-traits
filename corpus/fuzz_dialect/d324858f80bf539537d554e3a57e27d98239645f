@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- RIE CASCADE,
-   tatun VARCHAR(20) DEFAULT CURRENTBBBBBBBBBB#BBBBBBBB (user_id, created_at)
-);

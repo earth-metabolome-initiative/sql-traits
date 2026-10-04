@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-t DECIAML(05, 2) CHECK (amount > 0),
-
-   eat_at TIMESTAY KEY,
-    sur_EPER NOECTOR
-;

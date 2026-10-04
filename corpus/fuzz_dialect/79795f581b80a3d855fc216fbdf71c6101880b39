@@ -1,7 +1,0 @@
-CREATE FUNCTION calcoulate_total(order_d INTEGER)
-RETURNS DECIMAL(20, 2)
-LANGUAGE SQL
-AS $$
- CHE**********************L
-    USING (uM  rder_id =ATE$$;
-

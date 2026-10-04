@@ -1,2 +1,0 @@
-ALTER TABLE users ADD COLUMN puserhone VARCHAR(19);
-ALTER TABLE usersame SET NOT NULER TABWENCES users(i/);

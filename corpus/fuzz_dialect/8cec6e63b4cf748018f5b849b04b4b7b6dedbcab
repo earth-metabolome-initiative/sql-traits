@@ -1,3 +1,0 @@
-CREATE POLICY er_ilation ON uses
-    FOR ALL
-    USING (user_id@@@@@N<^NNNN@@@@@1@@@@@r_ue);

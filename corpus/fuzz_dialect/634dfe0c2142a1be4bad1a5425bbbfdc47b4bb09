@@ -1,1 +1,0 @@
-CREATE INDEX idx_uuserdx ON orders(status) WHERE stat= 'co'-

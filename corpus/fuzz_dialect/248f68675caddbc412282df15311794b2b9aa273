@@ -1,2 +1,0 @@
-CREATE POLICY user_isolati@n ON users
- USING (uselll= curre.t.*_uue);

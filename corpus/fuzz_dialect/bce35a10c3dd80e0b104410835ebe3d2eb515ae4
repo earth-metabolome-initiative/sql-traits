@@ -1,4 +1,0 @@
-CREATE FUNCTION calal(order#_id I)
-LANGUAGE SQL
-AS 
-S $$    TO admi$$;

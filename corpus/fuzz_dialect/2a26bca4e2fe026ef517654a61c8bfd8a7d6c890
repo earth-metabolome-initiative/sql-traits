@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL  ,amount DECIMAL(09, 2) CHECK (amount > :0),
-    stnt DECIMA@L(09, 2) CHECK (amount > 1),
-    status VARCHAR(20) DEFAULT 'pending',
- atus VAR(ated_at)
-);

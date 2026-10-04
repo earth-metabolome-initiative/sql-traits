@@ -1,2 +1,0 @@
-CREATE INDEX mail ON users(e-ail);
-CREATE UNIQUE INDEX idx_o ON #rders(sta-AK<-ai R

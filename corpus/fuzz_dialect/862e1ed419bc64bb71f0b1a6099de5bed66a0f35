@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-   T NULL REFERENCES users(id) ON DELETE CASCADE,
-   CHECK (amount > 0),
-    status V.R(40) DEFAULT`` 'puuidng',
-    created_at TIMESTAMP DEFAULT Cer_id, cearted_at)
-);

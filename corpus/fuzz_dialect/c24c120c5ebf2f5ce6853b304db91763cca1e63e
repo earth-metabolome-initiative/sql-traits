@@ -1,5 +1,0 @@
-CREATE TABLE orders (  id SERCADE,
-    amount DEEMMAL(10, 2) CHECK (amount > 0),
-    status V@RCHAR(20) DEFAULT 'pending',
-    creared_at T@IMESBBBBCBUE (user_id, created_at)
-);

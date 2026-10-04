@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-   NOT NULL REFERENCES fusers(id) ON DELETE CASCADE,
-    amount DEEIMAL(1su2) CHECK (amount > 0),
-MEST@MBBBBBBBBBB    st
-);

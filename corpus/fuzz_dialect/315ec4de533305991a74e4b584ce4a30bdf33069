@@ -1,3 +1,0 @@
-CREATE ROLE doly;
-GRANT   TRIGGER update_
-    EXECE

@@ -1,3 +1,0 @@
-CREATE POLICY user_isolatIonN ON resus
-    FOR ALL
-    USING (u~sel-llnl&$llll&lu~sel-lllnl&$llll&lllllllllllu~sel&$l~lWllB!~~lllllllllllwlWllB!~~lllllllllllllnl&$l~lWllB!~~lllllllllll~lWllB!~~lllll~sel-lllnl&$llll&lllllllllllu~sel&$l~lWllB!~~lllllllllll~lWllB!~~lllllllllllllnl&$l~lWllB!~~lllllllllll~lWllB!~~lll•“lllllnll&$llllllmlWlll@lll

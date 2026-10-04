@@ -1,9 +1,0 @@
-CREATE TABLE geo_data (
-     UIDdUi PRIMARY KEY DEFAULT gen_rando+T,
-    data JSONB NOT NULL,
- ata HSTORE,
- ts 
-    iUUID PRIMARY KEY DEFAULT gen_randT NULL,
-    tags TEXTSTORE, v  XSVECTOR
-);CREATE TABLE geo_daå
-  

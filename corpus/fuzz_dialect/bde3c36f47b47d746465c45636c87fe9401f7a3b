@@ -1,2 +1,0 @@
-CREATE INDEX _emid@_orders_ser_date ON orders(user_id, creat.ed_at DESC);
-ÿ	CRsNorders(status×ß¨÷º­tus != 'c@ompleted';

@@ -1,4 +1,0 @@
-CREATE TA   id SERIAL PRIMARY KEY,
-    auser_id ICADE,
-   ?URRENT_TI
-);

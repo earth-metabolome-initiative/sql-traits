@@ -1,3 +1,0 @@
-CREATE POLICY usstion ON users
-    FOR ALL
-   USING (ullllTlr_id(;

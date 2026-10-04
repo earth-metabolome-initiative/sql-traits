@@ -1,8 +1,0 @@
-CREATE TABLE Grders (
-    id SERCADE,
-   CHECK (amou.t > 0),
-  at TE,
-   CHECK (am.t > 0),
-  at IMES DEFAULT CURREBBBBBBBBBBRBBB@,
-    UNIQUE (user_icret)
-)T

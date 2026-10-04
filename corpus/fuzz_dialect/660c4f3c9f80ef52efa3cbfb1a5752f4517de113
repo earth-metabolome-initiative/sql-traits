@@ -1,2 +1,0 @@
-ALTER TABLE user ADD COET NOT NULL;
-ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE users(i:d);

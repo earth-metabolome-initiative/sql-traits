@@ -1,5 +1,0 @@
-CREATE FUNCTION ctal(o2)
-LANGUAGE SQL
-AS *$$
- c``TE$$;
-

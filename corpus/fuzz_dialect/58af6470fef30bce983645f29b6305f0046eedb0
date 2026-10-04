@@ -1,3 +1,0 @@
-CREATE TABLE geo_data(
-    id UUID PRIMARY KEY DEFAULT _eNNN^NNNnNNNduTo_mu
-);

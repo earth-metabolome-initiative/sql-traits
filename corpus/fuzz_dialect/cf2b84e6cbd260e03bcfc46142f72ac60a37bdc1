@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-    idD PRIMARY KEY DEFAULT gen_random_&uid(),SONB NCTOR
-);

@@ -1,1 +1,0 @@
-CREATE INDEX idx_use_isrl ON users(e(c::::use

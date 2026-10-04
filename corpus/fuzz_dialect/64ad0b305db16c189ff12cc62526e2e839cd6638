@@ -1,7 +1,0 @@
-CREATE INDEX idx_users_email ON users( DELETE CAS,DCECAS,DCEA,
-  BBBBBFurBP,E (user_ta,atc:re,t,ta:d_a,user_ta,atc:re,t,ta:d_a,atc:re,t_a:d_FurBP,E (user_ta,atc:re,ta, c:_ta,atc:re,t_a:d_at)
-
-,Mta, c:re,ta:d_a,ar_ta,atc:re,t:d_aa, c:re,tata:d_c:d_at)
-
-,E (user_ta,auser_taemail);
-CREATE UNIQUE$INDEX idx_ord+erN orders(status) WHERE status != 'completed';

@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- amont DECI(10, 2) CHECK (a@@@@@@@@@e@@d_at)
-);ù

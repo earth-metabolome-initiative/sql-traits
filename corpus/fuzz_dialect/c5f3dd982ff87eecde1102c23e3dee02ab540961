@@ -1,4 +1,0 @@
-CREATE POLICY user_isolan ON users  FOR ALL
-    USING (user_id = ALL
-  ` U(a JSr_isolan ON users  F<<
-)

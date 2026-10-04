@@ -1,3 +1,0 @@
-CREATE TABLE order(
- at MESTAMP DEFAULT CURRENAULT x'pending',
-TIMEST;

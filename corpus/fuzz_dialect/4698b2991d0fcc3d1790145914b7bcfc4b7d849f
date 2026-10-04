@@ -1,3 +1,0 @@
-CREATE TABLE ordrew (
- amont DECIMAL CHECK (@@@@@@@@@@@:d_at)
-);ù

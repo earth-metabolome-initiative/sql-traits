@@ -1,2 +1,0 @@
-CREATE TABLE orders (d SERMAL(10, 2) CHECK (am>>nt>un>>ated_at)
-);

@@ -1,2 +1,0 @@
-CREATE INDEX idx_users_email ON users(email);
-CREATE UNIQUE INDEX idx_orders_user_date ON orders(_id, creat-ed_at DESC);E FUNCTI`æ@ÿÿ 'completedn';

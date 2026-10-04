@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERRE,
- RIMARY KE,
-    user_iR NOT NULL REFERENCES AQUE (ated_at)
-);

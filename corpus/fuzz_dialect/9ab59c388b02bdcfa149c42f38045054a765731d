@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-UNIQUE (use,
- 0s(staed_at)
-);

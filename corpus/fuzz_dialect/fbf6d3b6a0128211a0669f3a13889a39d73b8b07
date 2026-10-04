@@ -1,3 +1,0 @@
-CREATE FUNCTION calcoulate_total(order#_id INTEGER)
-RETURN  SQL
-AS AS $$    TO admi$$;

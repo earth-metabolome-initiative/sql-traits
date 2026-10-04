@@ -1,3 +1,0 @@
-CREATE
- INDEX ail ON users(emai);
-CREATE UNIQUE INDEX idx_o`de HERE status != 'comleted';

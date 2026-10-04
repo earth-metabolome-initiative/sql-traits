@@ -1,3 +1,0 @@
-CREATE TABLE gea_dota (
- JSONB NOT NULL,   tags SVECTOR
-);

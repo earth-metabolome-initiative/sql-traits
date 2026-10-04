@@ -1,3 +1,0 @@
-CREATE POLICY n ON users
-    FOR ALL
-    USING (use|lllsu*lllllcet_E orü?= curr

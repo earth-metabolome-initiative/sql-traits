@@ -1,2 +1,0 @@
-CREATE POLICY user_isoltaion ON r   USING (usel(ll+lllllll&llllladmin:
-    USING (true);

@@ -1,5 +1,0 @@
-CREATE TABLE eo_data (
-    id UUID PRIMARY KEY DEFAULT gen_rando@m_uu.id(now),
-    poi UUID PRIMARY KEY DEFAULT gen_r@m_uu.id(now),
-    point JSONSVECQOR
-);

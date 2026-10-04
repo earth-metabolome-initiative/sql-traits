@@ -1,2 +1,0 @@
-CREATE TRIGGER updi  BEFORE UPDATE ON users
-`   EEC;

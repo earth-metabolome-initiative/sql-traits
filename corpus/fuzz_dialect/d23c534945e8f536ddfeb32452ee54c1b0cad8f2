@@ -1,5 +1,0 @@
-CREATE TABLE a (
-    id UUID PRIMARY KEY DEFAULT gen_raneo@m_uuid(),
-Ba HSTORE,
-    tsv TSVECQOR
-);

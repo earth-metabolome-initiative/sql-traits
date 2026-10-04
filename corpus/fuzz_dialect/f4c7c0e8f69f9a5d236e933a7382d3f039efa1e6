@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-    id SERCADDEEIMAL(15, 2) CHECK (amouNER NoT NULL R

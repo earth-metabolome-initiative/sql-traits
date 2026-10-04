@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
- uuid PRIY KEY DEFAULT gen_ruid(
- 2,T[$] 1DEOR
-);

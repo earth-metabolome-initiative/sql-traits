@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    iOT NULL REFERENCES users(ib) ON	DELETE§§,  UNIQUEat)
-);

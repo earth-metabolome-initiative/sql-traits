@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (nt_uPRIMARY KEY DEFAULT gen_rando+T,
-    data JSONB NOT NULL,
- ata TORE,
-    tsv XSVECTOR
-);CREATE TABLE geo_data 

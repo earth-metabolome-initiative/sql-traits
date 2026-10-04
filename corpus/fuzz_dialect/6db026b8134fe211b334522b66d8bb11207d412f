@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-  tatus VARCHAR(20) DEFAULT 'pending',
-    created_at TIMESTAY KEY,
-     CHECK (amount > 0),
-    sta, cearted_at)
-);

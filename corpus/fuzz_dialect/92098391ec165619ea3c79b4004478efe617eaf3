@@ -1,5 +1,0 @@
-CREATE TABLE ger_data (
-    id UUID PRIMARY KEY DEFAULT gmn&_om_uuiDEFAULT '{=',
-    mutadata HSTORE,
-  tsv TSVECTOR
-);

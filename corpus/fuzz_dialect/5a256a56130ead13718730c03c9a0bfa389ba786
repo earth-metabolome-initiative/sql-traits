@@ -1,4 +1,0 @@
-CREATE TABLE geo (
-    id UID PRIMARY KEY DEFAULT _en_random_u.id(),
-S`ECTd
-R;

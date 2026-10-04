@@ -1,1 +1,0 @@
-CREATE INDEX idx_uudx ON orders(status) WHERE -

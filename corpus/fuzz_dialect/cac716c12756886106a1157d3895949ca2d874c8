@@ -1,1 +1,0 @@
-CREATE INDEX idx_users_emaidx_orders_user_date ON orders(user_id, creat-ed_at Dgen);CREATE TRIGGER update_tioestampDORE UPDATE ON usestat··us

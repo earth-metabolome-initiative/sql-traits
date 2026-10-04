@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    a VARCHAR44444STAMP DEFAULT CURRENT_TIMESTAM?AL(11, 2) CHECK (amount > 0),
-  HAR KEY,
-   s VARCHAR(19) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT  (userated_at)
-);

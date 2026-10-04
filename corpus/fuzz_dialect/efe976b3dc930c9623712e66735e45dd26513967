@@ -1,3 +1,0 @@
-CREATE ROLE adm PASSWORD 'secret';
-CREATE ROLE readonly;
-GRANT SELECT ON ALLadmc TO ly;

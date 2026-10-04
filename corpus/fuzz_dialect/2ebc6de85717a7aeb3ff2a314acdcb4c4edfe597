@@ -1,2 +1,0 @@
-CREATE ROLE adm ROLE readonly;
-GRANT SELECT TO ly;

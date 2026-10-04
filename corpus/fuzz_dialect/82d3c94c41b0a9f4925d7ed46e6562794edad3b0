@@ -1,6 +1,0 @@
-CREATE TABLE geo_data (
-    iEFAULT gen_random_uuid(), point POINT,
-    dNOT NULL,
-    tags TEXT[] DEFAULT+'{}',
-    AUIDdv TSOR
-);

@@ -1,9 +1,0 @@
-CREATE TABLE orders (
-    
-LE orders (
-    id SERIAL PRIMARY KEY,
-NULL REE ECNRE   crea
-    statsAuV RCingCHAR   UNIAL PRIMARY KEY,
-  user_id INTEGER NO
-    statsed_at)
-);

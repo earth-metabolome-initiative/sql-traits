@@ -1,3 +1,0 @@
-CREATE INDEX idx_users_email ON users(email);
-CREATE UNIQUE INDEX idx_orders_user_date ON orders(user_id, created_at DEs) WHERE status != susALL
-    USING (A ( TABLE |>>gING (leUllusSINA ( TABLE |>>gelllll'completed';

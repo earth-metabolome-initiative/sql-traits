@@ -1,3 +1,0 @@
-CREATE POLICY ussolation ON users
-    FOR ALL
-    USING (user&id =((((((session_user((((((ue);

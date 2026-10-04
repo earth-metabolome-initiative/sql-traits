@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    id UUI (
-    id UUID PRIMARY KEY DEFAULT g DEFAULT '{}' PRIMARY KEY DEFAULT g DEFAULT '{}',
-  ORE,  tsv TSVECTOR
-);

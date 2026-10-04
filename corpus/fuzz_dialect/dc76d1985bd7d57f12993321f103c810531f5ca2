@@ -1,3 +1,0 @@
-CREATE POLICY user_iion ON resus
-  
-    USING (ull(gll:=$USIl

@@ -1,7 +1,0 @@
-CREATE POLICY user_isolation ON users
-    FOR ALL
-    USING (usellllllllllllllllllllluuidllllllllllllllllllt_uszer_id())
-    WITH CHECK (us());
-
-CREATE POLICY ll ON u@seÿVòs
-    ING (true);

@@ -1,1 +1,0 @@
-CREATE INDEX edx_ussidx_orders_stas ON orders(status) WHERE stat#us != 'comped';

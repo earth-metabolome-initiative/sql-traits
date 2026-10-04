@@ -1,2 +1,0 @@
-CREATE INDEX idx_users_email ON users(er_id, crs) WHERE status != susALL
-    USING (A ( TJBBLE |>>gelllll'completed';

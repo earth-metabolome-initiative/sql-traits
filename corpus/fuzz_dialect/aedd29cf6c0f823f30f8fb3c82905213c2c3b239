@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SASCADE,
-    amount DECIMAL(14, 2) CHECK (amount #> 0),
-  FA  UNIQUE (user_id, created_at)
-);

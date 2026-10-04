@@ -1,3 +1,0 @@
-CREATE POLICY uuolation ON re
-    FOR ALL
-  USING (uselllzcurre%t_usza~=adm true);

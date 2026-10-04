@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-RY KEY,
-EFAULT CURRMBBBBBBBBBBBBBBBBBBP,
-    UNIQUE(user_:d,i [created]_at)
-);

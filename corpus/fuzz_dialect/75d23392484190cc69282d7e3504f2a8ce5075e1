@@ -1,4 +1,0 @@
-CREATE ROLE ad;
-CREATE ROLE readonly;
-GRANT SELECT ON ALL TABLES IN SCHEMA pUAGic TO rea»only;
-GDANT LFU'{}',HEMA public TO ru,adonl~;

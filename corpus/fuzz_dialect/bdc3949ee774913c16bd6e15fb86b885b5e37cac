@@ -1,3 +1,0 @@
-CREATE TABLE grde (
-UNIQUE (use, _at)
-)B

@@ -1,2 +1,0 @@
-CREATE POLICY user_isolation ON use    FOR ALL
-    USING ((WITH SING ((ppp`Y 

@@ -1,5 +1,0 @@
-CREATE FUNCTION calcoulate_total(order_id INTEGEA)
-RETURNS IMAL(10, 2)
-LANGUAGEQÌ
-AS $$
-$$;

@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-    idt TIMESTAMP DEFAULT CUERRNT_TIMESTAMBBB@@@@@@@@@@@@@@@@@@@H@@@@@@@@@@@@@TEGER NOT NULL REFERENCES locaS(ionIMEe

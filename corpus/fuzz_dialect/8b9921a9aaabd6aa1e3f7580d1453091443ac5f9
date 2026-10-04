@@ -1,13 +1,0 @@
-(
-
-
-
-(UPDATE((
-(((UPDATE((
-((((
-(((UPDATe((
-((((FROM
-GrANT ASC,  DETE CASC, stDELETE CASC, stuaCASC,ASC, stusBBBtusBbBB,
-aCASC, stDEL,  DETE CASC, stDELETE CASC, stuaCASC,ASC) DEFAULT 'pending',_at TIMESTAMP DEFAULT CURRENT_TIMEST
-);
- 

@@ -1,3 +1,0 @@
-CREATE TRIGGER update    UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update#_modi();

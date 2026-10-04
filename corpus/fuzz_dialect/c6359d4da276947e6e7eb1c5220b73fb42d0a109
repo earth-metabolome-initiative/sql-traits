@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SERI NOT NULL REFERENCES NULL REFERENCES users(iød);l
-l

@@ -1,2 +1,0 @@
-CREATE TABLE geo_data (
-    id UD PRIMARY KEY DEFAULT gen_ranIMARY KEY DDEF

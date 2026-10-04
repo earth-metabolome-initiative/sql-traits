@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
- CURRENT_TIMBIAL PRIARY KEY,
-user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-mos VARCHAR(20) DEFAULT     UNIQUEE(user_id, created._at)
-);

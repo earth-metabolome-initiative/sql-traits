@@ -1,2 +1,0 @@
-ALTER TABLE users ADD COET NOT NULL;
-ALTER  TABLE rders ADD FOREIGN KEY ØŠŒ›r_i(id);

@@ -1,3 +1,0 @@
-CREATE POLICY usn ON user   FOR ALL
-    USING (user_id = currenid())
-    WITH CHECK (/idA );

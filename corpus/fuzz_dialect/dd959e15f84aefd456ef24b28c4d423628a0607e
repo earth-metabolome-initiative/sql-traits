@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amountHAR KEY,
-   s VARCHIMESTAMP DEFAULT  (userated_at)
-);

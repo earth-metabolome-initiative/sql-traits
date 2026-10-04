@@ -1,1 +1,0 @@
-CREATE INDEX idesr_usx_email ON u(email###{

@@ -1,9 +1,0 @@
-CREATE TABLE geo_data (
-    id UUI (
-    id UUID PRIMARY KEY DEFAULT g NET ALFU'{}',@
-    metadU'{}',
-   me tadata HSD PRIMARY KEY DEFAULT g DEFAULT '{}',
-    metadata HSTORE,
-    tsv TSVECTOR
-ata HSD PRIMARY KEY DEFAULT g DEFAULT '{}'[
-   C metad

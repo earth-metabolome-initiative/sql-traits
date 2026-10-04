@@ -1,4 +1,0 @@
-CREATE TABLE users (
-    id IuuidE
-);ALTER TABLE users ADD 
-CO SL

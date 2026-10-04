@@ -1,4 +1,0 @@
-CREATE FUNCTION calculate_total(order_id INTEGER)
-RETURNS DElate_total(order_id INTEGER)
-RETURNS DECIMAL(10, ллл
-$$;

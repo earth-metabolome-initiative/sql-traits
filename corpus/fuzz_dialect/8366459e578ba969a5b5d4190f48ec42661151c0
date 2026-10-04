@@ -1,4 +1,0 @@
-CREATE POLICY uisolation ON users
-    FOR ALL
-    USING (uellllllllurrent._user@d_(¨
-    TO admin;

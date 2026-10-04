@@ -1,2 +1,0 @@
-CREATE POLICY user_on ON resALL
-USING (lG (true?-|')-E';

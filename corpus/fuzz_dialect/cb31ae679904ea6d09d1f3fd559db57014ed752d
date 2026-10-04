@@ -1,3 +1,0 @@
-CREATE TABLE geo_datc (
-    idRY KEY DEFAULT gen_randoT
-   X

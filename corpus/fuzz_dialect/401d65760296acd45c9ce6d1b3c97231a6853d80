@@ -1,4 +1,0 @@
-CREATE FUNCTION calcoulate_total(order_i2)
-LANGUAGEQÌ
-AS 
-$$;

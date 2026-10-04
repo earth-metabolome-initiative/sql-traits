@@ -1,1 +1,0 @@
-CREATE INDEX i ON users(e->>(c T,

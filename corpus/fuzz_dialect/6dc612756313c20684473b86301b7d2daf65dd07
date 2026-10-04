@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
-    iUUID PRIMARY KEY DEFAULT gen_randT NULL,
-    tags TEXT[] DEFAULT+ESR
-);

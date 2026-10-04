@@ -1,4 +1,0 @@
-CREATE INDEX ate ON orders(sess_id, DELETE CASC, stDELETE CASC, stusC, stusBBBB,
-aCASC,ASC, stusBBBB,
-aCASETCASC,  DETE CASC, sETE CASC, stuxxxxBBBB,
-E CA S

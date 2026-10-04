@@ -1,2 +1,0 @@
-CREATE POLICY user_isolatIon ON LL
-    USING (usSA #-OSA #-ODllº

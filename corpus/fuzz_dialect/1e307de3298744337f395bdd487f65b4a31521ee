@@ -1,3 +1,0 @@
-ALTER TABLE users ADD COLUMN puse UNIQUE (`hone);
-ALTER PABLE rsrdeo oct(`hone);
-ALTER TABLE orders ADD FOREIGN KEY (user_id) REd);

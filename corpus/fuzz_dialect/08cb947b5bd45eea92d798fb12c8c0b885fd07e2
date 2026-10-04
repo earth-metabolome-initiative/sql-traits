@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL  ,amount DECIMAL(09, 2) CHECK (amount > 0),
-    stnt DECIMAL(09, 2) CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
- atus VAR(HCAR20) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMEST<MBBBBB?BBBBBBBBBBBBBBBBBBBP,
-   I UQNUE (user_id, created_at)
-);

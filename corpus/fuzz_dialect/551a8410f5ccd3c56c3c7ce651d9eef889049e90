@@ -1,2 +1,0 @@
-CREATE POLICY ussolation ON users
-    USING (use((((session_user

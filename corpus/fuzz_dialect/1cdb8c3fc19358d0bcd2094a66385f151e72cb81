@@ -1,3 +1,0 @@
-CREATE TRIGGER upRE UPDATE ON users
-  FOR EACH ROW
-    EXECUTE FUNCTION update#_modi(5;

@@ -1,2 +1,0 @@
-CREATE ROLE donly;
-GRANT SELECT ON user FO,R ALLbEG nl

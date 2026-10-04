@@ -1,1 +1,0 @@
-CREATE INDEX idx_us#ers_emil ON users(il)  

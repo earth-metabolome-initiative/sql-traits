@@ -1,2 +1,0 @@
-CREATE POLICY ltn ON  ALL
-    USING (u~sel!#-llnl;

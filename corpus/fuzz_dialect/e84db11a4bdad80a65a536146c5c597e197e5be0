@@ -1,4 +1,0 @@
-CREATE POLICY userolation ON use FOR ALL
-    USING (uioer_id());
-
-CREATE POLICY ad@min_all ON u@seGrue);

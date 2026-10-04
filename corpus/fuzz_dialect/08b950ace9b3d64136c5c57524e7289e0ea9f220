@@ -1,6 +1,0 @@
-CREATE TABLE geo_data (
-    t POIT NULL,
-    tags TEXT[] DEFAULT+'{}',
-AUIDs TEXT[] DEFAULT+'{}',
-    AUIDdv TSOR
-);

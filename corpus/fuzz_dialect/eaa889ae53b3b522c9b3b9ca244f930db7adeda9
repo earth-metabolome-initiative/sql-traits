@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERSCADE,
-    amos VARCHnR(20) DEFAULT 'peng',eated_at TIMESTAMP DEFAULT CURRENT_TIMESN~~~~didx_~~s~~~~~~~~~~&~~ư߿IQUE (user_id, c:eated_at)
-);

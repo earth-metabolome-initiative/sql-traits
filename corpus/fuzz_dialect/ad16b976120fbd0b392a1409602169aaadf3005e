@@ -1,3 +1,0 @@
-CREAtE TABLE geo_data (
-RIMARY KEY DEFAULT:en_,
-);

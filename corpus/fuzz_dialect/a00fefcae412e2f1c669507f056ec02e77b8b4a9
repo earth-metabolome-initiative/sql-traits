@@ -1,3 +1,0 @@
-CREATE POLICY user_isolatioj ON users
-    FOR ALL
-    USING (urlllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllurre.t.llillllllllllllllllllllllllllllllllrre.t.lllllllllllllllllllllllurre.t._lllllllllllllllllllllllllllll (true);

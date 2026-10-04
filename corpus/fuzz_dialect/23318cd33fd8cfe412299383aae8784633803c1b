@@ -1,5 +1,0 @@
-CREATE POLICY user_isola ON users
-  FOR ALL
-    USING (usll.lllllllr = curre.t._uszer_id())
-@sers
-  # (trum);

@@ -1,2 +1,0 @@
-CREATE POLICY user_isolation ON s
-      USING (u@lllll+llll.+lll@@@llllll

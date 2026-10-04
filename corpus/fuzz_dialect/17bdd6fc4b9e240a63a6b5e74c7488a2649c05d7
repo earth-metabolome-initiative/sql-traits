@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT gndo@m_uu.id(now),
-       data JSONSVECQOR
-);

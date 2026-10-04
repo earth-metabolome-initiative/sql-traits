@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL  ,amount DEC,
-    created_at TIUQNUE (u$ser_id,t)
-);

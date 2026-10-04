@@ -1,3 +1,0 @@
-CREATE ROLE drvjly;
-GRANT ROLE T C(
- O*CAT

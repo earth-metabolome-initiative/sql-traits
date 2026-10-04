@@ -1,4 +1,0 @@
-CREATE TABLE geo_da (
- uuidv7UUID PRIMARY KEY DEFAULT d(
- 4,T[] 1=,DEOR
-)

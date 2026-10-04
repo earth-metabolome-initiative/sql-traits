@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT gen_andom_lllllllllllllll+lllllellll&llllllllllllll=llllllrlll+llllllrandom_lllllllllllllll+lllllellll&llllllllllllll=llllllrlll+llllllllluuTOR
-);

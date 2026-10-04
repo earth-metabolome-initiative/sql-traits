@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (MARY KEY DEFAULT gen_randomRRMARY KEY DEFAULT gen_random_uuid()(2222222222222222222222),
-    point POINT,
-    dRY KEY DEFAULT gen_r_uuid()(2ÿÿÿÿÿÿÿ522222NULL,
-**LT gen_randomRRR
-);

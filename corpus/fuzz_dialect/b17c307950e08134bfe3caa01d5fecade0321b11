@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
- CURREN PRIARY KEY,
-    user_id I NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-mos VARCHAR(20) DEFAULT     UNIQUE (uscreated._at)
-);

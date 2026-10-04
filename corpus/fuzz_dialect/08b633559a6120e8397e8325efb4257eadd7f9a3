@@ -1,4 +1,0 @@
-CREATE FUNCTION calcoulate_total(order_id INTEGER)
-RETURNS DECIMAL(10, 2)
-LANGUAGE SQL
-AS $$[////**////@?/**///// EFAULT '{}/A//+/RCR$$;

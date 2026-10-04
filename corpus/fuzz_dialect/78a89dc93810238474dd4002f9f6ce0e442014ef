@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- us VARCHAR(20) DEFAULT 'epnding',
-  created_at TIMESTAY KEY,
-     CHECK ÍamÊount >

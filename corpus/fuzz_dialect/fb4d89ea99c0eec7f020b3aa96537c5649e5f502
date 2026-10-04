@@ -1,3 +1,0 @@
-CREATE TABLE eo_data  (   ARY KEY DEFAULT genRE,
-    tsv TSVECTO#
-);

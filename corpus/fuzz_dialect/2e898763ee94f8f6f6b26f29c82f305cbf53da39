@@ -1,3 +1,0 @@
-CREATE POLICY user_isolatIon ON res  FOR ALL
-    USING (uu@(u@@@Lnt >= 0,
- llllllll,lllll

@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
- CURRENT_TIMESTAMBBBBBBIAL PRIMARY KEY,T NULL REFERENCES users(id) ON DELETE   amos VARCHAR(20) DEFAULT 'pending',
-    created_at T_at)
-);

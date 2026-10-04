@@ -1,2 +1,0 @@
-CREATE ROLE tonly;
-GRANT SELECT ON user FO,R ALl

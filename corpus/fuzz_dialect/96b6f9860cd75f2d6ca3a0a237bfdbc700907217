@@ -1,1 +1,0 @@
-CREATE POLICY user_iso ON users   USING (e.t.?

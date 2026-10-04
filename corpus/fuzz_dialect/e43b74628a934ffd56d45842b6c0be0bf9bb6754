@@ -1,7 +1,0 @@
-CREATE POLICY user_ition ON userLL
-    USING (user_icrrent_user_id());
-
-CREATE POLICY adminition ON userLL
-    USING (user_icrrent_user_id());
-
-CREATE POLICY admin_all ON usersößßß º_all ON usersößßß º°­ß¾³³ù  

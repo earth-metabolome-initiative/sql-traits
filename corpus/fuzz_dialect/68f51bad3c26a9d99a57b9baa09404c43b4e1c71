@@ -1,1 +1,0 @@
-CREATE TRIGGER updtimestamestamp@ORE UPDATE ON u);

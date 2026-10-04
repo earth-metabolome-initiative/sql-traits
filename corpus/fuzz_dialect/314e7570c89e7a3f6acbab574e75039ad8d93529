@@ -1,3 +1,0 @@
-CREATE POLICY user_isol ON users
-  FOR ALL
-    USING (u==== T;

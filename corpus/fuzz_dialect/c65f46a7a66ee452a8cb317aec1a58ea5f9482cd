@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL  ,amount DECIMAL(18, 2) CHECK (amount > 0),
-   stnt DECIMAL(09, 2) CHECK (amou)
-);

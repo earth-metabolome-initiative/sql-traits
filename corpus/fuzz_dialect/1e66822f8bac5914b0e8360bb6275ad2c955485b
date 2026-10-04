@@ -1,6 +1,0 @@
-CREATE INDEX ids_user_date ON orders(sess_id, DELETE CASC, stDELETE CASC, stuBBs,
-BBaCASC,ASC, stusBBBB,
-aCASC, sELETE CASC,  DETBB,
-aCASC,ASC, stusBBBB,
-aCASC,  stDT stusBBBB,
-aCASC, stDELETE CA CASC,  DELETE CA S

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SEBBBBP,
-    UNIQUE (userd,i created_at)
-);

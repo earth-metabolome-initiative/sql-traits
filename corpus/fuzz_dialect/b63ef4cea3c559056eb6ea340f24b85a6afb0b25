@@ -1,5 +1,0 @@
-cREATE TABLE order (
-  id SERCADE,
-  CHECK (amount > 0),
-    status V@M
-);

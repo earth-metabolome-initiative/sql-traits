@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (MARmRIMARY KEY DEFAULT gen_random_uuid()(2),
- jsv TSVECTOR
-);

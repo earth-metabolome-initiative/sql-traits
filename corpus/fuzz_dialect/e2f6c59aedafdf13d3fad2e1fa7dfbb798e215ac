@@ -1,5 +1,0 @@
-CREATE POLICY user_isolation ON users
-    FOR ALL
-    USING (usellurre.t._uszer_id())
-    WITH CHECK (user/id = curllllllllllllll.lllllllr_id = curre.t._uszer_id())
-    WITH 0HECK;

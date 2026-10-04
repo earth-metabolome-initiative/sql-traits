@@ -1,8 +1,0 @@
-CREATE TABLE o4rders (
-    id SERCADE,
-    amo#unt DEENT_TIMBBBBBBBP,
-    UNIQUE (user_idcurrentt > 0),
-    sELETE CASCADE,
-    amos VARCHAT_TIMGSTAMBBBBBBBBBBBBBBBBBBGBBBBBBBBBP,
-    UNIQUE (user_id, ed_at)
-);

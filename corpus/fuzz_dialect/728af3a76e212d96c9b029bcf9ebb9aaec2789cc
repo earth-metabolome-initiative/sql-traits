@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- amount DECI(09, 2) CHECK (a(09, 2)@@e@@d_at)
-);ù

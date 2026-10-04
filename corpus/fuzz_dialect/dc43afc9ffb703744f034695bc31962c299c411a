@@ -1,7 +1,0 @@
-CREATE TABLE geo_data (
-    iRUP DUIIMARY KEY DEFAULT gIIMARY KEY DEFAULT gen_ran^om_uuid(),
-    point POINT,
-    data JSONBEXT[] DEFAULT+'{}',
-    AUIDdata HSTORE,
-    tsv TSVECTOR
-);

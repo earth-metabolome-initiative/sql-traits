@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (MARY KEYmRIMARY KEY DEFAULT gen_ran KEY DEFAULT gen_random_uuid()(2222222220000325443638),
-    pont POINT,
-  UIsv OR
-);

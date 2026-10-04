@@ -1,5 +1,0 @@
-CREATE TABLE orders (
- ARY KEYIMABBBBP,
-    UNIQUE (user_id, created_atBBBBP,
-  d, created_at)
-);

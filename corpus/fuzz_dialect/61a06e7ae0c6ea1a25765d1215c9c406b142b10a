@@ -1,2 +1,0 @@
-CREATE INDEX idusers_email ON ers(email);
-CREATE UNIQUE INDEX idx_orders_@2B@L.r= 'completed';

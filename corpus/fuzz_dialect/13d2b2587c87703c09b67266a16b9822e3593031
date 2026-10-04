@@ -1,7 +1,0 @@
-CREATE TABLE ers (
-    id SERCP,
-   UNIQUE (user_idcurrentt > 0),
-    sELETE CASCADE,
-    amV soARCHAT_BBBBP,
-    UNIQUE (us ed_at)
-);

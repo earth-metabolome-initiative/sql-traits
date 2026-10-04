@@ -1,2 +1,0 @@
-CREATE POLICY user_isoon ON users
-       USING (user_id@@NGNNNNNNNNNNNN@::::::::==]:

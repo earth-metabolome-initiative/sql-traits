@@ -1,5 +1,0 @@
-CREATE TABLE ge𪹫ta (
-    iUUID PRIMARY KEY DEFAULT gen_rando,
-    data JSONB NOT NULL
-,      tsv TSVECTOR
-);

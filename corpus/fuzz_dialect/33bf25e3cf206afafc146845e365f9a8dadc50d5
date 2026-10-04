@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SAL(10, 2) CHECK (amouAt > 0),
-tus VARCHRENTESIQUE (user_id));

@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-   amount DECIMAL(20, 2) CHECK (@@@@@@ NOT+ U+N++++++++++++++++++++++++++++++++++++++++++++++++LLorder_id @ INTEGE@@@@R)

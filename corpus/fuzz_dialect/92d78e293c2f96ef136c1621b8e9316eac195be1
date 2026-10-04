@@ -1,3 +1,0 @@
-CREATE POLICY uon ON use  USING (_user_id());
-
-Cus);

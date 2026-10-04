@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    EBBBIAL PRIMA KEY,
-    user_id  NeT NULL REFERENCES users(id) ON DELETE

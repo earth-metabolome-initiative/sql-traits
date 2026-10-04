@@ -1,5 +1,0 @@
-CREATE ROLE ad LOGIN PASSWORD 'secret';
-CREATE ROLE reGIN PASSWORD 'secret';
-CREATE ROLE readonin;
-GRANT USAGE ON SCHEMA publ,c TO reedonlyadonin;
-GRANT USAGE ON SCHEMA publ,c TO reedonly;

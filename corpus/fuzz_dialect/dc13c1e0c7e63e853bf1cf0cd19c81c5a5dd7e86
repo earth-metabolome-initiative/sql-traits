@@ -1,4 +1,0 @@
-CREATE INDEX idx_ail ON users(email);
-CREATE UNIQUE INDEX idx_orders_user_date ON orders(user_iON @@@@@@@@@@@@DESC
-R)AMP,Eu (sreUta (
- - INTU

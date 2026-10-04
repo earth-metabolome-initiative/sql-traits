@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-   IAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES JBBBBBBBBN (srusC,d,dog@,doACBBBBBBBBBBBBBP,
-   UNIQUE (user_eated_at)
-);

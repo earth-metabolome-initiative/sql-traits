@@ -1,3 +1,0 @@
-CREATE TABLE geota (
-    i UUEY DEFAULT gen_random_uuid(>>>>Â
-);

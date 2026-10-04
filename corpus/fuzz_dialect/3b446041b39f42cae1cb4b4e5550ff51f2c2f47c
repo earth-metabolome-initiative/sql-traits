@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (J DEFAULT .gen_random_uuid(),
- JSONB NOT NULL,
-  metadata HSTORE,
-    tsv TSVECTOR
-);

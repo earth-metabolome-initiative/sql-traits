@@ -1,4 +1,0 @@
-CREATE TABLE geo_ (
-    id UUIEY DEFAULT gen_random_uuid(2,
- T[] 1DEa HSTORE,v TSVECTOR
-);

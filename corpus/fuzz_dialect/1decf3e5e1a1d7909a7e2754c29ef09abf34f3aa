@@ -1,2 +1,0 @@
-ALTER TABLe users ADD CONSTRAINT uk_phone UNIQUE (phone);
-A$FL$ TABLE orders ADD FOREIGN KEY (user_`dBLES

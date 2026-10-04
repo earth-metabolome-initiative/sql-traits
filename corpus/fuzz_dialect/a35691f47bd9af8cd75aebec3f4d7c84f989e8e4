@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-      statNOT NULL REFERENCES esers(id) ON DELETE CASCADE,
-    amount DEEIMAL(0sum2) CHECK (a~mount -> 0),
-MESTAMBBBBBBBBB  #st
-);

@@ -1,8 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT gen_rd(),
-    point PT,
-    data JSONB NOT NULL,
-   s TEXT[]DEFAULT '{}',
-    metadata HONB NOT NULL,
-    tsv TSVECQOR
-);

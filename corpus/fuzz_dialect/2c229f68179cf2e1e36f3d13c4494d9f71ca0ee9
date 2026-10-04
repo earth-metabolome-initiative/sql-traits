@@ -1,3 +1,0 @@
-CREATE INDEX email ON users(email);
-CREATE uNIQUE INDEX idx_orders_user_date ON orders(user_id, created_a: DESC#);CREATE INDEX email ON users(email);
-CREATE UNIQUE INDEX idx_orders_user_date ON orCBLE  geoc_

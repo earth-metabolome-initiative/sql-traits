@@ -1,3 +1,0 @@
-CREATE POLICY usez_ion ON resus
-  
-    USING (use.ll>>!u>>>>>>>>>>>>>>>>>>>>>>>>>>rue);

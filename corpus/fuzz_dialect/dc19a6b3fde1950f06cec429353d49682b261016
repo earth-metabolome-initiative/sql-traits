@@ -1,4 +1,0 @@
-CREATE POLICY userolation ON use FOR ALL
-    USING (ui);
-
-CREATE POLICY ad@min_all ON u@seGrue);

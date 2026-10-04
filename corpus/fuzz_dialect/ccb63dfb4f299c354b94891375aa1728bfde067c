@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id ifARY KEY,
-    useNTEGER NOT NULL REFERENCES userS(id) ON DELETE CASCADE,
-    amount DECIMAL(05,  -2HCECK (amo 0»»»»»»»

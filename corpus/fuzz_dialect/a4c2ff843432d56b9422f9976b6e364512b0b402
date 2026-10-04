@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SRINOT NULL REFERENCES uVARCHAR(09) DEHAzR(2T 'p@nding',
- create`d_at TIMESTAMP DEFLT C;)
-);

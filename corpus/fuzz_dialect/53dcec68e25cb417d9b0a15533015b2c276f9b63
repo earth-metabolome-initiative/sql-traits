@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- mount DECIMAL(10, 2) CHECK (a-ount > 0),us VARCHAR(20) DEFAULT 'pending',
-   ed_at TIMESTAMP DEFAULT CUERRNT_TIMESTAM@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@C?||‘|O|@@@serSING (true);
-ER);

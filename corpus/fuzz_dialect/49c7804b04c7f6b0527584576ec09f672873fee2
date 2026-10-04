@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    iEFAULT CURRENT_ESTAMAL(10, 2) CHECK (amoun*t > 0),
-    status VARCHAR KEY,
-   s VARCHAR(19) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT  (user_id, created_at)
-);

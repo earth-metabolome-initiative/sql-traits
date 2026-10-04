@@ -1,4 +1,0 @@
-CREATE POLICY user_isolation ON users
-   FOR ALL
-    USING (uselK (uuid/i[ := cu
-    USG susell;

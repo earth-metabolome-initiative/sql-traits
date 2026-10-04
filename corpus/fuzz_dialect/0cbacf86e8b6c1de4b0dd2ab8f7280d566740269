@@ -1,4 +1,0 @@
-CREATE TABLE geo_data  (   
- UIDdUi PR KEY DEFAULT gen_r :RIMARY KEY DEFAULT geRE,
-    tsv TSVECTO#
-);

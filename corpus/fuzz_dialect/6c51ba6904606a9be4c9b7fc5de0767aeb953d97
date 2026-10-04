@@ -1,2 +1,0 @@
-CREATE ROLE readonin;
-GRANT USAGE ON SCHEMA public TO reedonly:

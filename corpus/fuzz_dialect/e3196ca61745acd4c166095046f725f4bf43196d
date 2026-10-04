@@ -1,4 +1,0 @@
-CREATE TABLE eo_data  (   
-dUi PRIMARY KEY DEFAULT gen DEFAULT geRE,
-    tsv TSVECTO#
-);

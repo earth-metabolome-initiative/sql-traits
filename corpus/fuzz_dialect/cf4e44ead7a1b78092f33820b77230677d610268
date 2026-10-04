@@ -1,3 +1,0 @@
-CREATE POLICY uslatnio ON users
-    FOR ALL
-    USING (uuidL|llle_t==(true=(true);

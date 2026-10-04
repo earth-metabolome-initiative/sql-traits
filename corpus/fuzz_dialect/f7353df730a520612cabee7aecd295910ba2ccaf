@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amounIEDAMt EL(1  20) CHECK (amount >amwunt > 0),
-  amount DEEIMAL(1sum2) CHECK (amount > 0),
-MEST@MBBBBBBBBBB    st
-);

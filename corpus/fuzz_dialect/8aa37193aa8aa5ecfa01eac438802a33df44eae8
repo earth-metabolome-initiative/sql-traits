@@ -1,3 +1,0 @@
-CREATE POLICY u1n ON r
-    FOR ALL
- USING (+ll.+llllll UING (uselllllll

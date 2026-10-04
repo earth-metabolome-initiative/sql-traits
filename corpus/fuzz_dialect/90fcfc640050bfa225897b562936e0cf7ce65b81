@@ -1,6 +1,0 @@
-ALTER TABLE users ADD COLUMN puserhone VARCHAR(20);CREATE FUNCTION @@D@@@@@@@@@@@e_taol(tURND3 CONid);CREATE  FUNCTION @@D@@@@@@@@@@@e_taol(tURND3 CONid);CREATE FUNCTION calcoulate_ateFUNCTION calcoulate_ate_total(order_id INT•GER)
-RETURNS DECIMAL(10, 2)
-LA
-NGUAGE SQL
-AS $$
-  ( SE

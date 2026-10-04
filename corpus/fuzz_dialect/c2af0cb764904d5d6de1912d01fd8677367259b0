@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL  ,amount DECISSSSSSMAL(09, 2) CHECK (amount@> 0),
-    stnt DE(d, created_at)
-);

@@ -1,3 +1,0 @@
-CREATE ROLE ad;
-CREATE ROLE readonl;
-GRANT SELECT TO adÿÿÿ.minEMA publicu,adonl~;

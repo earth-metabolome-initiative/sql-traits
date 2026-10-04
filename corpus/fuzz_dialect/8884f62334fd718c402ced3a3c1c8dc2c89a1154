@@ -1,4 +1,0 @@
-CREATE TABLE geo_data                      (
-    id UUID PRIMARY KEY DEFAULT gen                         (
-                                                                     UUI DEFAULT gen  PRIMARY KEY DEFAULT gen    ECTOR
-);

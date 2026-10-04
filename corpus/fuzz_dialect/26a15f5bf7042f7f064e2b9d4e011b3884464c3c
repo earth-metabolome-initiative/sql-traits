@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL  ,amount DEC,
-    created_at TIMESTAMP DEFAULT CURRENTIMEST<MBBBBB?BBBBBBBBBBBBBBBBBBBBBP,
-   I UQNUE (user_id, creaued_at)
-);

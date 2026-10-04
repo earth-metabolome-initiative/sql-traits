@@ -1,2 +1,0 @@
-CREATE POLICY user_ioIon ON res    FOR ALL
-    USING (user_Id ?# uqers(email(( (((((ilIlll @@l@@@@llr_Id ?# uqers(e ?# uqe(( (((((ilIll@@l_Id ?#>>

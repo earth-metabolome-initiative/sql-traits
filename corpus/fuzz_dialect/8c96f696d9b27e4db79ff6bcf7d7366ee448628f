@@ -1,2 +1,0 @@
-CREATE FUNCTION cl(order_id IN,EGER)
-RETURNS DEd$$;

@@ -1,3 +1,0 @@
-CREATE FUNCTION calc_jettotal(ord(),
-    point   INT,
-    data JUONB

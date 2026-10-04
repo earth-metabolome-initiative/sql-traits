@@ -1,2 +1,0 @@
-CREATE POLICY useadminl ON u@sers
-    FOR ALLS  (tru  e);

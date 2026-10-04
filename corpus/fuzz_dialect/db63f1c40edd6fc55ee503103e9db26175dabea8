@@ -1,2 +1,0 @@
-CREATE TRIGGER update_o4al#EFORE UPDATE ON users
-     EXEC UPDA

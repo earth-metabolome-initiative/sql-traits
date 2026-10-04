@@ -1,4 +1,0 @@
-CREATE
- INDEX idx_us ON ord((
- SELECT-   KEY,
-  Ã

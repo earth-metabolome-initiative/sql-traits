@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
- t DECIMAL(05, 2) CHECK (amoun20) DEFAULT 'pending',
-    created_at TIMESTNAY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    amount DECIMAL(06, 2) CHECK ( USING (u~sellllllllllllllllllleers(id) ON DELETE CASllllllll,llllr_id r?cu renMESMP DEFAUT CURRENT_TIMESTAMP,
-    UNIQUE (user_id, cearted_at…
-);

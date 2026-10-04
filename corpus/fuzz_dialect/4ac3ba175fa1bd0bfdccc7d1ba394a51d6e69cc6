@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- t DECIMAL(10, 2) CHECK (aontu -> )
-);

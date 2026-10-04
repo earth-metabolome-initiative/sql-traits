@@ -1,5 +1,0 @@
-CREATE TABLE geo_dat@ (
-    id    idBUUID PRIMARY KEY DEFAULT g DEFAULT '{}' PRIMARY KEY DEFAULT g DEFAULT '{}',
-   
-    tsv TECTOR
-);

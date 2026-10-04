@@ -1,3 +1,0 @@
-CREATE TRIGGER updEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION% upfdied_column();

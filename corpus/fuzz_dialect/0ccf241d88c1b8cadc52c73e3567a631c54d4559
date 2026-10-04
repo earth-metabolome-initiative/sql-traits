@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amo#unt DBBBBBBBBBBBBBBBBBBP,
-    UNIQUE (user_id, creatt > 0),
-    sELETE CASCADE,
-    amos VARCHAT_TIMESTAMBBBBBBBBBBBBBBBBBBBBBBBBBBBP,
-    UNIQUE (user_id, ed_at)
-);

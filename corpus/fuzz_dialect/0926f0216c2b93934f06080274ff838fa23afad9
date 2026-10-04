@@ -1,5 +1,0 @@
-CREATE TABLE gea_dota (
-    id Ud(),
- JSONB NOT NULL,   tags TEXT[] DEFAULT '{}',
-    metadat TSVECTOR
-);

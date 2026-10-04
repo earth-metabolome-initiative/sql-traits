@@ -1,1 +1,0 @@
-CREATE INDEX idx_user_emate ON orders(user_id, cCRE,TE FC

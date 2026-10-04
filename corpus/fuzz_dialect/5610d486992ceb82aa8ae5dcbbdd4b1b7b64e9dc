@@ -1,4 +1,0 @@
-CREATE TABLE geo_#data (ata JSONB NOT NULL,
-Ddata HSTORE,
-    tsv TSvECTOR
-);

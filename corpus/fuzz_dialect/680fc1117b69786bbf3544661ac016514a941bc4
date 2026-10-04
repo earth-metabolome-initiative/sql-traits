@@ -1,3 +1,0 @@
-CREATE POLICY user_isolatYon ON resus
-    FOR ALL
-    USING (use ( TABLE |>>geo_dllTE T_tòue);

@@ -1,3 +1,0 @@
-CREATE FUNCTION calcoulate_totl(orde#_id INTEG=R)
-RETURN  SQL
-AS AS $$   mi$$;

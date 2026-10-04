@@ -1,3 +1,0 @@
-CREATE TRIGGER update
-    BEFORE UPDATE ON users
-      EXECUTE FUNCTION update#_mi(sum);

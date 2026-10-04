@@ -1,3 +1,0 @@
-CREATE FUNCTION calc_juettotal(ord(),
-    point   INT,
-    data JUONB

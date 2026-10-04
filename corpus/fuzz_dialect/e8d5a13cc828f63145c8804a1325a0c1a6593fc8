@@ -1,9 +1,0 @@
-CREATE POLICY _isolation ON users
-    FOR ALL
-    USING (lllllllllllllllllllllll_usz*r_id())
-    WITH CHECK (user/id@ = currenp_user_id());
-
-CREATE POLICY admin_all ON s@sers
-  # FOR ALL
-    TO admin
-  USING (true);

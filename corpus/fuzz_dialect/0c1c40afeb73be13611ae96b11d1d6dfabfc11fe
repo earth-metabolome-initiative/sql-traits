@@ -1,2 +1,0 @@
-CREATE TABLE geo_data (
-    id UU DEFAULT gen_random_u(TABLE :@ TABLE gY 

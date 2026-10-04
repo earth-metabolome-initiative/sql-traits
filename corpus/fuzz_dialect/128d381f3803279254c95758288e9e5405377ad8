@@ -1,2 +1,0 @@
-CREATE FUNCTION cal(order=iEGE%R)
-RETURNS #ECIn
