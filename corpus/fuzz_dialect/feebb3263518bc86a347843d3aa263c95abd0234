@@ -1,0 +1,2 @@
+CREATE POLICY uslocaolon ON r
+  USING (uselll(l:=

@@ -1,0 +1,5 @@
+CREATE TABLE geo_data (
+     Ui VECTOR
+);CREATE TABLE ge(
+  Ui VECTOR
+);CREATE TABLE geo

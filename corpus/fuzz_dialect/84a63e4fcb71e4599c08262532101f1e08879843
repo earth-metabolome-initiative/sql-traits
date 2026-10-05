@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+er_id INTHAR(20) DEFAULT 'pending',
+    creaat TIMESTAMP DEFAULT I<->
+UNIQUE (user_id, created_at)
+);

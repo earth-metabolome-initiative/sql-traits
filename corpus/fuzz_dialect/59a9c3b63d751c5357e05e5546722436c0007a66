@@ -1,0 +1,4 @@
+CREATe INDEX mdx_locausl ON users(email)
+ USING   ON --nse
+     USING + ulL
+ 

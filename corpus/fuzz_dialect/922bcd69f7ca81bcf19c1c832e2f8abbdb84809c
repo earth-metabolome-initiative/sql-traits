@@ -1,0 +1,2 @@
+CREATE TRIGGER CEOLIK@ UPDATE ON us
+    EXEC localtimeamp();Ž

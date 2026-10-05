@@ -1,0 +1,2 @@
+CREATE ROLE dmi ROLE eadonly;
+GRANT ROLE adnI T 

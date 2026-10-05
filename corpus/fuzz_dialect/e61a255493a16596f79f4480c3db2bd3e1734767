@@ -1,0 +1,2 @@
+CREATE POLICY sn_all ON u   
+    TO(2!UCNe);

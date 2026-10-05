@@ -1,0 +1,1 @@
+CREATE TABLE geo(dt INT);

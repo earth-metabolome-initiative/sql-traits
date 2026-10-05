@@ -1,0 +1,2 @@
+CREATE TABLE orders(
+   ERNCES VARCHAR PRIMARY KEY,    user_id EY,m VARCHAR);

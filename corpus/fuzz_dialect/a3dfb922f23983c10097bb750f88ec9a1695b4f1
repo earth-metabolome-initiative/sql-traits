@@ -1,0 +1,4 @@
+CREATE TABLE oers (
+  id SERRE,ARY KE,
+    user_iR NOT NULL REFERENCES AQUE
+);

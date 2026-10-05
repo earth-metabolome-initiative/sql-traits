@@ -1,0 +1,1 @@
+CREATE TRIGGER up UPDATE ON u  EXECUTE FUNCTION u_d_c (uluos);ÿÿÿÿÿÿÿ/

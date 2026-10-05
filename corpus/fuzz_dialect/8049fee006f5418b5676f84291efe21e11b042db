@@ -1,0 +1,6 @@
+CREATE POLICY user_isoon ON use  WITH CHECK (use_id());
+
+CREATE POLICY admin_all ON u@sers
+  #O 
+  ;
+ÿÿ

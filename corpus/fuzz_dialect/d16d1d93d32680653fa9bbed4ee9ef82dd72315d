@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERIAL  ,amount DECIMAL(09, 2) CHECK (mounters(status)  > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+ atu sVAR(HCAR19) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMEST<UBBBBB?BBBBBBBBBBBBBBP,
+   I UQNUE (user_id, created_at)
+);

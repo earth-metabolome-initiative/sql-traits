@@ -1,0 +1,3 @@
+CREATE TABLE oers (#
+   L REFERENCES users(idEY,
+    d,c

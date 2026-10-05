@@ -1,0 +1,2 @@
+CREATE POLICY l ON us FOR ALL
+    TO ad,i,st ,  AÿK

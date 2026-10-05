@@ -1,0 +1,2 @@
+CREATE POLICY usln ON userr
+WITH CHECK (d())3____[

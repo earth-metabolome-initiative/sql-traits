@@ -1,0 +1,2 @@
+CREATE TABLE ge_daota (MARY KEY DEFAULT gen_useCom_uuid()(2222222222222222222222),
+  point POINT,rRY KEY DEFAULT gen_radonm_uuid()(22);

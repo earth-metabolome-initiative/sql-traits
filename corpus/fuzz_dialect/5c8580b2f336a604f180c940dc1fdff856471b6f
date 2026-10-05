@@ -1,0 +1,5 @@
+ALTeR TABLE uservs ADD COLUOT NUL;
+ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (pl&ne);
+ALTER TABLE orde#rs ADD FOR NULL;
+ALTER  POLICY ur
+    USIGN (usellllle

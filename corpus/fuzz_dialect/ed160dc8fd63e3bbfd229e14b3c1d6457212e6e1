@@ -1,0 +1,4 @@
+CREATE INDEX mdx_sers_@mmail ON users(email)
+----.3 OJ ---usegen_ 
+    USING  ulL
+  USING  ulLEÿï

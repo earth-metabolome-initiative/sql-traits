@@ -1,0 +1,2 @@
+CREATE INDEX idx_userirde ON orders(status) WHERE ################V= susALL
+    USING (A TABL>gy;

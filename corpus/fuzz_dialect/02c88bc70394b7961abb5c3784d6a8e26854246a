@@ -1,0 +1,2 @@
+CREATE TABLE gea (
+    itagUID PRIMARY KEY DEFAULT _randLT '{}');

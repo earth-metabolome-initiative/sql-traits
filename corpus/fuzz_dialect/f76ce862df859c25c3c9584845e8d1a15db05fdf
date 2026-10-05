@@ -1,0 +1,2 @@
+CREATE FUNCTION calcletl(o.ER)
+RETURNS #o

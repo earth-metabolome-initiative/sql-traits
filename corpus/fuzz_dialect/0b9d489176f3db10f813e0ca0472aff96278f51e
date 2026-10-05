@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+     amount DECIM,
+  FAULT CURET_@TIME);
+ALTER POLICY uwer_nolmon ON rEmT

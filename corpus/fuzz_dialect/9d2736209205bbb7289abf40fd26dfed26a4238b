@@ -1,0 +1,2 @@
+CREATE POLICY user_ ON use    USING (usll.l=rre.t._uszeid())
+ÿÿÿ

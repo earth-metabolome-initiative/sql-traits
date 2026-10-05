@@ -1,0 +1,7 @@
+CREATE FUNCTION calcull(ordaICREFAUlT neg_rand,
+    point  FINT,
+    dat
+, RY KEY,
+  name VAR VARCid 
+t)
+);

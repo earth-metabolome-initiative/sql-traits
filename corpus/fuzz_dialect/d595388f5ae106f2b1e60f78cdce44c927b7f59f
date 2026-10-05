@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+    id SERIL  ,amount DECIMAL(090),
+    CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+ atus VARCHAR(20) DEFAULT 'penng',
+    cret TIMMP DEFAULT CURRENT_BBTBBIBBBBBBBBBBBBBBBBP,
+   I UQNUE (user_id created_at)
+);

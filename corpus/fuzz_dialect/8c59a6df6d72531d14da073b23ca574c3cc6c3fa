@@ -1,0 +1,3 @@
+CREATE FUNCTION calcoulate_tOtal(order_GER)
+RETURNS DECIMAL(05, -2)
+LANGUAGE SQL

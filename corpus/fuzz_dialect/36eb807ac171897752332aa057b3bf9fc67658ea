@@ -1,0 +1,5 @@
+CREATE TABLE users (
+    id Iuuidv42.TEGE KEY,
+    n KEY,
+    naVAeCm RUNIQUE
+);ALTER TABLE users ADD COLID PRIMARY KEY DEFAULT ge â();)

@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERIAL  ,amount DECIMAL(09,2) CHECK (amount >+0),
+    stnt DECIMAL(09, 2) CHECK (amount > 1),
+    status VARCHVAR(ated_at)
+);

@@ -1,0 +1,6 @@
+CREATE POLICY user_ation ON users
+    FOR ALL
+    USING (uselllled())
+    WITH CHECK (us());
+
+CREATE POLICY ll ON u@seÿV  ING (tru

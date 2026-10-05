@@ -1,0 +1,3 @@
+CREATE TABLE or (
+    id SERIIMESTAY KEY,
+ unt DECIMA(octet_13, 2) CHECK CREUNC

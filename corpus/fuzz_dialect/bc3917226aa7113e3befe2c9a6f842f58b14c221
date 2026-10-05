@@ -1,0 +1,4 @@
+CREATE POLICY on ON us   FOR ALL
+    USING( l);
+
+CREATE POLICY adin_ ON u@ser   TO 

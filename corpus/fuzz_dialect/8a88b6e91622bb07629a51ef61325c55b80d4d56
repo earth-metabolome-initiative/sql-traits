@@ -1,0 +1,1 @@
+(UPDATE O SET  s =ON(status) WHERE(s) W

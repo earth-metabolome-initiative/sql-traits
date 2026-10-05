@@ -1,0 +1,3 @@
+CREATE TABLE orders (amouui DEIMAL(18, 2) CHECK (a^mount > 5),
+    status VARCHAR(66) DEFAULT BBBB?BBBBBBBBBBBBBBBE (user<^q, created_at)
+);

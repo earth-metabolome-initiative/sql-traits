@@ -1,0 +1,3 @@
+CREATE TABLE g_dat (
+    idIMARY KEY DEFAULT gen_raom_uuid() DEFAULT user ,  tsv TSVECTOR
+);

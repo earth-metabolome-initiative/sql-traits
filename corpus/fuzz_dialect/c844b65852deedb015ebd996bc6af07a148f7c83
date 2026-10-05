@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+   s VARCHAR(53) DEFAULT 'pending',
+    creaat TESTAY KEY,
+   amouted_at TIMESTAMP( _at)
+);

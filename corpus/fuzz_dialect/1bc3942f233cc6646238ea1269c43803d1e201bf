@@ -1,0 +1,2 @@
+CREATE POLICY maxuuid_ition ON resus
+  USING (lld = cur&t_usza~~

@@ -1,0 +1,2 @@
+CREATE TRIGGER up UPDATE ON usOW
+    EXECUTE FUNCTION u_d_c (uluos);ÿÿÿÿÿÿÿ/

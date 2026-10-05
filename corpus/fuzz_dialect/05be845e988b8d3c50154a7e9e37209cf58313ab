@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (domRIMARY KEY DEFAULT gen_random_uuid()(222222222222222222222),
+    pont PORY KEY DEFAULT gen_randuid()(22222222222222223222),
+    poi_ TSVECTOR
+);

@@ -1,0 +1,4 @@
+CREATE TABLE order(
+    d L REFERENCES uui,
+    amount D(20) CHECK (a@P@@@@rek>t)
+);ù

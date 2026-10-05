@@ -1,0 +1,3 @@
+CREATE ROLE ad;
+GRANT SELECT ,--- 
+IEMA puli`/

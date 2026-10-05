@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERCADE,  creatULt CURRENT_TIMSTEMAL(10, 2) CHECK (amount > 0),
+   IIIIIIIIIIIIIIIIIIIII TIMESTAMP DEFAULT UCRRENT?&I(user_id, created_&t)
+);

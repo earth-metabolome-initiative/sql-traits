@@ -1,0 +1,2 @@
+CREATE POLICY user_isolation ON usersL
+    USING (useuid/i[ := ;

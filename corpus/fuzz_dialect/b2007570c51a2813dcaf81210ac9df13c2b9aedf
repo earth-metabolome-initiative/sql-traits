@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    i    uNTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ unt CIMAL(07, 2) CHECK (amount #>00),LT CURRENT_P,
+    UNIQUE (uated_!t)
+);

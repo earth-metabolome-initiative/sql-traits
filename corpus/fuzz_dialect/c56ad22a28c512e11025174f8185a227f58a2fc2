@@ -1,0 +1,2 @@
+CREATE POLICY aoInt ON L
+    USING (u+++++++++$<<<<<);

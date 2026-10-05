@@ -1,0 +1,2 @@
+CREATE INDEX  ON use(email)
+  USING el;llìÿÿ

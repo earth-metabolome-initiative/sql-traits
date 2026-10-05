@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERCADE CHECK (amount > 0),
+   IIIIIIIIIIIIIIIIIIIII TIMMP DEFAULT UCRRENT?&I(user_id, created_&t)
+);

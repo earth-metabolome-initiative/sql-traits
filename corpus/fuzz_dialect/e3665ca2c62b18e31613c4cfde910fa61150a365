@@ -1,0 +1,3 @@
+(UPDATE((
+(
+ SELECT WN,u_r IN(TABLE lln

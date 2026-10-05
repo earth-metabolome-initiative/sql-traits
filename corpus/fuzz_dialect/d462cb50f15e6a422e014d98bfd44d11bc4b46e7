@@ -1,0 +1,2 @@
+CREATE POLICY caolo ON r
+ USING (u(l:=

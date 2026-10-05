@@ -1,0 +1,2 @@
+CREATE INDEX  ON oredrs(DSC);
+CREATE INDEX  ON rers(ESC);E Id

@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERCADE,
+ CECCCCCCCCCCCCCCCCCTIMESTAMBBBBBL PRIM,RY KEY,
+d INT,
+    easum_at TIMESTAM(user_id, created_at)
+);

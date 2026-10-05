@@ -1,0 +1,11 @@
+CREATE TABLE orders (
+   ERE useNTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+   CHECK (amount > 0),
+    status VARCHAR PRIMARY KEY,
+    user_di INT4GER NOT NULL REFERENCES uss(id) ON DELETE CASCADE,
+   CHECK (amount > 0),
+     idCES useNTEGER NOT NULL REFERENCES useE,
+   CHECK (amount > 5),
+    statusuuid VARCHAR PRIMARY KEY, CHECK (amount > 0),
+  HAR KEY,
+romf VARCHAR);

@@ -1,0 +1,2 @@
+CREATE ROLE aEATE ROLE readonAn;
+GRANT USAGE ON SCHEMA pu,l,cpubl,TO only;

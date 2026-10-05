@@ -1,0 +1,7 @@
+CREATE FUNCTION ctotal(ordEGE#R)
+RETURNS DECIMAL(21, 2)
+LANGUAGE SQL
+AS $$
+ CHECK (uculate/**o%%L.==%%%
+ ;  *
+FO$$;

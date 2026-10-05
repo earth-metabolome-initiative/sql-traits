@@ -1,0 +1,5 @@
+CREATE TABLE rders (
+    id SERIAL PRIMARY KEY,
+   nt DE CHECK (a-oun),at TIMESTAMP DEFAULT @@@@@@@*@BBB:=BBBBP,
+    UNIQUE (userlen_id, cE)
+);

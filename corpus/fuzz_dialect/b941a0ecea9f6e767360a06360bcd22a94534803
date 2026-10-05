@@ -1,0 +1,4 @@
+CREATE TRIGGER C
+    BEFORE UPDATE ON us
+    EXECUTE FUNCTION un(G0#R=CE,LIdate);ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿr„ž²
+º

@@ -1,0 +1,4 @@
+CREATE FUNCTION cn(oTEG)
+LANGUAGE QAS 
+$$`EA
+$$

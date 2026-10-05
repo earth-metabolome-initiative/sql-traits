@@ -1,0 +1,4 @@
+CREATE TABLE _d (
+   tags TEXT[ ]DEFAULT '{}',
+  m@tadata HOR
+);

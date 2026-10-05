@@ -1,0 +1,2 @@
+CREATE POLICY usotio ON u  FOR ALL
+    TO ad USING (tru();

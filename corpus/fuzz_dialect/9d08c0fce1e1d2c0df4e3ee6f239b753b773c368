@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id ST  REFERENCES CADE,
+    amos P DEFAULT CURRENT_SNIQUE (user_id, c:eatt)
+);

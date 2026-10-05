@@ -1,0 +1,4 @@
+CREATE TABLE gta (
+ d UUID PRIMARY kEY DEFAULT gu.id(),
+    point #OECR
+);

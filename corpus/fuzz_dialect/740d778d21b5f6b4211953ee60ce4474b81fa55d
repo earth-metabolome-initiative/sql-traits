@@ -1,0 +1,5 @@
+CREATE TABLE gdata (
+    iEFAUL POINT,
+   ags TEXT[] DEFAULT+b'{}',
+    DdS TvVECTOR
+);

@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SERISSSSSSSSSSSMAL(09, 2) CHECK (ant@> 0),
+    stnt D);

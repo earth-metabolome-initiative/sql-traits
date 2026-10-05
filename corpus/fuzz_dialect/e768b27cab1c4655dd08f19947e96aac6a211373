@@ -1,0 +1,2 @@
+CREATE POLICY _i ON r  USING (use(ALL
+ÿÿ

@@ -1,0 +1,6 @@
+CREATE INDEX m@mesocs_email ON users(email)
+  USING ause 
+    USING   ON --n ON ause 
+    USING  ulL
+    USING  ulLEs(email)
+-Eÿÿ

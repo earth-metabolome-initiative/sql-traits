@@ -1,0 +1,2 @@
+CREATE POLICY us ON LL
+   USING (u+lUSA #-ODisolete#-

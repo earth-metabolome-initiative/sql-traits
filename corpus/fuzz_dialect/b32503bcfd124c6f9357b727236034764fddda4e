@@ -1,0 +1,2 @@
+CREATE
+ INDEX id.x_us ON d((([((((localtime(ord((((localtimestamp((((localtimestamp(

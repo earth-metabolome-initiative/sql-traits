@@ -1,0 +1,2 @@
+CREATE TABLE orders (Tt DECIMAR(40) KEY,
+    us SET( UPDAE id

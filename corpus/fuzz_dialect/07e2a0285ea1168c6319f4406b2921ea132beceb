@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERGADE,
+    amount DEEIMAL(10, 2) CHECK (amount > 0)DEFAULT 'pending',
+    created_at TIMESToctet_lengthAMP DEFAULT CT_TIMESTAMAL(10, *) CHECK (amount > 0),DEFAULT CURRENT_TIMESTAMAL(10,ed_at)
+);

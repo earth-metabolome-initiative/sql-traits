@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+    idRIMARY KEY DEFAULT X&tid@(),S NCTOR);

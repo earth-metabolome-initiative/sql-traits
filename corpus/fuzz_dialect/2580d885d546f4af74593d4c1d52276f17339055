@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  ed_at TTAMP DEFAULT CURRENT_BBB#BB,
+    UNIQUE (user_C?#A created_a)
+);

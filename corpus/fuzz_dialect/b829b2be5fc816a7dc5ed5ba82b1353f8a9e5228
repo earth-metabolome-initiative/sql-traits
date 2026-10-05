@@ -1,0 +1,3 @@
+CREATE POLICY us_isolatiation ON users
+USING (usllllllll.llllll.r_idrre.t._uid())
+ ;

@@ -1,0 +1,5 @@
+CREATE TABLE e (
+    id UUID PRIMARY KEY DEFAULT gen_rando@m_uu.id(now),
+    poi UUID PRIMARY KEY DEFAULT gen_ruu.id(now),
+    point JSONSVECOR
+);

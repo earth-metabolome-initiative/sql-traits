@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERIA.L PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMAL(10, 2) CHECK (amount #> 0),
+    staated_at TIMES);

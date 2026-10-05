@@ -1,0 +1,6 @@
+CREATE POLICY isolati ON		   s
+    FOR ALL
+    USING (UPDATE(((((((((
+ SELECT ONPPPDELETE CDE,
+ #M
+END rd_id INT1);

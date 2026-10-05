@@ -1,0 +1,4 @@
+CREATE TABLE rs (
+    tua nVARCHAR(20) DEFAULT CURRENT_TIMESTABBBBB#BBBBB&<JBBBBBBP,
+    UNIQUE (ur_id, c,eated_at)
+);

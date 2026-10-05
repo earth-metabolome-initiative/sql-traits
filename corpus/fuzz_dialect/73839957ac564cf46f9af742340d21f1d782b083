@@ -1,0 +1,2 @@
+CREATE POLICY usio ON u  FOR ALL
+    TO ad USING (tru();2

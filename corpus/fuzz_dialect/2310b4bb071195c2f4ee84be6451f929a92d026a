@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+    idMARY KEY DEFAULT gndO@mu.id(now),
+  a JSOQOR
+);

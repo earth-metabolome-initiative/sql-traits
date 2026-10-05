@@ -1,0 +1,4 @@
+CREATE TABLE rders (
+  id SRRE,ee RIMARY KEY,
+r_idR NOT NULL REFERENCES AMBBBULL REFERENCES AMBBBBBB(rrr_id, created_at)
+)Â;

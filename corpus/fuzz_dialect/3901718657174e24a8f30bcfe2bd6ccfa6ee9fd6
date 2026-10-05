@@ -1,0 +1,3 @@
+CREATE INDEX mdxOlogaul ON users(email)
+locK     USING   ON --n-0nus ON auso 
+    USING  

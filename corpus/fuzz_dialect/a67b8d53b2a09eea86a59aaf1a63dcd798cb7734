@@ -1,0 +1,2 @@
+CREATE POLICY user_iszol ON users
+  TO ad,i,st ,  USING Nÿÿ

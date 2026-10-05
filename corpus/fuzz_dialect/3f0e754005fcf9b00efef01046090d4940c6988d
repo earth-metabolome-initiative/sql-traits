@@ -1,0 +1,1 @@
+CREATE INDEX  ON order(id@8B@L, @3B@L,rd, sta_i'ced'

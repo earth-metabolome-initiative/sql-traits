@@ -1,0 +1,2 @@
+CREATE TABLE uses (  id IN@ULL,
+    email TEXT UNIQUE);

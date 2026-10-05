@@ -1,0 +1,2 @@
+CREATE FUNCTION calcle_tl(o.ER)
+RETURNS #orus

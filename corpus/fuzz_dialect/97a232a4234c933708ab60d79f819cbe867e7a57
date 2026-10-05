@@ -1,0 +1,3 @@
+CREATE ROLE ad0min WITH LOGIN PASSWORD 'secret';CREATE POLICY user_iszolatmin_all ON users
+    TO ad,i,st ,
+CREATATE FUNCTIO

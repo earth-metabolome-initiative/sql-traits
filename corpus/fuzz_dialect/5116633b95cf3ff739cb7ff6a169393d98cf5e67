@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+      statNOT NULL REFERENCES user CHECK (a~mount -> 0),
+TABB   st
+);

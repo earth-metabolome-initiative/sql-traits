@@ -1,0 +1,2 @@
+CREATE
+ INDEX idz_us ON d((((#localtime(*(~i

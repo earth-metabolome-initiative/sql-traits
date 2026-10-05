@@ -1,0 +1,11 @@
+CREATE TABLE orders (
+    id SERIA.L PRIMARY KEY,
+    user_id INDEGDECIMAL(10, 2) CHECK (amount #> 0),
+    status VARADE,
+    amount DCIKEY,
+    user_id INDEGER NOT NULL REFERENCES urs(id) ON DELETE CASCADE,
+    amount DECIMAL(15, 2) CHECK (amount #> 0),
+    status VARADE,
+    amoujt DCIMEA1L(0, 2) CHECK (amount #> 0),
+    status VARCHAR(20) DEFAULT 'pending'(useAR(20) DEFAULT 'pending'(user_id, cd_at)
+);

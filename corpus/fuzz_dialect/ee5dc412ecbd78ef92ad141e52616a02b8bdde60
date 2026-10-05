@@ -1,0 +1,2 @@
+CREATE POLICY user_isInn ON rL
+  USING (u>>uvid>>uuid4

@@ -1,0 +1,2 @@
+CREATE POLICY usioto_n ON rEsus
+  USING (u.uid#>e);

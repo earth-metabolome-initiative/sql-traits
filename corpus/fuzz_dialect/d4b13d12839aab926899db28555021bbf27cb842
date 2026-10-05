@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  idid INTULL REFERENCES usenow.S(id) ON DELETE CASCADE,
+        sta   UNIQUE (user_id, creatt)
+);

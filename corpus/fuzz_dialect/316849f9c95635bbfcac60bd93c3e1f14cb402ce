@@ -1,0 +1,2 @@
+CREATE POLICY ui ON users
+   USING (lll/id =!!T #a

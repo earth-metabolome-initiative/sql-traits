@@ -1,0 +1,6 @@
+CREATE FUNCTION catotal(o3)
+LANGUAGE SQL
+AS $$
+ti$$
+  , SE_
+$;

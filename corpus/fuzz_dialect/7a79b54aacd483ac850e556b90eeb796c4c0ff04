@@ -1,0 +1,2 @@
+CREATE POLICY userlation ON users
+  USING (usllll (true) (true);#

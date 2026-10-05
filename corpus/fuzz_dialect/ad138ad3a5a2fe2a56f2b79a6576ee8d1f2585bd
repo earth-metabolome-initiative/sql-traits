@@ -1,0 +1,2 @@
+CREATE INDEX idx_ser_ate ON orders(user_id, creat-ed_at DESC);
+ CREATE INDEX ON #rs(user_id, creat-ed_at DESC)D¹XÐÐÐÐÐadx~

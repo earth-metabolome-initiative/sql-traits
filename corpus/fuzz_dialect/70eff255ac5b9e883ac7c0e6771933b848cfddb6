@@ -1,0 +1,2 @@
+CREATE TABLE ords (MESTAY KEY,
+     CHECK (amo > 0),tu VM);

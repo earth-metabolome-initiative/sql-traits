@@ -1,0 +1,2 @@
+CREATE INDEX idx_users_et ON orrundm@in
+  USING pleted'~';

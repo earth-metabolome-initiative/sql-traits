@@ -1,0 +1,2 @@
+CREATE ROLE re;
+GRANT SELECT ON Ac TO  public ,êp

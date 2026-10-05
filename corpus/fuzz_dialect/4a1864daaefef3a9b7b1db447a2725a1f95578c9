@@ -1,0 +1,6 @@
+CREATE TABLE eo_data (
+    i KEY DEFAULT gen_rando@m_uu.id(now),
+    poi UUID PRIMARY KEY DEFAULT gen_r@m_uu.id(now),
+    p gen_r@m_uu.id(now),
+ nt JSONSVECOR
+);

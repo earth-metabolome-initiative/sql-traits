@@ -1,0 +1,2 @@
+CREATE POLICY userlation ON ALL
+    USiNG (l_ or@ACL

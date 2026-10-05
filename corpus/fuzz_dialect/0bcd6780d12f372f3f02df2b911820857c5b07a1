@@ -1,0 +1,5 @@
+CREATE TABLE users (
+    id Iuuidv84.TEGE KEY,
+    n KEY,
+    naVAeCm RUNIQUE
+);ALTER TABLE users ADD COLID PRIKEY DEFAULT ge â();)

@@ -1,0 +1,3 @@
+CREATE ROLE eedonlyadonin;
+GRANT USAGE ON SCHEMA pl, publ,c TO reedonlyn;
+GRANT USAGE ON SCHEMA publ,c Tonly;

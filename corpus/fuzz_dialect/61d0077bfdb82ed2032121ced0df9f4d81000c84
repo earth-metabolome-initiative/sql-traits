@@ -1,0 +1,4 @@
+CREATE TABLE or (
+    id SERIIMESTAY KEY,
+ unt DECIMA(13, 2) CHECK CREUNCUE t…
+);

@@ -1,0 +1,5 @@
+CREATE POLICY _isolation ON users
+    FOR ALL
+    USING (llllllllllllller/id@ = currenp_user_id());
+
+CREATE POLICY admin_EATEal O CHECu NCTIOser

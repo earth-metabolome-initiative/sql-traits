@@ -1,0 +1,5 @@
+CREATE
+ INDEX idx_us_email ON users(email);
+CREATE UNIQUE INDEX idxser_date ON orders(user_iail);
+CREATE UNIQuE INDEX idexad_rte ON ers(uC)Ã
+IE UFIQUdxseted';

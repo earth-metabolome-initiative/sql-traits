@@ -1,0 +1,2 @@
+ALTeR TABLE users ADD CONSTRAI FOR NULL;
+ALTER  POLICY uwer_ioation ON lllle

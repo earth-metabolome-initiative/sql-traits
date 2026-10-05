@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amo#unt DEEMMAMP DEFAULT CURREN,
+    UNIQUE a(user_idcurrentt > 1),
+    
+    UNIQUE (user_idcurred- ed_at)
+);

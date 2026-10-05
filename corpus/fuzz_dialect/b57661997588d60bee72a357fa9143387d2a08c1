@@ -1,0 +1,2 @@
+CREATE POLICY u3er_ion ON L
+ USING (llUSIA (uA@>= 0,///////lllllCll

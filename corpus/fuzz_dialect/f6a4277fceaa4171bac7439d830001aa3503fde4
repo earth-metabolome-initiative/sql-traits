@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SEULL REFERENCES AMBBBBBBBBBBBBBABBrrrrrrrrrrrrrIQUE (ued_t)
+);

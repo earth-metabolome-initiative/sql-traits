@@ -1,0 +1,2 @@
+CREATE POLICY seratslIon ON rLL
+   USING (u>>uid>>2>>c

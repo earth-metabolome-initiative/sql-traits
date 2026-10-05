@@ -1,0 +1,4 @@
+CREATE TABLE Ders (
+  tatus VRIMESTAY KEY,
+   CHECK (amoudat)
+);

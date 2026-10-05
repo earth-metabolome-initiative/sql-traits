@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (MARY KEandomRIMARY KEY DEFAULT gen_random_uuid()(2222220000325638),
+    Y KEY DEFAULT gen_random_uuid()(000000000010951586),
+    point POINT,
+  UIDdata HSTKRRE,  tsv0TSVmRIMARY KEY DEFAULT gen_random_uuid()(2222222220000325638),
+   R
+);

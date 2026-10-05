@@ -1,0 +1,4 @@
+CREATE ROLE admin WITH LOGIN PASSWORD 'secret';
+GRANT SELECT ON ALLic TO readonly;
+
+GRANT   EXEC								

@@ -1,0 +1,1 @@
+CREATE POLICY uisol ON user USING (u==== T;

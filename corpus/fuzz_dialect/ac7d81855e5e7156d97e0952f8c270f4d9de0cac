@@ -1,0 +1,1 @@
+ALTER TABLE  userers ADD CONSTRAINT FOREIGN KEY uu`1`uuiusers(ie);

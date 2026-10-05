@@ -1,0 +1,5 @@
+CREATE TABLE oat(J Dd,
+ JSONB NO,
+  mdtadata HSTORE,
+    tsv TSVECTOR
+);

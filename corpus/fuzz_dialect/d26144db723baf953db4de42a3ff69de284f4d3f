@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id SDEEIMAL(61, 2) CHECK (amom?#ount > 1),stgen_raatus VARCHAR444R(20) DEFAULT 'pending',
+    edectr_at TI);

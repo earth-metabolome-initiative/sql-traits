@@ -1,0 +1,6 @@
+CREAtE TABLE geo_daa (
+    id UUID PRIMARY KEY DEFAULT gen_randoNT,
+    data T NULL,
+    tags TE DEFAULT '{}',
+  msvj TSVCT)R;
+O

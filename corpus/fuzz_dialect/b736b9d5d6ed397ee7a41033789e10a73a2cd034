@@ -1,0 +1,3 @@
+CREATE TABLE orde (
+ CHECK (am.t > 0),
+  at TAM);

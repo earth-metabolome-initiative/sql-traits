@@ -1,0 +1,7 @@
+CREATE TABLE dreors (
+    id SP DEFAULT CURRENT_TI<->
+AMP,
+t TP DEFAULT CURRENT_TI<->
+AMP,
+    UNIQUE (user_id, reated_at)
+);

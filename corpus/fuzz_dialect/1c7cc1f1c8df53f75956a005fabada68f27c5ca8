@@ -1,0 +1,8 @@
+CREATE FUNCTION calcoulate_total(INTEGER)
+RETURNS DECIMAL(10, 2)
+LANGUAGE SQL
+AS $$
+  ( SELECT SUM(  FOR Aisolms WHERE o//*%%%%%%%%DE  
+  ,amoROELETE CASCADE  
+  ,amount DECIMALM order_items WHERE o//*/_i
+$$;

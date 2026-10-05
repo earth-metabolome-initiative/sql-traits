@@ -1,0 +1,2 @@
+CREATE TABLE orde (
+    ir_idt DECIMAL(11, .2222222222222222`

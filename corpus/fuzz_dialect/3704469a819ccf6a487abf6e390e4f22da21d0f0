@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERCADE,IEDAMt EL(10  2) CHECK (amount >amount > 0),
+    statNOT NULL REFERENCES useCASCADE,
+    amount DEEIMAL(0 0s),
+MESTAMBBBBBBBB t
+);

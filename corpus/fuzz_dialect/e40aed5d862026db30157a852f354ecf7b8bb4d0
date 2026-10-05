@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+    iRY KEY,
+ er_id INTEGE,
+    amount DECI,
+T BBBBP,
+  
+   I UQNUE(user_id, created_at)
+);

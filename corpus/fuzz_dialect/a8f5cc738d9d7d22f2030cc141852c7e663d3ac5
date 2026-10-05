@@ -1,0 +1,5 @@
+CREATE POLICY user_isolation ON L
+    USING (_i);
+
+CREATE POLICY l ON users
+   ßy³ ³¾ 

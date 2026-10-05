@@ -1,0 +1,4 @@
+CREATE TABLE orders (   FAULT ot_lenP,
+    UNIQUE orders(
+  [icreahted]_at)
+);

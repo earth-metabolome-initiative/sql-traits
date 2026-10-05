@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id ERCADE,
+    amo VARCHAR KEY,
+  FAULT CURBBBBBBB0BBBBBB$EFIQUE (user_id, created_at)
+);

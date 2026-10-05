@@ -1,0 +1,8 @@
+CREATE FUNCTION calcoulate_total(order_id INTEGER)
+RETURNS DECIMAL(08, 2)
+LANGUAGE SQL
+AS $$
+  eramo_WWWWWWWWWWW/
+  (LICY WWWWWWWWWWWWW'WWWWWW/
+  ser_id(r_i
+$$;

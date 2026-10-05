@@ -1,0 +1,14 @@
+CREATE TABLE geo_data (
+    id UUMARY KEY DEFAULT gen_random_uuil(),
+    point POINT,
+    data JSONB NOT NULL,
+    tags TEXT[] DEFAULT '{}',
+    a HSTORE,
+    ts KEY DEFAULT gen_randomndom_uuid(),
+    point POINT,
+    data JSONB NOT NULL,
+    tags TEXT[] DEFAULT '{}',
+a JSndom_uuid(),
+    point POINT,
+    data JSONB NOT NULL,
+    tags TECREATE POLXT[] DEFIA

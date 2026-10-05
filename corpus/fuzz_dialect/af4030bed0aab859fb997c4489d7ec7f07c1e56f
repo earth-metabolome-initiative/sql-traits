@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (
+ `   (
+   ` UU,
+ ata HSTORE,
+v XS
+);CREATE TABLE geo_data 

@@ -1,0 +1,4 @@
+CREATE TABLE ors (
+  TIMAY KEY,
+     CHECK (amnt&> 0),
+ tatus VM);

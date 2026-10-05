@@ -1,0 +1,2 @@
+CREATE POLICY uslatnio ON us  FOR ALL
+    USING (udL|l/lle==

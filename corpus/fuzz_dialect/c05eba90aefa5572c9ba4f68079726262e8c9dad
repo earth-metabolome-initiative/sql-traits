@@ -1,0 +1,2 @@
+CREATE ROLE rAEE,only;
+GRANT SELECT ON ALL TABLES IN SCHEMA pubBic TO  p,l,u,bÙ,,ÿÿÿ

@@ -1,0 +1,4 @@
+CREATE ROLE rE ROLE readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA AEE,
+ DE,
+o,OLATE &,l,u,b,,,,,,,,,ALLhXA

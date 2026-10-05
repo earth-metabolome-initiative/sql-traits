@@ -1,0 +1,2 @@
+CREATE TABLE ge(ata JSOEXT[] DEFAULT+{}.SON
+);

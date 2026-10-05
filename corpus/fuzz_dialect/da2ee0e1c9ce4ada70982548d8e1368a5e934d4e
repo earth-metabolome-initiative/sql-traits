@@ -1,0 +1,2 @@
+CREATE POLICY uin_a ON us  TO ad,i,
+*L (TH S

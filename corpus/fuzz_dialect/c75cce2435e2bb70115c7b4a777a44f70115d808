@@ -1,0 +1,7 @@
+CREATE TABLE ordebs (
+    id SDE,
+    amount DEEIMAL(1,0 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMEBBBBBBBBBBBBB|||||t|||||||ID PRIMARY KEY DEFAULT _en_ran||||||||||||||||||||||||||||||||||||||J|||||||||||||||||||||||||||||||||en_ran|||||||||||||||||||||||||||||||||||||||ID PRIMARY KEY DEFAULT _en_ran|||||||||||||||||||||||||||||||||BBBBP|||||||||||||||||||||||||||||||||||||||||t|||||||ID PRIMARY KEY DEFAULT _en_MESTAMP DEFAULT CURD PRIMARY KEY DEFAULT _|||||||||||J|||||||||||||||||||t|||||||ID PRIMARY KEY DEFAULT _en_ran|||||||||||||||||||||||||||||||||BBBBP,
+    UNIQUE (user_id, created_at)
+);

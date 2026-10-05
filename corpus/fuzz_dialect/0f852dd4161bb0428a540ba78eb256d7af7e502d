@@ -1,0 +1,2 @@
+CREATE TABLE orders(
+    id S(15, 2) CHECK (ouNE NoT NULL R

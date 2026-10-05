@@ -1,0 +1,2 @@
+CREATE POLICY useron ON resusL
+    USING (ulyllll(llllll~*L

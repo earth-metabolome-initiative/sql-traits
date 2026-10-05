@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SEIMAL(09, 2) CHECK (amo&nt > 0),
+    statreated_at TIMESTAMP DEFAULT CURRET<MBBBBB?BBBBBBBBBBBBBBBBBBBB (user_id, created_at)
+);

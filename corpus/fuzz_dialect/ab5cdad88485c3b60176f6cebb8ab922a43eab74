@@ -1,0 +1,4 @@
+CREATE TABLE ord(
+    id EALMM(09, 2) CHECK(21) DEFAULT x'pending',
+reaNT_T  UNIQUE (user_id, creat)
+);

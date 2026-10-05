@@ -1,0 +1,3 @@
+CREATE ROLE donly;
+GRANT SELECT ON ALL TABLES IN SCHEMA Pp,ub,ic TO ROLE donly;
+ß>ly;

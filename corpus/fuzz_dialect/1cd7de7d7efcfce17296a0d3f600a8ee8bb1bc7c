@@ -1,0 +1,2 @@
+CREaTE TRIGGER utimestamORE UPDATE ON users
+   EXECUTE FUNCTION ued_column();

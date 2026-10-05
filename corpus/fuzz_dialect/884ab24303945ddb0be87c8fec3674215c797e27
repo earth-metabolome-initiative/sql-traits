@@ -1,0 +1,4 @@
+CREATE TRIGGER uestamp    BEFORE UPDATE ON us  CREATE ROLE d LOGIN PASSWORD 'secret';
+CREATE ROLE reGIN PASSWORD 'secret';
+CREATE ROLE readomin;
+G$ANT USAGÿÿÿÿÿÿeOedT nl@@

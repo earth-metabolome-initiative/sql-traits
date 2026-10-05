@@ -1,0 +1,4 @@
+CREAtE TABLE rder(
+ OT ULL REFERENCES users(id) ON DELETE 
+    
+ dK E(

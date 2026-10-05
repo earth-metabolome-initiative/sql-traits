@@ -1,0 +1,4 @@
+ DELETE CTE C,(TABLE (ut))
+A,
+(TABLE (ut))
+A;

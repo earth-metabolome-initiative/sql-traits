@@ -1,0 +1,3 @@
+(UPDATE((
+((SELECT A,
+N'N'>E

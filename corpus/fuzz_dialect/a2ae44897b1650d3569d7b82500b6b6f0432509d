@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+  TIESTAY KEY,
+CHECK (amount > 8),
+ tatus VARCHARIMESTAY KEY,     
+CHECK (amont )at T,IÐS

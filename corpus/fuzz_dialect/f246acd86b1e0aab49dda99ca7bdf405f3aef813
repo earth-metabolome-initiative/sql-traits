@@ -1,0 +1,2 @@
+CREATE TABLE tag(ea JSOEXT DEFAULT+{}.SON
+);
