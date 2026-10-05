@@ -1,3 +1,0 @@
-CREATE TABLE g_dat (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid() DEFAULT user ,  tsv TSVECTOR
-);

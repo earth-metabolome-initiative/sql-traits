@@ -1,2 +1,0 @@
-CREATE POLICY user_iatmin_all ON uuidus    TO ad,i,
-?   USIPOL ((WITH S

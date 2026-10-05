@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- RIE CASCADE,
-   tuat nVARCHAR(20) DEFAULT CURREmaxTIUNIQUE (user_id, cr_at)
-);

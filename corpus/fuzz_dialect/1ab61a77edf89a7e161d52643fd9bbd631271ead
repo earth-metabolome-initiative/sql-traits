@@ -1,3 +1,0 @@
-CREATE POLICY user_isozn ON users
-    FOR ALL
-    USING (d = c:``````b``MEGEÿÿÿ@

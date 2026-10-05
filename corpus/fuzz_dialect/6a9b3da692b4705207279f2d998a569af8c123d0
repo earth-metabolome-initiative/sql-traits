@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    GER NOT NULL REFERENCES users(id)ON DELETE CASCADE,
- Ed, cearted_at)
-);

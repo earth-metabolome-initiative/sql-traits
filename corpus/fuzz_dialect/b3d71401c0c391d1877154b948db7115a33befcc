@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-     UIDdUi PRIMARY KEY DEFAULT Y KEY DEFAULT gen_randT NULL,
-    tags TEXTSTORE, v  XSVECTOR
-);CREATE TABLE geo_daå
-  

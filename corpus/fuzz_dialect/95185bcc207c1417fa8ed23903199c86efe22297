@@ -1,2 +1,0 @@
-CREATE POLICY user_isolation ON             `                            n                                  users
-    WITH CHECSING (true`;

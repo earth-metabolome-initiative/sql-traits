@@ -1,4 +1,0 @@
-CREATE TRIGGER CEOLIK@_ti UPDATE ON us
-    FOR EACH ROW
-    EXEC localtimeamp();Žxž²
-º

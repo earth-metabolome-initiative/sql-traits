@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SEBP,UNIQUE(user_:d,i [created]_at)
-);

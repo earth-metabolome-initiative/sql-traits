@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (ataT NL,
-   ދags TEXT[]DEFAULT+'{}',
-    mUIDdata HSTORE,
-    tsv TSVECTOR
-);

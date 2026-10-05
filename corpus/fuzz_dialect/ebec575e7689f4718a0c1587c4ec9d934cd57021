@@ -1,3 +1,0 @@
-CREATE POLICY user_iszol ON users
-    FOR ALL
-    TO ad,i,st ,  USING NN;   ÿÿÿÿÿÿÿÿ

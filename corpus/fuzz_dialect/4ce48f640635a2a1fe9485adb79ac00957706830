@@ -1,6 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY DEFAULT gen_randoNT,
-    data T NULL,
-    tags TE DEFAULT '{}',
-  msvj TSVECT)R;
-O

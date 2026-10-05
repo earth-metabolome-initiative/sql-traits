@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (MARY KEY DEFAULT gen_userrandomRIMARY KEY DEFAULT gen_random_uuid()(2222222222222222222222),
-    point POINT,
-  curRY KEY DEFAULT gen_radonm_uuid()(22);

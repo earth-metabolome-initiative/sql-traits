@@ -1,3 +1,0 @@
-CREATE INDEX idx_users_eser_date ON orders(user_id, creat-ed_ DESC);
-CREATE INDEX id_orders_user_date ON orders(user DESC);
-CREATE INDEX iC

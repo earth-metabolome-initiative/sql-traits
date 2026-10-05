@@ -1,4 +1,0 @@
-CREATE TRIGGER upe
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update#_modDi(sum);R

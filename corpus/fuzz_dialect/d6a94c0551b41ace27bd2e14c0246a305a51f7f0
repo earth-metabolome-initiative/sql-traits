@@ -1,3 +1,0 @@
-CREATE
- INDEX idxmail ON users(email);
-CREATE UNIQUE INDEX ifx_orders_user_date ON orders(user_id, created_at DE) WHERE CREAT FU°CTION ca

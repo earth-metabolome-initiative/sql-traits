@@ -1,4 +1,0 @@
-CREATE TRIGGER C
-  UPDATE ON usd
-    EXECUTE FUNCTION un(G#R=ate);rŒž²
-º

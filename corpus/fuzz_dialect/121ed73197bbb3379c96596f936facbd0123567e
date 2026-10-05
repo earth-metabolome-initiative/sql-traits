@@ -1,3 +1,0 @@
-CREATE FUNCTION calgou_al(orhder_id INTEGER)
-RETURNS DECIMAL(10,                            2)
-LA

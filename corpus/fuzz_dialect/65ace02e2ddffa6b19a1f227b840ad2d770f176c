@@ -1,2 +1,0 @@
-CREATE TRIGGER update_Nt UPDATE ON users
-    FOR EAolE n();`@

@@ -1,2 +1,0 @@
-ALTER TABLE Ausers ADD COLUMN puserhone VARCHA;
-ALTER TABLE orders ADD FOREIGN KEY uuid(user_id) REFERENCES``````Ôe

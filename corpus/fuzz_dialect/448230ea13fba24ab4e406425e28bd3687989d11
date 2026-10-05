@@ -1,3 +1,0 @@
-CREATE POLICY user_ ON useL
-    USING (usll.l= curre.t._uszer_id())
-ÿÿÿÿ);

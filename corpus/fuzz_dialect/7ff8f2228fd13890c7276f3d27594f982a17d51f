@@ -1,5 +1,0 @@
-CREATE TABLE orders (
- RIO CASCADE,
-   tuat nVARCHAR(20) DEFAULT CURRENT_TIMESTABBBBB#BBBBB&<JBBBBBBP,
-    UNIQUE (user_id, created_at)
-);

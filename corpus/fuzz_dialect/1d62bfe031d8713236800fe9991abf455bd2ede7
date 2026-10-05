@@ -1,3 +1,0 @@
-CREATE POLICY uscurener_iszolatmin_all ON users
-    FOR ALL
-    TO ad,i,st , ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ

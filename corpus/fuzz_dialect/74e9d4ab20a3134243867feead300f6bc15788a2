@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    id    iEY DEFAULT g DEFAULT '{}' PRIMARY KEY DEFAULT g DEFAULT '{}',
-    mD PRIMAR DEFAULT '{}',
-    metadata HSTO
-);

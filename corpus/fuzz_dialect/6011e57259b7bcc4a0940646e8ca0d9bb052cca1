@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    TEGER NOT NULL REFERENCES userS(idoct) ON DELETE CASCADE,
-    amhut DE CHECK (a-oun),
-    status_at TIMESTAMP DEFAULT @@@@@@@@@@@@@@@@@@@@@BBBBBBB:=BBBBP,
-    UNIQUE (userlen_id, cre)
-);

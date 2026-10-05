@@ -1,2 +1,0 @@
-CREATE INDEX iders_status ON oders(status) WHERE status != 'Id'-us !=
- 'cotdelmpe';

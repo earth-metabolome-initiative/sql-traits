@@ -1,3 +1,0 @@
-CREATE FUNCTION calcoulatettal(or_se)
-RETURN DCESIL
-AS $$$$;

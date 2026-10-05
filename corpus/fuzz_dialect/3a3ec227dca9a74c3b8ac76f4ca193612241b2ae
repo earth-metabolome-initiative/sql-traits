@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SDE,
-    amount DEEIMAL(1,0 2) CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMil);
-CREATE UNIQUE INDEX idx_orders_user_date ON orders(user_id, creat-ed_at Dgen);CREATE TRIGGER update_timestamp@ORE UPDATE ON use33333333·N orders(stat··usEBBBBBBBBBBBBB|||||||||||||||||||||UNIQUE (uat)
-);

@@ -1,2 +1,0 @@
-CREATE TABLE orderso(
-    id SERIAL  ,amoun DECIMAL(0,.2) CHEl

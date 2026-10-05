@@ -1,1 +1,0 @@
-CREATE POLICY user_isolatIon ON r    USING (us(E+++.+++++

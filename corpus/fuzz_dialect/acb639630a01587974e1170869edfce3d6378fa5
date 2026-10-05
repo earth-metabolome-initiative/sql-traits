@@ -1,6 +1,0 @@
-CREATE TRIGGER update_uuitestamp
-    BEFORE UPDATE ON us  CREATE ROLE ad LOGIN PASSWORD 'secret';
-CREATE ROLE reGIN PASSWORD 'secret';
-CREATE ROLE readonin;
-GRANT USAGE ON SCHEMA publ TO reedonly;En
-e`_columnUUUUU®©();

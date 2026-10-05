@@ -1,1 +1,0 @@
-CREATE POLICY useIon ON r    USING (lllllllllllllllllr_id ? cid ? cullr_id ? ;

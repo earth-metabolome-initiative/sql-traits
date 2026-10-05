@@ -1,3 +1,0 @@
-CREATE POLICY user_iion ON res
-   USING (usll.+us
- e

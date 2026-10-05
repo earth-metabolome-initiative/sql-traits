@@ -1,3 +1,0 @@
-CREATE TABLE ords (
-    id SERCA444MESTAMP DEFAULT  (ur_id, created_at)
-);

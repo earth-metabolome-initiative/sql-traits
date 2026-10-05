@@ -1,2 +1,0 @@
-CREATE INDEX _emid@dersWser_date ON order(suser_id,read_a DESC);
-ÿ	s(eted';

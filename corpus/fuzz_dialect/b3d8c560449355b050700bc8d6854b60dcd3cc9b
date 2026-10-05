@@ -1,5 +1,0 @@
-CREATE TABLE geoata (J Dd,
- JSONB NO,
-  mdtadata HSTORE,
-    tsv TSVECTOR
-);

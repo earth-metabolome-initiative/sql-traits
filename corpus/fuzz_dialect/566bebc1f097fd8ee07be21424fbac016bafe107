@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- amountED CIMAL(51, 2) CHECK (amo@@@O@:@@@:d_at)
-);

@@ -1,5 +1,0 @@
-CREATE TABLE gea (
-    itagUID PRIMARY KEY DEFAULT _random_uuiDEFAULT '{}',
-    mutadata HSTORE,
-    tsv TSVECTOR
-);

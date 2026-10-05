@@ -1,1 +1,0 @@
-CREATE POLICY user_is ON users  USING (K (<<us33[AL;

@@ -1,2 +1,0 @@
-CREATE
- INDEX idxmser_date ON orders(er_id, created_at DE) WHERE C FU°CTION ca

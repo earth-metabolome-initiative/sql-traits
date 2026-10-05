@@ -1,2 +1,0 @@
-CREATE POLICY uses_isolation ON us
-    USING (t2tal<=llllate_t@1tal<=llbbbbculU);

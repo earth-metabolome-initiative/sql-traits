@@ -1,4 +1,0 @@
-CREATE FUNCTION calal(oer#_id I)
-LANGUAGE SQL
-AS 
-S $$$$;

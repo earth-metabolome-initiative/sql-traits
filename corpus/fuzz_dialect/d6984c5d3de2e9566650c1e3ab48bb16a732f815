@@ -1,4 +1,0 @@
-CREATE TABLE gea_dota (
-    id Ud(),
- JSONB NOT NULL,   tags SECTOR
-);

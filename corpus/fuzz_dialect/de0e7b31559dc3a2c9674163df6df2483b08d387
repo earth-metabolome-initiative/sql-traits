@@ -1,3 +1,0 @@
-CREATE ROLE adATE ROLE readonly;
-GRANT SELECT ON  public TO readonly;
-GRANT ALL PRIVILEGES ON TABLEpublic TO ru,adonl~;

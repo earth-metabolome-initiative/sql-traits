@@ -1,2 +1,0 @@
-CREATE INDEX idx_u_email ON uers(email);
-CREATE TABLE g

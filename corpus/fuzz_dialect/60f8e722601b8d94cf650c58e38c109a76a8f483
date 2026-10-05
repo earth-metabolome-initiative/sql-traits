@@ -1,4 +1,0 @@
-CREATE INDEX idx_ser_ate ON orders(user_id, creat-ed_at DESC);
- CREATE INDEX ON #ordeuserltimers(user_id, creat-ed_at DESC);
- CREAT
- SELEE IND¹XÐÐÐÐÐadx

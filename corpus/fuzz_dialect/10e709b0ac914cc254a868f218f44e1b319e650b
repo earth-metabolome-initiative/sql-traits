@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-id SERCADE,
-    amounIEdddddddddddddddddddddddddddddddddddddddddddddddDAMtDELETE CASCADE,
-    amount DEEIMAL(0sum2) CHECK (a~mount > 0),
-MESouMBBBBBBBBB   st
-);

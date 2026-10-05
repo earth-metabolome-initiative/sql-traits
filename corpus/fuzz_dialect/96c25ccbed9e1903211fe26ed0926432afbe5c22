@@ -1,2 +1,0 @@
-ALTER TABLE us ADD COET NOTL;
-ALTER  TABLE orde ADD I u(id);

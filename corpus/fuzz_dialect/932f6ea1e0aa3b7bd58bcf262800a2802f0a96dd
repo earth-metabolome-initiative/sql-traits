@@ -1,3 +1,0 @@
-CREATE ROLE adminLOGIN PASSWORD 'secret';
-CREATE ROLE onin;
-GRANT USAGE ON Sic TO reed:only;

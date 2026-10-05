@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (MARY KEY DEFAULT gencur_randomR_random_uuid()(2222222221),
-  dRY KEY DEFAULT ge_uuid()(2222*LT gen_randomRRR
-);

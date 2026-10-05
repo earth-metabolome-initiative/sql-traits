@@ -1,4 +1,0 @@
-CREATE TABLE orders (d SASCADE,
-    amount DECIMAL(14, 2) CHECK (amount #> 0),
-  FA  UNIQUE (usecreated_at)
-);

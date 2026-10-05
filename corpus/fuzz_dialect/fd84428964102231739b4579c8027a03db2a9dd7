@@ -1,3 +1,0 @@
-CREATE TABLE order(
- at MESTA DEFAULT CURRENAULT x'pending',
-TIMEST;

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,   amount AL(10, 2) CHECK (amou:nt > 0),
-    tatus VARCHAR DEFAULT NIQUE (BBP,_id, creat_tdae)
-);

@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amount DEEIMAL(10, 2) CHECK (amount > 0),atu------- 'pending',
-    AMP DEFAULT CMAMAL(10, 2) CHECK (amount > 0)CHECK (amount > 0),
-  S users(idd, created_at)
-);

@@ -1,4 +1,0 @@
-CREAtE TABLE order(
- OT NULL REFERENCES users(id) ON DELETE 
-    
- dK E(

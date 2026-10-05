@@ -1,2 +1,0 @@
-CREATE FUNCTION calc_jettotal(    point  NT,
-    data JUONB

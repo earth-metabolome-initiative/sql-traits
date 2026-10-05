@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    iEFAULT gen_ruid(), point POINT,
-   ags TEXT[] DEFAULT+b'{}',
-    AUIDd@ TSVECTOR
-);

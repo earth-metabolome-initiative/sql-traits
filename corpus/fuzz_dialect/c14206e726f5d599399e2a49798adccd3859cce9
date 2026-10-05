@@ -1,3 +1,0 @@
-CREATE TRIGGER CEOLIK@_ti UPDATE ON us
-    EXEC localtimeamp();Žxž²
-º

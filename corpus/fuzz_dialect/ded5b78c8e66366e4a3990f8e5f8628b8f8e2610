@@ -1,3 +1,0 @@
-CREATE ROLE a;
-GRANT SELECT ON rs TO admin;
-GRANT USAGE ON SCHEMA êíbic TO readonly;

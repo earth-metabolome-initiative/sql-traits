@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-  TIMESTAY KEY,
-     CHECK (amount > 0),
- tatus VM);

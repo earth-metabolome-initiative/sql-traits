@@ -1,1 +1,0 @@
-CREATE POLICY uiso ON u  USINGu (us`true);

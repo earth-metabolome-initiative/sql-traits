@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-  i   d DEFAULT '{}',
-    metaEATE TABLE,
-    tsv TSVECTOR
-);

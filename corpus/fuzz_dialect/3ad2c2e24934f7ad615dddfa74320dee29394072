@@ -1,3 +1,0 @@
-CREATE ROLE adATE ROLE readonin;
-GRANT USAGE ON SCHEMA publ,c TO reedonlyadonin;
-GRANT USAGE ON SCHEMA publ,c TO reedonly;

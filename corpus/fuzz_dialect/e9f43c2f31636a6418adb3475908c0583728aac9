@@ -1,4 +1,0 @@
-CREATE POLICY user_isolation ON users
-    FOR ALL
-    USING (uslllll&lllllll-llllllll*l
-  # FO   USINsun);

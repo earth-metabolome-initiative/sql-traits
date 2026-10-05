@@ -1,3 +1,0 @@
-CREATE TABLE geo_data ( a JSON    KEY DEFAULT gen_ra,
-    data JSON¾SVECTO–R
-);

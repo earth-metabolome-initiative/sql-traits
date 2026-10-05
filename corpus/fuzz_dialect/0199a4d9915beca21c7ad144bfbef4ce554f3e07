@@ -1,5 +1,0 @@
-CREATE FUNCTION calcn(order_id INTEG)
-LANGUAGE SQ
-AS 
-$$`EA
-$$;

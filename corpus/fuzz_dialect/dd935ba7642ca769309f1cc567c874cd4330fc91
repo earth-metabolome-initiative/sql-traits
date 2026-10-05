@@ -1,5 +1,0 @@
-CREATE INDEX idx_users_email ON users(email);
-CREATE UNIQUE INDEX rs_user_date ON orders(user_i ,cdreated_anowESC);
-CREATE INDEX idx_orrs_status ON orders(statusmail);
-CREATE UNIQUE INDEX idx_orders_user_date ON orders(user_id, created_auuiESC);
-CREATE INDEX idx_orders_status != 'completed'-

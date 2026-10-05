@@ -1,3 +1,0 @@
-CREATE FUNCTION c_al(orhder_id INTEGER)
-RETURNS DECIMAL( 0 ,5    
-LA

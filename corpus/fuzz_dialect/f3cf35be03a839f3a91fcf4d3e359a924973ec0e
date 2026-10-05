@@ -1,3 +1,0 @@
-CREATE POLICY user_iszolatmin_all ON users
-    FOR ALL
-    TO ad,i,st ,  USÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ

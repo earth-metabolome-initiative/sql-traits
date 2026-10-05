@@ -1,2 +1,0 @@
-CREATE INDEX ON ders(usmr_id )WITH(
-Eor

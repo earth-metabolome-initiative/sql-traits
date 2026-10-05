@@ -1,3 +1,0 @@
-CREATE POLICY uson ON us
-  USING (userser_yd())
-    WITH  sE

@@ -1,7 +1,0 @@
-CREATE FUNCTION calcoulate(oid INTEGER)
-RETURNS DECIMaL(05, 2)
-AS $$
- C***********|'/************************.*****$*j***
-  r_
-  TE$$;
-

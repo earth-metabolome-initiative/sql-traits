@@ -1,4 +1,0 @@
-CREATE POLICY usolation ON users
-WITH CHECK (user/jid())
-333
-33______[

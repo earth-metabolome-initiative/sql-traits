@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (ata JSOEXT[] DEFAULT+'{}',
-mUIDdata HSTORJ,
- sv TSVETOR
-)

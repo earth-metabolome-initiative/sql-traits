@@ -1,5 +1,0 @@
-CREATE TABLE o_(
-   EFAULT gen_rS#OhB NOT NULL,
-  tags TEXTT[] DEFAULT+b'{}',
-    AUIDdv TSVECTOR
-);

@@ -1,1 +1,0 @@
-CREATE INDEX idx__emal ON users(n WITH LO--- -e;

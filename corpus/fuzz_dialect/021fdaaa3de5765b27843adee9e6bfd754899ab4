@@ -1,6 +1,0 @@
-CREATE TABLE data (
-  Y KEY,
- D PRIMARY KEY DEFAULT gen_raoNT,
-    daa HSTORE,
-    ts TSVECTOR
-);

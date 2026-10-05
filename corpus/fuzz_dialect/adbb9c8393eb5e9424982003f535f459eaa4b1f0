@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-    id SERAMP DEFAULT CURRENT_DATE((dE 

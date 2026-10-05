@@ -1,2 +1,0 @@
-CREATE TRIGGER upe
-    BEFORE UPDATE ON us    EXECUTE FUNCTION update#_modDi(sum);R

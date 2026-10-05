@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    d L REFERENCES usersE,
-    amount D(20) CHECK (a@P@rek>t)
-);ù

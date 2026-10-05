@@ -1,3 +1,0 @@
-CREATE POLICY user_iion ON esus
-  
-    USING (ull(gll:=$I.

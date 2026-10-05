@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERSCADE,
-ated_at TIMESTAMP DEFAULT CURR~~~~~UE (user_id, c:eated_at)
-);

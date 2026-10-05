@@ -1,3 +1,0 @@
-CREATE TABLE orrs (
- OT NULL REFERENCES users(id) ON DELETE 
-    amAL(08,  PDATCE(

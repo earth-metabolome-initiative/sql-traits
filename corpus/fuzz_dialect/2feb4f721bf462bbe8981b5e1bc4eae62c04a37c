@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amo#unt DEE(21) DEFAULT x'pending',
-reated_av BBBBBNIQUE (user_id, created_at)
-);

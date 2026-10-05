@@ -1,2 +1,0 @@
-CREATE ROLE admEATE ROLE read;
-GRANT SELECT (ON)  re’“†Å

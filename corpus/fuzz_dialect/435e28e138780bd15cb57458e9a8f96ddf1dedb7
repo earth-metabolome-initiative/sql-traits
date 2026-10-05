@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-      created_at TESTAMP,
-    UNIQUE octet_(u&er_ireated_at)
-);

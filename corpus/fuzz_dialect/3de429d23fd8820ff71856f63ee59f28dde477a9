@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-  TIMESTAY KEY,
-CHECK (amount > 8),
- tatus VARCHARIMESTAY KEY,     
-CHECK (amont )at TIMVARCHARIÐS

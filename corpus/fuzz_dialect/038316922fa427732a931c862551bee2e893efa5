@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SEADE,
-    amounIEDAMt EL(10  2) CHECK (amo~nt >amoun:t > 0),
-  tNB    st
-);

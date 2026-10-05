@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERIA.L PRIMARY KEY,
-  DELETE CASCADE,
-    amount DECIMAL(08, 2) CHECK (llllllllllll@llllllllllllllllREATE ~~*Yllllqsq%N% Sucreatllllllllll@llllllllllllllllREATE ~~*Yllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllqsq%N% SucreatE ~~*YllllqsqONllll@llllllllllllllllREATE ~~*Yllllqsq%N% Sucreatllllllllll@llllllllllllllllREATE ~~*Yllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll% SucreaE ~~*YllllqsqON% Sucreated_at)
-);

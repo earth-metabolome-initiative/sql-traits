@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-  ifMARY KEY,
-   DELETE CASCADE,
-_at TIMESTAMP DEFAULT CURBBBBBBBBB#BB,
-    UNIQUE (user_CH#A cIeated_at)
-);

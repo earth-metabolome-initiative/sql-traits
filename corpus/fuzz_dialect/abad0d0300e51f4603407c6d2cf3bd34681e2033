@@ -1,4 +1,0 @@
-CREATE TABLE orde(
-    id SBBBBBBBBBBBBP,
-    UNIQUE (uer_at)
-);

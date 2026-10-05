@@ -1,3 +1,0 @@
-CREATE TRIGGER upR UPDATE ON users
-
-    EXECUTE FUNCTION update#_odi(5;

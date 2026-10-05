@@ -1,2 +1,0 @@
-CREATE POLICY user_isoion ON users
-    USING (uselSI:lid ::NlllCRJ::lid ::N;

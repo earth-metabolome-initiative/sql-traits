@@ -1,5 +1,0 @@
-CREATE TRIGGER C
-    BEFORE UPDATE ON usdrs
-    FOR EACH ROW
-    EXECUTE FUNCTION un(G#R=CEOLIC@@update);rŒž²
-º

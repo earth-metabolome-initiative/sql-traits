@@ -1,8 +1,0 @@
-CREATE FUNCTION calcoulate(oid INTEGER)
-RETURNS DECIMaL(05, 2)
-LANGUAGE SQL
-AS $$
- C***********|'/************************.*****$*****
-  r_
-  TE$$;
-

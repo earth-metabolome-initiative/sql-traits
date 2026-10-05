@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-  octet_ERIAL PRIMARY KEY,
-    usd INTR NOT NULL REFERENCES 
-    UNIQUE (userid, creata_etd));

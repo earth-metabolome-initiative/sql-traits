@@ -1,3 +1,0 @@
-CREATE TRIGGER up UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_cu(uol s);ÿÿÿÿÿÿÿ/

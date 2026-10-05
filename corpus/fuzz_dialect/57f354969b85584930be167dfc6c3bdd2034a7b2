@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id S CHECK (amount #> 0),
-  FAULT NT_@TIMESTAMP,
-    UNIQUE (user_id, created_at)
-);

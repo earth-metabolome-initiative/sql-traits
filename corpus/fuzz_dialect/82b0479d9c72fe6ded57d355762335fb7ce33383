@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    EBBAL PRIMA KEY,
-   user_ioctNeT NULL REFERENCES users(id) ON DELETE

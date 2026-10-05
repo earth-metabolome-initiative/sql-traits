@@ -1,3 +1,0 @@
-CREATE TABLE orrs (
- o DECI(10, 2) CHECK (:a@@@@@@@2@e@@d_at)
-);ù

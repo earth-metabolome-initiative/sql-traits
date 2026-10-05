@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-    d iDUIU PRIMARY KEY DEFAULT gen_CONB NOT NUL tsvVECTOR
-);

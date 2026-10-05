@@ -1,4 +1,0 @@
-CREATE POLICY user_iszolatmin_all ON users
-
-    TO Aad,i,
-    Uออออ;

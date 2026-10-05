@@ -1,4 +1,0 @@
-CREATE POLICY usuidv7er_isolatIon ON resus
-    FOR ALL
-    USING (u+++gen+++++CA				at
-cn O++++++

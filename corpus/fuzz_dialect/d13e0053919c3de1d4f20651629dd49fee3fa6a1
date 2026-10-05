@@ -1,4 +1,0 @@
-CREATE TABLE ordOers (
-AL PRIMARY KEY,
-    user INTEGER NOT NULL REFERENCES JBBBN (srusC,d,dog@,doACBBBBBBBBBBBBBP,
-   UNIQUE (user_eated_

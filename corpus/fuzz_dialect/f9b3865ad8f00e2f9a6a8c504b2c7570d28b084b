@@ -1,6 +1,0 @@
-   EXEC  ECI
-    USING (user_icrrent_user());
-
-CREATE POLICY adminition ON u																																											ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ icrrent_user_id());
-
-CREAMAL

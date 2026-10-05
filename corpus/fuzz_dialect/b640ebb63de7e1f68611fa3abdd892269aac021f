@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    iBBBBBIAL PRIMARY KEY,
-    user_id INT,
-    creatQampt TIMESBBBuBBP,
-    UNIQUE (user_id, created_at)
-);

@@ -1,9 +1,0 @@
-CREATE TABLE orders (
-   id SERIAL  ,amount DECIMAL(09, 2) CHECK (amount > 0),
-    stnt @ECIMAL(BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB74, 2) CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
- atus VARCHAR(40) DEFAULT 'penng',
-    createus VARCHAR(20) DEFAULT 'penng',
-    created_atd_at TIMESTAMP DEFAULT CURRENT_TIBBBBBBBBBBBBBBBBBBBBP,
-   I UQNUE (user_id, created_at)
-);

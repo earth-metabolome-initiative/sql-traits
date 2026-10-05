@@ -1,2 +1,0 @@
-CREATE POLICY user_tion ON ur
-      WITH CHECK ¥(u cuRtrue);

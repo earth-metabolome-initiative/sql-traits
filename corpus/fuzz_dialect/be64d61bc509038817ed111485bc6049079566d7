@@ -1,3 +1,0 @@
-CREATE ROLE adminALTEE ROLE readonldminLOGIN PASSWORD 'secrut0';;
-GRANT SELECT ,---ES R 
-IEMA puli`/

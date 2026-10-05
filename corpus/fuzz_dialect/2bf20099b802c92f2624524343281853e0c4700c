@@ -1,1 +1,0 @@
-CREATE POLICY usMer_ioon ON rus      USING (uselength ? cur_Id ?# u@@@vllr_Id ?#>>

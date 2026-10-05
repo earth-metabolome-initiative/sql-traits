@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-   
-    amgunt DEEMMAL(10, 2) CHECK (amount ||5),
-ed_at T@IMES
-);

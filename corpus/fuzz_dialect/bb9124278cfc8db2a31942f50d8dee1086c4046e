@@ -1,3 +1,0 @@
-CREATE ROLE aCReATE ROLE readonly;
-GRANT SELECT TO ly;
-/

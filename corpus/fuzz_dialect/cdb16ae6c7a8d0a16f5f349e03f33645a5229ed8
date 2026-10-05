@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id BBP,
-    UNIQUE (user^user^id, cre.t)
-);

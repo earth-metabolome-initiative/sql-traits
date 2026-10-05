@@ -1,2 +1,0 @@
-CREATE POLICY uall ON user    FOR ALL
-    TO ad,i,st ,  USÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ

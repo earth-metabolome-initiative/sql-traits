@@ -1,3 +1,0 @@
-CREATE POLICY user_isolan ON users    USING (user= ALL
-  ` U  F<<
-)

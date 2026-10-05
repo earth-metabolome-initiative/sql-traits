@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-maunt DECI,
-    statuRAVs CHAR(40) DEFAULT 'pending',
- N JXXXXXXXXXX@@cahculate_l(d_at)
-);

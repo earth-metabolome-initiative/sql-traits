@@ -1,3 +1,0 @@
-CREATE TRIGGER pmsuetamp
-    BEFORE UPDATE ON users
-      EXECUTE FmNþþþU_ou

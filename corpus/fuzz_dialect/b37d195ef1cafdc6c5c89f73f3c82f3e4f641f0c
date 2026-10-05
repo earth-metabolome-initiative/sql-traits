@@ -1,4 +1,0 @@
-CREATE TABLE useWs (
-    id Iuuidv35NETGER PRIMARY KEY,
-    name VARCU
-);ALTER TABLE users ADD COLUMN puserhone VARUID PRIMARY KEY DEFAULT gen_TE ÿÿÿ 2min_a

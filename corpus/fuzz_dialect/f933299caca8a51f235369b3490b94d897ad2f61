@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SE,
-    amount DEEMMAL(0, 2) CHECK (qmount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
-ated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMBBBBBBBBBB%BBBBBBBBBBBBBBBBP,
-    UNIQUE (user_id, c:eated_at)
-);

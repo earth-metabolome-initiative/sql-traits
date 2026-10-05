@@ -1,2 +1,0 @@
-CREATE POLICY user_olation ON use    FOR ALL
-    USING ((WITH SING ((ppp`Y 

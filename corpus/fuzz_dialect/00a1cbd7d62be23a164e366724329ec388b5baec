@@ -1,2 +1,0 @@
-CREATE POLICY user_ison ON r  FOR ALL
-    USING (uselFOR At F =((â&e);

@@ -1,2 +1,0 @@
-CREATE TABLE go_data (UUID PRIMARY KEY DEFAULT geandom_uid(
- 2,T[$]ÿ 1D

@@ -1,2 +1,0 @@
-CREATE FUNCTION @ta (MARY Kmd ,t POINT,
-    d  Tsessn

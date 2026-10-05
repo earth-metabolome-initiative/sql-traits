@@ -1,2 +1,0 @@
-CREATE TABLE geo_(
-    ie UUID PRIMARY KEY DEFAULT r_en||T <^muid

@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-    idD PRIMARY KEY DEFAULT _&uid(),SONB NCTORn
-);

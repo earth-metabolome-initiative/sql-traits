@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (MARY KEYrandomRIMARY KEY DEFAULT gen_rmadno_uuid(XXXX)(0000000000001976288020),
- genpoinq POINT,
-  UIDdata HSTKRECTOR
-);

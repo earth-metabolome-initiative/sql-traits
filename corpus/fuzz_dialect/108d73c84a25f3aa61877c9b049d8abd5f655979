@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-  tatus VARIMESTAY KEY,
-   CHECK (amoudat)
-);

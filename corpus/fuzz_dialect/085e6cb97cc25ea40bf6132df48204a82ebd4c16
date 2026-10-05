@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SERI,
-    created_at AMP DEFAULT CREATE@d IN@@H@@@@;

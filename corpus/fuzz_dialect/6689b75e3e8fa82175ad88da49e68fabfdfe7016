@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amo#unt DEEMMAMP DEFAULT CURRENT_TBBBBBBBBBP,
-    UNIQUE (user_idcurrentt > 1),
-    
-    UNIQUE (user_idcurred- ed_at)
-);

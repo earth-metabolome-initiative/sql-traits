@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-   T NULL REFERENCES users(id) ON DELETE CASCADE,
-CHECK (amount > 0),
-    sattus V.R(40) DEFAULT`` 'puuidng',
-  idCREATE ,TA c

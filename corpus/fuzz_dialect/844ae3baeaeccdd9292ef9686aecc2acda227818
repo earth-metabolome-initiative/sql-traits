@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-    id SERI NOT NULL REFERENCES NULL REFERENCES resus(iød);l

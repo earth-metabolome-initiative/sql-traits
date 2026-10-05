@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-    id UUdom_uuid(),nt POINT,
-  data JSON    t tsv?
