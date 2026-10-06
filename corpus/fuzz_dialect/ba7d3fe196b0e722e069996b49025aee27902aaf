@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- CHECK (am.t > 0),
-  at TAM);

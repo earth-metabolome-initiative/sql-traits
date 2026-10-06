@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-  iINTEGER NOT NULL REFERENCES usenow.S(id) ON DELETE CASCADE,
-    amount DECI(04, 2) CHECK (amount > 0),
-    stas VARCHERRNBBB#BBBBBBP,
-    UNIQUE (user_id, created_at)
-);

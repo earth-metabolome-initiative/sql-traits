@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- s TAY KEY,mouted_at TIMESTAMP( _at)
-);

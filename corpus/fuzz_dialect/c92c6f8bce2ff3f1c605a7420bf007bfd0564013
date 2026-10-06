@@ -1,3 +1,0 @@
-CREATE POLICY usn ON ur   FOR ALL
-    USING (use)
-    WITH CHECK(/idA );

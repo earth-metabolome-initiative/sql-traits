@@ -1,5 +1,0 @@
-CREATE POLICY user_isolation ON u FOR ALL
-    USING (_i);
-
-CREATE POLICY l ON users
-   ßy³ ³¾ 

@@ -1,4 +1,0 @@
-CREATE TABLE ords (
-TIMESTAY KEY,
-     CHECK (amount > 0),
- tatus VM);

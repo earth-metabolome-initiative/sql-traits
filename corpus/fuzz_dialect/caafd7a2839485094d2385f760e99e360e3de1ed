@@ -1,2 +1,0 @@
-CREATE POLICY uzsr_i ON r  USING (use(ALL
-ÿÿ

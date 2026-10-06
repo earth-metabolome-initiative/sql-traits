@@ -1,3 +1,0 @@
-CREATE TABLE rd(
- ed_at TIM DEFAULT CURR(u,ted_at)
-);

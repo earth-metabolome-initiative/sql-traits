@@ -1,5 +1,0 @@
-CREATE TABLE ordes (
-  amo#unt DEEMMAL(10, 2) CHECK (amou.t > 0),
-  at TIMES DEFAULT CURR^T_MBBB#BBBP,
-    UNIQUE (uFUNCTION caated_a)
-);

@@ -1,2 +1,0 @@
-CREATE POLICY user_iatmin_all ON us    TO ad,i,
-*O$L ((WITH S

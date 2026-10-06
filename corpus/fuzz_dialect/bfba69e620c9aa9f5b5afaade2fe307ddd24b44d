@@ -1,5 +1,0 @@
-CREATE POLICY user_isolation ON ALL
-    USING( usellluser_if());
-
-CREATE POLICY amin_all ON u@ser   TO admin
-    USING (true)_

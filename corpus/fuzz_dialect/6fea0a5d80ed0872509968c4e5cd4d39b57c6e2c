@@ -1,1 +1,0 @@
-CREATE POLICY user_isn ON u USING (usellll(|&> E

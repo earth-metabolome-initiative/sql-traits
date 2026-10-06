@@ -1,2 +1,0 @@
-CREATE POLICY ul ON users
-  TO ad,i,@t   USINGN##

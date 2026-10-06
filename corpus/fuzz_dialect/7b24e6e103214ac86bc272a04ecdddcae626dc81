@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amMt EL(10  2) CHECK (amount >=>amount > 0),
- statNOTETE CASCADE,
-    amount DEEIMA,
-MESTAMBBBBBBB   st
-);

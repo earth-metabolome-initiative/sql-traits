@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    TEGER NOT NULL REFERENCES userS(idoct) ON DELETE CASCADE,
- 
-  status_at MESTAMP DEFAULT @@@@@@@@@@@@@@@@@@@@@BBBBBBB:=BBBBP,
-    UNIQUE (usen_id, cre)
-);

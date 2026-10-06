@@ -1,4 +1,0 @@
-CREATE POLICY usolation ON userr
-WITH CHECK (d())
-333
-3____[

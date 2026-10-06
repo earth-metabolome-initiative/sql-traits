@@ -1,3 +1,0 @@
-CREATE POLICY ul ON users
-    FOR ALL
-    TO ad,i,@t   USINGN##

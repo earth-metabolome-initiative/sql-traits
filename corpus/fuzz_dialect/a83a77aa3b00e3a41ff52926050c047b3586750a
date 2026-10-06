@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SE,
-   CHECK (am.t > 0),
-  at TAMEBBBP,
-    UNIQUE (user_iBated_at)
-);

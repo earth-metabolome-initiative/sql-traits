@@ -1,2 +1,0 @@
-CREATE POLICY on ON uL
-    USING (_i (uc`1```_ue);

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-  ed_at TIMESTAMP DEFAULT CURRENT_BBB#BB,
-    UNIQUE (user_C?#A created_a)
-);

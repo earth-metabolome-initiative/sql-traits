@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    i$UUID PRIMARY KEY DEFAULT[] DEFAULT '{%',
-  a HSTORE,
-  CREATE TRIGGER
-);

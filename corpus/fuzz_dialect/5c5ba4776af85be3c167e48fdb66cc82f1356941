@@ -1,1 +1,0 @@
-CREATE POLICY userion ON re  FOR  DELETE  BU

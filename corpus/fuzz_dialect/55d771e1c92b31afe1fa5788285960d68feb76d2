@@ -1,3 +1,0 @@
-CREATE TABLE ords (
-    id SERC DEFAULT  (ur_id, created_at)
-);

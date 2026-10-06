@@ -1,2 +1,0 @@
-CREATE POLICY usioto_n ON rus
-  USING (iuu.d#>e);

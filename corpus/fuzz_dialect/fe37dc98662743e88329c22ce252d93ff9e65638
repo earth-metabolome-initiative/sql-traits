@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id DECIMAL(09, 2) CHECK (amount@? 0),
-    stnt DEC);

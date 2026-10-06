@@ -1,4 +1,0 @@
-CREATE TABLE ords (
-TIMESTAY KEY,
-     CHECK (amo > 0),
- tatu VM);

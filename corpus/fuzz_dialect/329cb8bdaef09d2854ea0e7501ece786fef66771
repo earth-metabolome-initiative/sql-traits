@@ -1,1 +1,0 @@
-CREATE POLICY useadmin_all ON u@ser   TO adm    USING (tr

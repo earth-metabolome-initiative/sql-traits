@@ -1,1 +1,0 @@
-CREATE INDEX idxs ON rders(user_id, c+s != ''-

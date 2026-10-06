@@ -1,4 +1,0 @@
-CREATE POLICY user_iin_all ON userY
-    FOR ALL
-    TO ad,i,
-USING NNN  pp`AL

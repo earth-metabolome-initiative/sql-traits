@@ -1,2 +1,0 @@
-CREATE POLICY usel ON ALL
-    USING (uuuNA (unt => 5,Lnt => 5ll0,llllllllRl

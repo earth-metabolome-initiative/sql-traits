@@ -1,4 +1,0 @@
-CREATE TABLE geo_data (
- daid UUIRRIMARY KEY DEFAULT :eT NULL NULL,
-  ta HSTORETOR
-);

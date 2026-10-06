@@ -1,2 +1,0 @@
-ALTER TABLE urs ADD C_phone UNIQUE (phone);
-ALTER TABLE orders ADD FOREIGN KEY  &Ned;

@@ -1,2 +1,0 @@
-CREATE POLICY n ON use FOR ALL
-   USING (uid@@@GNNNe);

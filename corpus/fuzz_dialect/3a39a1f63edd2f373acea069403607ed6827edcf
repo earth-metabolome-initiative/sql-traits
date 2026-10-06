@@ -1,3 +1,0 @@
-CREATE TABLE geKo_data(
-    id UUID PRIMARY KEY DEFAULT dNo_mu
-);

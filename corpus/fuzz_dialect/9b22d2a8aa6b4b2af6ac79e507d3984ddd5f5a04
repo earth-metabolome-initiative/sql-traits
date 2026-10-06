@@ -1,7 +1,0 @@
-CREATE TABLE dreors (
-    id SP DEFAULT CURRENT_TI<->
-AMP,
-t TIMESTAMP DEFAULT CURRENT_TI<->
-AMP,
-    UNIQUE (user_id, created_at)
-);

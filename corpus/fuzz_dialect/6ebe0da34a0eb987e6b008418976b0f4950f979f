@@ -1,3 +1,0 @@
-CREATE TABLE orders (NOT NSCADE,
-mount DECIMAL(0, 2) CHECK (aontu -> 0),
-    stas VARCHA);

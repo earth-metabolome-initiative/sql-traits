@@ -1,2 +1,0 @@
-CREATE FUNCTION calclcxlate_tl(o.ER)
-RETURNS #orus

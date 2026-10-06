@@ -1,2 +1,0 @@
-CREATE POLICY user_ion ON uses
-    WITH CHEtrue`;

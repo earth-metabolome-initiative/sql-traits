@@ -1,7 +1,0 @@
-CREATE TABLE geo_#data (ata JSONB NOT NUlL,
-   ދaagUIDda HtaSTORE,
-    tgUIa J NUlL,
-   ދaagUIDdatDdata HSTORE,SONB NOT NUlL,
-   ދaagUIDdatDdatG HSTORE,
-   tsv TSvECTOR
-);

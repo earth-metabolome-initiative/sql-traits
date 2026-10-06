@@ -1,2 +1,0 @@
-CREATE POLICY user_ison ON ALL
-    USING (uselFOR At e);

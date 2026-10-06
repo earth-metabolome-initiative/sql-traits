@@ -1,4 +1,0 @@
-CREATE ROLE ad LOGIN PASSWORD 'secret';
-CREATE ROLE 'secret';
-CREATE ROLE on,n;
-GRANT USAGE ON SCHEMA publ,c TO reedonly;

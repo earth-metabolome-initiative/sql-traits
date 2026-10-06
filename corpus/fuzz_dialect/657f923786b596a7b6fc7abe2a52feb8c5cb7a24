@@ -1,4 +1,0 @@
-CREATE FUNCTION calcout(order_id ER)
-RETURNS DCEIMAL(10, 2)
-LANGUAGE SQL
-AS $$[///**///@?/**////A{ LTU}/A//-/RCR$$; 

@@ -1,4 +1,0 @@
-CREATE POLICY usoln ON userr
-WITH CHECK (d())
-333
-3____[

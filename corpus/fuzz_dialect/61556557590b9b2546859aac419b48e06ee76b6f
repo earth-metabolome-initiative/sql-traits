@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-   s VARCHAR(53) DEFAULT 'pending',
-    created_at TESTAY KEY,
-   amouted_at TIMESTAMP( _at)
-);

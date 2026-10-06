@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- MBBBB PRIMARY KEY,
-    user_EGER NOT NULL REFERENCES u.ser
-);

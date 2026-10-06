@@ -1,2 +1,0 @@
-CREATE POLICY usioto_n ON rsus
-  USING (u.uid#>e);

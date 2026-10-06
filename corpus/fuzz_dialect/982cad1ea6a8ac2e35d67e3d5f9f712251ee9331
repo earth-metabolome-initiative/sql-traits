@@ -1,2 +1,0 @@
-CREATE ROLE dmi ROLE eadonly;
-GRANT ROLE adminI T 

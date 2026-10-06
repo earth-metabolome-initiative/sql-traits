@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-   amount DEEIM@L(10, 1) CHECK (amount > 0) CHECK (amount > 0),
-  HAR KEY,
-romf VARCHAR);

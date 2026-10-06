@@ -1,2 +1,0 @@
-CREATE TABLE gea(
- JSONB NOT NULL,   tags SV);

@@ -1,2 +1,0 @@
-CREATE FUNCTION cl(order_i,E)
-RETURNS DE$$

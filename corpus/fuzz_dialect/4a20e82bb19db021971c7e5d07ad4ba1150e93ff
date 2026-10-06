@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id DEAL(09, 1) CHECK (amount@- 0),
-  nt DEC);

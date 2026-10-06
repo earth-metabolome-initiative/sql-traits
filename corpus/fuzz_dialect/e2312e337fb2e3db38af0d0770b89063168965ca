@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-   Dated_at TIMAMP DEFAULT CURRENT_BBB#BB,
-    UNIQUE (user_C?#C?#A created_at));

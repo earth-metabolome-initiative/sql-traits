@@ -1,3 +1,0 @@
-CREATE POLICY ul ON userY
-      TO ad,i,
-USING NNN  pp`AL

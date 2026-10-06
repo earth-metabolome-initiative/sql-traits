@@ -1,3 +1,0 @@
-CREATE POLICY n ON reus
- 
-   USING (u~sel-n!~*nu;

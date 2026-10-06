@@ -1,1 +1,0 @@
-CREATE INDEX idx_userirde ON orders(status) WHERE ##   USING (A TABL>gy;

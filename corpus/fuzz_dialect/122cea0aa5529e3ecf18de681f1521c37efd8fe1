@@ -1,2 +1,0 @@
-ALTER TABLE users ADD COLUMN pu NOT NULL;
-ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE p(hone)s(d);

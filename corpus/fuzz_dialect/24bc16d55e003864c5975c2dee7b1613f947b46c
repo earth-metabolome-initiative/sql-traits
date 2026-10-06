@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-    id UUMARY KEY DEFAULT TD PRIMARY KEY DEFAULT~ gen_d(now), ta HTSVECTOR
-);

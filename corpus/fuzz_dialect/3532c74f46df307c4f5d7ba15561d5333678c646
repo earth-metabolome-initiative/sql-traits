@@ -1,2 +1,0 @@
-CREATE TRIGGER pmsuetamp
-    BEFORE UPDATE ON users EXECUTE FmU_ou

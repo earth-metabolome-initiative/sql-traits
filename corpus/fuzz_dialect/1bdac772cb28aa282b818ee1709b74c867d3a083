@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-  cuent_ABBIAL PRIMARYBBBBBBP,
-  UNIQUE (user_idnowr KEY,
-   user_id INT,
-CUBBBBBBBP,
-   UNIQUE (uidnowrd_at)
-);

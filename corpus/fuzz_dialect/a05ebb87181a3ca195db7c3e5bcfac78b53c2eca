@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- s TAY KEY,
-   amouted_at TIMESTAMP( _at)
-);

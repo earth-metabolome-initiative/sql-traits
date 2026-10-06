@@ -1,3 +1,0 @@
-CREATE POLICY user_i_all ON users
-
-    TO Aad,i,    Uออออ;

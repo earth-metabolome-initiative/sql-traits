@@ -1,3 +1,0 @@
-CREATE POLICY usatmi_all ON users
-    FOR ALL
-    TO ad,i,st   USING ###

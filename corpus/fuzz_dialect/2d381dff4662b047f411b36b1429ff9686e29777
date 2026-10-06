@@ -1,3 +1,0 @@
-CREATE POLICY userol ON resus
-    FOR ALL
-    USING (+++++++++++++++++SET #-#+ccccc+++++

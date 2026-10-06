@@ -1,2 +1,0 @@
-CREATE POLICY usiotoi_n ON rEsus
-   USING (ullllll(u.uid#>e);

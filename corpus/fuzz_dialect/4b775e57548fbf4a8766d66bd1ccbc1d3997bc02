@@ -1,5 +1,0 @@
-CREATE FUNCTION cn(ordeTEG)
-LANGUAGE Q
-AS 
-$$`EA
-$$;

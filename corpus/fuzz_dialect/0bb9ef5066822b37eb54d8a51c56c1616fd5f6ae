@@ -1,7 +1,0 @@
-CREATE TABLE data  (   
- UARY KEY DEFAULT gena.n_ra.TO);
-CREATE TABLE users (
-    id IuKEY,
-    n KEY,
-    naVAeCm RUNIQUE
-);ALTER TABLE users ADD COLIKEFAULT g

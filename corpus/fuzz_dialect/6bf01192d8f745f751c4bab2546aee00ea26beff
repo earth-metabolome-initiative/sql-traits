@@ -1,2 +1,0 @@
-CREATE TRIGGER updUoum UPDATE ON users
-   EXEC.PE!FNA;

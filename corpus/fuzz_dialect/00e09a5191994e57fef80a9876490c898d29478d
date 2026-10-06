@@ -1,1 +1,0 @@
-CREATE POLICY i@n ON res  USING (uselllllA=:--GO--Ó

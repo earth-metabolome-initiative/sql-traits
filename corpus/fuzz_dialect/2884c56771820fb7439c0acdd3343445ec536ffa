@@ -1,2 +1,0 @@
-CREATE POLICY user_is ON uL
-    USING (_i (uc`1```a _ue);

@@ -1,2 +1,0 @@
-CREATE
- INDEX idz_ ON kr(((localtime(((localtime()

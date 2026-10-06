@@ -1,3 +1,0 @@
-CREATE TABLE o (
-    id DE(09, 2) CHECK (amount@? 0),
-  t DEC);

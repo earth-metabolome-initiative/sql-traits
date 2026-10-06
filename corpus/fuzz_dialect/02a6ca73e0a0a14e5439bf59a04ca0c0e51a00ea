@@ -1,4 +1,0 @@
-CREATE POLICY on ON us   FOR ALL
-    USING( l);
-
-CREATE POLICY admin_ ON u@ser   TO 

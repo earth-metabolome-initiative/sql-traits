@@ -1,2 +1,0 @@
-CREATE TABLE orders(
-    id S(15, 2) CHECK (amouNE NoT NULL R

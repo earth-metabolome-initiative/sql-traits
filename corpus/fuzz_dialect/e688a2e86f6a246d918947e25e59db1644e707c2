@@ -1,9 +1,0 @@
-CREATE TABLE orders(
-   ERENCES useNTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-   CHECK (amount > 0),
-    status VARCHAR PRIMARY KEY,    user_id INTEGER NOT NULL REFERENCES uss(id) ON DELETE CASCADE,
-   CHECK (amount > 0),
-     id SERCADE,
-    amount DEEIMAL(10, 1) CHECK (amount > 0) CHECK (amount > 0),
-  HAR KEY,
-romf VARCHAR);

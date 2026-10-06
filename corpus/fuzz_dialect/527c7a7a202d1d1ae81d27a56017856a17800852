@@ -1,3 +1,0 @@
-CREATE POLICY uon ON re USING (uselK (uuid/id = curid(/));
-
-CR );

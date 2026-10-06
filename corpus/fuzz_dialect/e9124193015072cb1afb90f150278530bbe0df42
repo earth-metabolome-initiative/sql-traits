@@ -1,3 +1,0 @@
-CREATE POLICY user_iszolatmi_all ON users
-    FOR ALL
-    TO ad,i,st   USING ###

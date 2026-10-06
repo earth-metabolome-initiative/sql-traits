@@ -1,4 +1,0 @@
-CREATE ROLE a;
-GRANT SELECT ON Aublic TO readonly;
-;
-GRANT USAGE ON SCublic TO readonly;

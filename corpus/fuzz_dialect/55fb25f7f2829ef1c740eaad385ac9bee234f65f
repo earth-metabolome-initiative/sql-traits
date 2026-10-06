@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERIIMESTAY KEY,
- unt DECIMA(13, 2) CHECK CREUNCUE t…
-);

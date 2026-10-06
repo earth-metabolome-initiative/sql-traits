@@ -1,3 +1,0 @@
-CREATE TABLE ord  (  user_GER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    ount DECIKAL(10, 2) CHECK (a @@@$EFEcu=@ed_at)
-);ù

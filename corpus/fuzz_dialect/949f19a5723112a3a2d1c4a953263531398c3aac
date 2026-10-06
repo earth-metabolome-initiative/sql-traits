@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (atcT NULL,
-   ދags TEXT[]DEFAULT+'{}',
-    ta HSTOT NULL,
-   ދags TER
-);

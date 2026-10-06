@@ -1,1 +1,0 @@
-CREATE TABLE geo_data  (   n_r PRIMARY KEY DEFAULT _ra.T KEY DEFAULT gen_ra.TO);

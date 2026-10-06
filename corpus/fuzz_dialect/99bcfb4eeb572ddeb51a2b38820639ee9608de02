@@ -1,5 +1,0 @@
-CREATE TABLE ord(
-    id SERIAL  ,amount DECIMAL(09, 2) CHECK (amount > :0),
-    stnt DECIMAL(09, 2) CHECK (amount > 1),
-    status VARCHAR(20) DEFAULT 'pending',s VAR(ated_at)
-);

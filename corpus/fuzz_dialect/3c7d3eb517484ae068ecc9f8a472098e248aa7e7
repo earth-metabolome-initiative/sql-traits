@@ -1,1 +1,0 @@
-CREATE POLICY ucurpeation ON users    USING((WITH`:TH ui);

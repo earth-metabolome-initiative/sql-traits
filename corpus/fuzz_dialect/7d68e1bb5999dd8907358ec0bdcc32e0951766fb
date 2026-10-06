@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    iat TIMEQTAMP DEFAULT Cc$QUE%(BBP,_id, createdd, created_at)
-);

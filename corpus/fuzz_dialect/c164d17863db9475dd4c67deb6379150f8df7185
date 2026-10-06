@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amgunt DEEMMAL(10, 2) CHECK (amunt > 0),BIAL PRIMARY KEY,
-    user_id IENT_TIMESTAMBBBUE (useri_d, created_at)
-);

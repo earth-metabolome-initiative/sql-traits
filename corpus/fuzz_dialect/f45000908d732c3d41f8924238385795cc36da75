@@ -1,2 +1,0 @@
-CREATE ROLE adTH ROLE readonly;
-GRANT UPDATE(

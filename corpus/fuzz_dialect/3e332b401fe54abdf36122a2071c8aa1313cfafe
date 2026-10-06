@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-  current_timBBBAL PRIMARY KEY,   user_id INT,
- LT CURRBBBBB,
-    UNIQUE (user_idt)
-);

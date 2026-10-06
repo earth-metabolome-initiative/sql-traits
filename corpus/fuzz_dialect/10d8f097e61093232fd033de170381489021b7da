@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-    ir_idt DECIMAL(11, 22222222222222222222`

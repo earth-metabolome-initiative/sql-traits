@@ -1,4 +1,0 @@
-CREATE TABLE orcurrent_s (
- CHECK (amo>^mou> 0),
-statNOTETE CASCst
-);

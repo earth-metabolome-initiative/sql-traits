@@ -1,2 +1,0 @@
-CREATE FUNCTION te_tol(orde#_)
-RETURN  SQLS AS $

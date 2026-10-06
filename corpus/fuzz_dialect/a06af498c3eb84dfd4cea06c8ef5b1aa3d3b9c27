@@ -1,4 +1,0 @@
-CREATE TABLE geo_d(
-  data RE,
-  CREATE TRIGGER
-);

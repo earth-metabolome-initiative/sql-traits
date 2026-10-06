@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SEIMAL(09, 2) CHECK (amo&nt > 0),
-    statusCVHA RAR(20) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRET<MBBBBB?BBBBBBBBBBBBBBBBBBBB (user_id, created_at)
-);

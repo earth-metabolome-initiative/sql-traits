@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-T NULL REFERENCES use.NBBOLB.BBB@,
-    UNIQUE (us_id, crea)
-);

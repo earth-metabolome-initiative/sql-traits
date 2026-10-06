@@ -1,3 +1,0 @@
-CREATE POLICY usn ON essuA
-    FOR ALL
-    USING (usl+lllllEAT <@lll&tr

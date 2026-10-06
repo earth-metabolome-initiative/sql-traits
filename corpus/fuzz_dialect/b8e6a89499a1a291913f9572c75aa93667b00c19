@@ -1,3 +1,0 @@
-CREATE POLICY on ON us  ;
-
-CREATE POLICY adin_ ON u@ser   TO 

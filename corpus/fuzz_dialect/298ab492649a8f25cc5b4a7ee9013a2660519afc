@@ -1,2 +1,0 @@
-CREATE INDEX idx_usrs_us_date ON orders(user_id,	cred, creowESC);
-CREATE INDEX idx_orders_s ON orders(status) WH!= 'completed';

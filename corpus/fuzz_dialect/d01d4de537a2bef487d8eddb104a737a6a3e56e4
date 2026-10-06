@@ -1,6 +1,0 @@
-CREATE FUNCTION ccoulate_total(o2der_id INTEGER)
-RETURNS DE
-LANGUAGE SQL
-AS $$
-  *AULT g @A '{/ܧ////**
-$$;

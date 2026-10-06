@@ -1,2 +1,0 @@
-CREATE POLICY serao_itslIon ON rLL
-   USING (u>>uid>>2>>c

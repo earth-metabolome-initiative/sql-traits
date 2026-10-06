@@ -1,3 +1,0 @@
-CREATE TABLE orders (
- 
-   tuat nVARCHAR(20) DEFAULT CURRQ);

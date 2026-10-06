@@ -1,2 +1,0 @@
-CREATE TABLE orders (    id ifAR KEY NOT NULL REFERENCES userS(id) ON DELETE CASCADE,
-t DE»»»

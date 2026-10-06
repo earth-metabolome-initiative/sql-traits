@@ -1,2 +1,0 @@
-ALTER TABLE usersrs DROP l;
-ALTER TABLE users DROP CO( 

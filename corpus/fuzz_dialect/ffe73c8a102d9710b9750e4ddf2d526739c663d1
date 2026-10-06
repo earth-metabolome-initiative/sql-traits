@@ -1,2 +1,0 @@
-CREATE POLICY user_isolatn ON resus
-  USING (+++++Nq''''++

@@ -1,2 +1,0 @@
-CREATE POLICY un ON ALL
-    USING (uselFOR At e);

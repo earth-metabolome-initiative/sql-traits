@@ -1,3 +1,0 @@
-CREATE FUNCTION te_totl(orde#_)
-RETURN  SQL
-AS AS $$   mi$$;

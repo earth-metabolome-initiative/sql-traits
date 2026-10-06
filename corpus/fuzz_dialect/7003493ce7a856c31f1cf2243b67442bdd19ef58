@@ -1,4 +1,0 @@
-CREAtE TABLE rder(
- OT NULL REFERENCES users(id) ON DELETE 
-    
- dK E(

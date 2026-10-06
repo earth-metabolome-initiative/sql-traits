@@ -1,2 +1,0 @@
-CREATE ROLE admin WITH LOGIN PASSWORD 'se';
-CREATE ROLE et PASSWORD 'secret';y;

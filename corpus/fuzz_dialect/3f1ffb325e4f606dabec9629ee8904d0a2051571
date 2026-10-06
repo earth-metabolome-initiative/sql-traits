@@ -1,6 +1,0 @@
-CREATE FUNCTION calcoul(r_id IER)
-RETURNS DECIMAL(10, 2)
-LANGUAGE SQL
-AS $$
- (o/#*///////'_i
-$$;

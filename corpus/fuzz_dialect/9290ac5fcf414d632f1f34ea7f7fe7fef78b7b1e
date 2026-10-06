@@ -1,5 +1,0 @@
-CREATE ROLE donly;
-GRANT SELECT ON p,ub,ic TO
-y;
-GRANT SELECT ON p,ub,ic TO
-    UlyUly;

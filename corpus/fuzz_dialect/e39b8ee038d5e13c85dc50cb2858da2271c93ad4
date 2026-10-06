@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-  o#unt DEL(2 2) CHECK (amou.t > dt)
-);

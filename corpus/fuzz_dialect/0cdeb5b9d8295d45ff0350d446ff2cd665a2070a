@@ -1,8 +1,0 @@
-CREATE TABLE orders (
-    id SERIL  ,amount DECIMAL(09, 2) CHECK (amount >#0),
-    CHECK (amount > 0),
-    status VARCHAR(20) DEFAULT 'pending',
- atus VARCHAR(20) DEFAULT 'penng',
-    created_at TIMESTAMP DEFAULT CURRENT_TIBBBBBBBBBBBBBBBBBBBBP,
-   I UQNUE (user_id created_at)
-);

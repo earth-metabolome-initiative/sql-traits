@@ -1,2 +1,0 @@
-CREaTE TRIGGER utimestamORE UPDATE ON users
-   EXECUTE FUNCTION update_modified_column();

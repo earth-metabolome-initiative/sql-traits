@@ -1,3 +1,0 @@
-CREATE POLICY user_isolatInn ON re
-    FOR ALL
-  USING (u>>uvid>>uuid4

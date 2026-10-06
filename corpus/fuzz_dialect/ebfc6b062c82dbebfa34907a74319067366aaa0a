@@ -1,4 +1,0 @@
-   EXEC  ECI
-   USING (user_icrrent_user());));
-
-CREAMAL

@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SDEEIMAL(61, 2) CHECK (amom?#ount > 1),stgen_raatus VARCHAR444R(20) DEFAULT 'pending',
-    r_at TI);

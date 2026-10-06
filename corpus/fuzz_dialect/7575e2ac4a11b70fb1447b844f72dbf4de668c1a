@@ -1,6 +1,0 @@
-ALTER TABLE users ADD COLUMN pu NOT NULL;
-ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE p(hone);
-ALTER TABLE orders ADD FOREIGNserhone VARCHAR(40);
-ALTER TABLE userusers ADD CONSTRAINT uk_phone UNIQUE p(hone);
-ALTERerhohne);
-ALTER TABLEmi

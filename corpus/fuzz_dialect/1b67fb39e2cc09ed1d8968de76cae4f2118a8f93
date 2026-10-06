@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (
-     UIDdUi PRIMARY KEY DEFAULT gen_rCTOR
-);CREATE TABLE geo_

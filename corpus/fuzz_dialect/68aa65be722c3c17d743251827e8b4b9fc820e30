@@ -1,3 +1,0 @@
-CREATE TABLE o (T NULL REFERENCES users(idEY,
-    d,t)
-),;

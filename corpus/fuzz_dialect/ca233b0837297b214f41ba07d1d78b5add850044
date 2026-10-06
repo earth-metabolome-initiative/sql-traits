@@ -1,4 +1,0 @@
-CREATE TRIGGER updstam6
-    BEFORE UPDATE ON users
-  FOR EACH ROW
-    EXECUTE FUNCTION update_modefi@.ed_mecoaCASC, stDELETE CASC,  DETE

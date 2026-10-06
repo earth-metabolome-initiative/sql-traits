@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERY,
-  DELETD CASCADE,
-    amount DECIMAL(06, 2) CHECK (lllll#Tlll?llll@llRAA##EzdATE !~*sqA#PABONed_at)
-);

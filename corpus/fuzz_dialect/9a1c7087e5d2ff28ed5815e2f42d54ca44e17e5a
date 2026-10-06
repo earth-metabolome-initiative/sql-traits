@@ -1,1 +1,0 @@
-CREATE POLICY Yser_is ON rs USING (K (<<

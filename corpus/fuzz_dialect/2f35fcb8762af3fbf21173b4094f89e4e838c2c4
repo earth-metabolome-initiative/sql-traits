@@ -1,3 +1,0 @@
-CREATE POLICY user_isolation ON essuA
-    FOR ALL
-    USING (usl+lllllEAT <@lll&tr

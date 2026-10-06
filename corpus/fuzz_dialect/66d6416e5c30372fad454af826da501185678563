@@ -1,2 +1,0 @@
-CREATE ROLE eadonin;
-GRANT USAGE ON SCHEMubl,c TO reed

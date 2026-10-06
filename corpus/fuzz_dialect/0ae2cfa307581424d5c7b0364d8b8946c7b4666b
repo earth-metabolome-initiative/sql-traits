@@ -1,3 +1,0 @@
-CREATE TABLE orders (amouui DEIMAL(09, 2) CHECK (a^mount > 5),
-    status VARCHAR(20) DEFAULT BBBB?BBBBBBBBBBBBBBBE (user_id<^q, created_at)
-);

@@ -1,4 +1,0 @@
-CREATE TABLE geo_d (
-   tags TEXT[ ]DEFAULT '{}',
-    m@tadata HOR
-);

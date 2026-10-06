@@ -1,3 +1,0 @@
-CREATE TABLE ordrs (
-    id SERCADE,
-    amosest DEEMMAL(10, 2) CHECK (ahhhhhhhhhhhhhhmou.t > 0),ed_at TIBB);

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- 
-   tuat nVARCHAR(20) DEFAULT CURRQUE (uid, cz_at)
-);

@@ -1,1 +1,0 @@
-ALTER TABLE usere#rs DROP CONSTRAINT uk

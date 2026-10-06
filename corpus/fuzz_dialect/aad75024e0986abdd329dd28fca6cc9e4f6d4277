@@ -1,4 +1,0 @@
-CREATE TABLE orders (
- MBBBB PRIMARY KEY,
-    use NOT NULL REFERENCES u.ser
-);

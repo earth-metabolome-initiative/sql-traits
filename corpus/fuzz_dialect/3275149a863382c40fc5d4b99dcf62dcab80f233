@@ -1,6 +1,0 @@
-CREATE TABLE geo_data (MARY K DEFAULT gen_random_uuid()(2222222220000325638),
-    point POINT,
-  UIARY KEY DEFAULT gen_random_uuid()(2222222220000325443638),
-    point POINT,
-  UIDdata HSTKREECTOR
-);

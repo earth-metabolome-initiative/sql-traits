@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    idid I REFERENCES use.NBB.BBBBE (user_id, crea)
-);

@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SERI REFERENCES usE NOT Eat)
-);

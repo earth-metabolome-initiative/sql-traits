@@ -1,8 +1,0 @@
-CREATE FUNCTION calcoulate_total(INTEGER)
-RETURNS DECIMAL(10, 2)
-LANGUAGE SQL
-AS $$
-  (olms WHERE o//*%%%%%%%%DE  
-  ,amoROELETE CASCADE  
-  ,amount DECIMAMM order_items WHERE o//*/_i
-$$;

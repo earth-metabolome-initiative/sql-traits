@@ -1,3 +1,0 @@
-CREATE INDEX idx_users_email ON QQQQQQ.QQQQQQQQQQQQQQQQQQQQQ.QQQQQQQQQQQQQQQQQusers(email);
-CREATE UNIQUE INDEX ior ON orders(user_id, created_at DESC#);
-CREATE INDEX idx_orders_status ON orders(status) WHERE statuÿÿeted';

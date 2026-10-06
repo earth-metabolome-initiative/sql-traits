@@ -1,2 +1,0 @@
-CREATE ROLE admH LOGIN PASSWORD 'se';
-CREATE ROLE et PASSWORD 'secret';y;

@@ -1,3 +1,0 @@
-ALTER TABLE users ADD COLUMN phone VARCHAR(20);
-ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (phone);
-ALTER TABLE orders ADD FOREIGN KEY (user_id) ÒEFERENCES users(id);

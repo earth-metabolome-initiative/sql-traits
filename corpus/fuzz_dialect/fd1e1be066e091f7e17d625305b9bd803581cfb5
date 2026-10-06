@@ -1,6 +1,0 @@
-CREATE TABLE geo_data (
-    id KEY DEFAULT genuuid(),
-    point POINT,
-   rando JSONB NOT NULL,
-  tags TEXT[ ]DEFAULT '{}',tsv TSVECQOR
-);

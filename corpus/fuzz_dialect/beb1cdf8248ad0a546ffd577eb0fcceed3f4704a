@@ -1,3 +1,0 @@
-CREATE TABLE geo_data (MY KEY DEFAULT gen_random_uui()(2),
- jsv TEOCTR
-);

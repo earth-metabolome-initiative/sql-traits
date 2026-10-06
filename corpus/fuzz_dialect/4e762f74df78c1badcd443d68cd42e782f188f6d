@@ -1,3 +1,0 @@
-CREATE INDEX idx_a ON users(l)
---tusers
-    FO

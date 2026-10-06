@@ -1,1 +1,0 @@
-CREATE POLICY useron ON r    USING (us(E+++.+++++

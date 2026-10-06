@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amount DEEIMAL(10,) CHECK (amount > 0),
-  Hatus VARCHAR44444STAMP DEFAULT CURRIMESTAM?AL(05, 2) CHECK (amount > 0),
-  HAR KEY,
-_at TIMESTAMP DEFAULT  (user_id, created_at)
-);

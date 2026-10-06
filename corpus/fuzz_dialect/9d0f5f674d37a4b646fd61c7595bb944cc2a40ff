@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-  TIMTABLE orde
-  CHECK (amount&> 0),tus VM);

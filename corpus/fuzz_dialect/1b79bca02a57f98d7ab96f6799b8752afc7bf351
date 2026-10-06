@@ -1,4 +1,0 @@
-CREATE TABLE ord(
-    id SERC,
-  UNIQUE s(eur^id, cre.ated_at)
-);

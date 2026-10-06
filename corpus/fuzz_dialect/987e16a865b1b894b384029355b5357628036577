@@ -1,3 +1,0 @@
-CREATE POLICY u ON sus
- FOR ALL
-    USING (use||||C?|F|r||||||C?|F|r|||||

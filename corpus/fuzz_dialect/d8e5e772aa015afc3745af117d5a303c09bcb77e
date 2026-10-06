@@ -1,4 +1,0 @@
-CREATE POLICY ul ON userY
-    FOR ALL
-    TO ad,i,
-USING NNN  pp`AL

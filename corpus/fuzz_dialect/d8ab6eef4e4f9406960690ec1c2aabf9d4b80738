@@ -1,3 +1,0 @@
-CREATE FUNCTION calculate(order_id INTEGER)
-RETURNS DE_total(order_idER)
-RETURNS DE$$;

@@ -1,2 +1,0 @@
-CREATE TABLE ata (
-    id UUID PRIMARY KEY DEFAULT gen0==<=-  

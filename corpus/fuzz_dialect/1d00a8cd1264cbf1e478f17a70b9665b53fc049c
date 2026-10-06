@@ -1,5 +1,0 @@
-CREATE TABLE oers (
- DELETE CASCADE,
-    amouznt DEEIMAL(10, 2) CHECK (amount > 0),us MP DEFAULT CURRENT_TBBBBBBBBB#BB,
-    UNIQUEe _rsu(CHA created_at)
-);

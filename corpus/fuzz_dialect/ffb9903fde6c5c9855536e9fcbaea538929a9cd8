@@ -1,2 +1,0 @@
-CREATE TABLE orders (    id i KEY NOT NULL REFERENCES use(id) ON DELETE CASCADE,
-t DE»»»

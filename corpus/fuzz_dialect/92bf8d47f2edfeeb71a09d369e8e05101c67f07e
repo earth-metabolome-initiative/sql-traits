@@ -1,3 +1,0 @@
-CREATE ROLE d;
-CREATE ROLE readonl;
-GRANT SELECT TO admpublicu,adonl~;

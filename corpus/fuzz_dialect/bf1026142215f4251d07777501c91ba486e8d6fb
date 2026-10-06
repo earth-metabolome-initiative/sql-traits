@@ -1,7 +1,0 @@
-CREATE FUNCTION calculate_total(ordaICREFAUlT neg_rand,
-    point  FINT,
-    dat
-, RY KEY,
-  name VAR VARCid 
-t)
-);

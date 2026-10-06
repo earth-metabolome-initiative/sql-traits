@@ -1,5 +1,0 @@
-CREATE TABLE oata (J Dd,
- JSONB NO,
-  mdtadata HSTORE,
-    tsv TSVECTOR
-);

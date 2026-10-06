@@ -1,3 +1,0 @@
-CREATE ROLE adminAinLOG;
-GRANT SELECT ,--- 
-IEMA puli`/

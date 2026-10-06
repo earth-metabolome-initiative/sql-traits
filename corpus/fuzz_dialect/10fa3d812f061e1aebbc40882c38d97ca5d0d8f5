@@ -1,3 +1,0 @@
-CREATE POLICY uuation ON r   FOR ALL
-    USING (us%t_usza~=  USusza~=
-  a~=adm USING;

@@ -1,2 +1,0 @@
-CREATE POLICY user_iatn ON resus
-  USING (+++++Nq''''++

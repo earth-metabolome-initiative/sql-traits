@@ -1,2 +1,0 @@
-CREATE POLICY u_eirssn_all ON u    FOR ALL
-    TO( !USNe);

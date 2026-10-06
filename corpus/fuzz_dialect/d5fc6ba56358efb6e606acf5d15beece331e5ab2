@@ -1,3 +1,0 @@
-
-CREATE ROLE readonly;
-GRANT SELECT ON ALL TO  p,l,l,u,b,,

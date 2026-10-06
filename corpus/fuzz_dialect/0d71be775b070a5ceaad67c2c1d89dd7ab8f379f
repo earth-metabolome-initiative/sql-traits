@@ -1,1 +1,0 @@
-CREATE INDEX  ON orders(id@3B@L, @3B@L, crd, sta_i'ced';

@@ -1,5 +1,0 @@
-(UPDATE(((
- SELECT session_user
- #M
-END ,;
-L

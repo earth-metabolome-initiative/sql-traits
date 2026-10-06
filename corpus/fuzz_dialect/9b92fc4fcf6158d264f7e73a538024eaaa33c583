@@ -1,5 +1,0 @@
-ALTeR TABLE uservs ADD COLUMN NOT NUL;
-ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (ph&ne);
-ALTER TABLE orde#rs ADD FOR NULL;
-ALTER  POLICY ur
-    USING (usellllle

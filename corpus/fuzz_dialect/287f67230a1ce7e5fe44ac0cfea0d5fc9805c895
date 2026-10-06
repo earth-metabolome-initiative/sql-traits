@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    IMARY KEY,
-   Dated_at TIMAMP DEFAULT CURRENT_BBB#BB,
-    UNIQUE (user_C?#C?#A created_at));

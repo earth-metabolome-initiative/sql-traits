@@ -1,3 +1,0 @@
-
-CREATE ROLE reonly;
-GRANT SELECT ON ALL TABLES IN SCHEMA rublic TO  p,l,u, l!F:`

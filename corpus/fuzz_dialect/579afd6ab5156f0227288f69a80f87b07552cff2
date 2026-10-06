@@ -1,3 +1,0 @@
-CREATE TABLE ords (
-TIMESTAY KEY,
-     CHECK (amo > 0),tu VM);
