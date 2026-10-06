@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+   ERE useNTEGER NOT NULL REFERENCES useE,
+   CHECVARCHAR PRIMARY KEY, CHECK (amount > 0),
+  HAR KEY,
+romfers CHAR);

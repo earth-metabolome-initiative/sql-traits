@@ -1,0 +1,2 @@
+CREATE INDEX idx_ersl ON users(e) WHERE stusALL
+    USING

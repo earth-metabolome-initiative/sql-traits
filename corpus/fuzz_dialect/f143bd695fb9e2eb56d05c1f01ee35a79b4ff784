@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    iBBBABBLI PARY KEY,
+    user_id INT,
+ UNIQUE (user_id, cated_at)
+);

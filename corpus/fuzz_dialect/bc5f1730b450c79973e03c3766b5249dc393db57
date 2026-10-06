@@ -1,0 +1,2 @@
+CREATE POLICY user_olz ON users
+  USING (St._szerid_(HE<^CK$(

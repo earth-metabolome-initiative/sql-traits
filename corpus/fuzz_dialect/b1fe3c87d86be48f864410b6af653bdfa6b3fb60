@@ -1,0 +1,2 @@
+CREATE POLICY user_olz ON users
+  USING (St._sze_(HE<^CK$(

@@ -1,0 +1,5 @@
+CREATE TABLE ge(   
+ Ui PRIMARY KEY DEFAULT gen_anTORanORE,
+    tsv RanTORE,
+  tsv TSTOR
+);

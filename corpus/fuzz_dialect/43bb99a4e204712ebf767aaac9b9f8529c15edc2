@@ -1,0 +1,1 @@
+CREATE POLICY user_isolatn ON resL   USING (ull=lET NOT NUHAn

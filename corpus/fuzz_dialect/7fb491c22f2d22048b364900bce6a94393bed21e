@@ -1,0 +1,3 @@
+(UPDATE((
+(((
+ SELECT OCS#>@NPSE#>@N,~รรร

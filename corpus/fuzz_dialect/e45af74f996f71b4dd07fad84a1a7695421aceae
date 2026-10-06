@@ -1,0 +1,2 @@
+CREATE TABLE ordes(
+    id S(15) CHECK (o NoT NULL R

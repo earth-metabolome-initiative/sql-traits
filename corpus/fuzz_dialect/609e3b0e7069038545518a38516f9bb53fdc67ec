@@ -1,0 +1,4 @@
+CREATE TABLE ger_data (
+    sv TSVECTOR
+);
+CREATE TABLE Â°ÿÿÿ

@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    iOT NULL REFERENCES rs(ib) ON	DELETE§§,)
+)

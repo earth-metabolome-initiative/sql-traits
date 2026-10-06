@@ -1,0 +1,4 @@
+CREATE INDEX ils_email ON ure(etail);
+DESC DEL;
+DESC email (e
+DELDELET

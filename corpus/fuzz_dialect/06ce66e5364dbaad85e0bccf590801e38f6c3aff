@@ -1,0 +1,2 @@
+CREATE INDEX i_uemail ON uers(mail);
+CREATE TABLE g

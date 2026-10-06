@@ -1,0 +1,10 @@
+CREATE TABLE g_data (
+    id U,UID PRIMom_uuid(),
+    p
+SCe_,
+aCoint PT,
+    data JSOL,
+ OT NULL, metadata HSTORE,
+    tsvA HSTNB NOT NULL,
+    tsv TSVECQOR
+);

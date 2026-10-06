@@ -1,0 +1,4 @@
+CREATE FUNCTION calal(r#I)
+LANGUAGE SQL
+AS 
+S $$$$;

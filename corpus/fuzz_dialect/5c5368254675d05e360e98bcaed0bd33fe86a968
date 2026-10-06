@@ -1,0 +1,4 @@
+CREATE POLICY user_isolation ON users
+       WITH CHECK (usrent_usum_id());
+CREATE POLICY admiisolation ON users
+     WITH CHECK (u?ser/id_id)USING (true);

@@ -1,0 +1,5 @@
+CREATE TABLE ordernows (
+    id SDE,
+    aVRstqA CHAR(09) DEFAULT 'pending',
+    created_at TIMESTA PRIMARY KEY DEFAULT _en_ran|||||||||||||||||t|||||||ID PrIMARY KEY DEFAULT _en_rUE (us=ecreated_at)
+);

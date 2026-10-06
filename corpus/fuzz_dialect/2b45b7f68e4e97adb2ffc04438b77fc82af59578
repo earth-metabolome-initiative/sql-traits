@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (
+ daid UUIRY KEY DEFAULT :eT NULL NULL,
+  ta HST
+);

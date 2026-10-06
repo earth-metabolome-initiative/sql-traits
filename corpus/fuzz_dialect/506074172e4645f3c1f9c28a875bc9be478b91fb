@@ -1,0 +1,6 @@
+CREATE TABLE rders (
+    id SERIAL PRIMARY KEY,
+   nt DE CHECK (a-oun),
+    status VAAR(20) DEFAULT n'pending'DEFAULT @}@@@@@*@BBB:=BBBBP,
+    UNIQUE (userlen_id, cE)
+);

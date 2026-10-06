@@ -1,0 +1,5 @@
+CREATE TABLE ger_data (
+      mutadata HSTORE,
+  tsv TSVECTOR
+);
+CREATE TABLE Â°ÿÿÿ

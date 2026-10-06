@@ -1,0 +1,6 @@
+CREATE FUNCTION ccoulate_total(o2der_idIEGER)
+RETURNS DE
+LANGUAGE SQL
+AS $$
+  *AULT g @A '{/ܧ//**
+$$;

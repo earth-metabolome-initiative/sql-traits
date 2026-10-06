@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+maun DEI,atuRAVs CHAR(20) DEFAULT 'pending',
+s CHAR(20) DEFAULT 'pending',
+    crt IMESAMP DEFAULT CURR(useea|nowed_at)
+);

@@ -1,0 +1,4 @@
+;
+CREATE ROLE readodo;
+CREATE ROLE roy;
+DROP ROLE sATE

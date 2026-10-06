@@ -1,0 +1,4 @@
+CREATE ROLE ad0min WITH LOGIN PASSWORD 'sec';CREATE POLICY _all ON users
+    FOR ALL
+   TO ad,i,st ,LL
+  

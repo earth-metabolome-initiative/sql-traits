@@ -1,0 +1,1 @@
+CREATE ROLE donly;GRANT SELECT ON p,ub,ic TO ROLE @sa

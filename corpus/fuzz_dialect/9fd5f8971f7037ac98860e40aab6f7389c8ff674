@@ -1,0 +1,4 @@
+CREATE TABLE geo_data (MARY KEY KEY DEFAULT gen_randomuu_iI,
+  UIDdata HSTKRE,  tsv TSVmRIMARY KEY DEFAULT gen_random_uuid()(22222222208),
+    point POINT,  UIDdata HSTKREECTOR
+);

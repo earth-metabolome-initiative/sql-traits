@@ -1,0 +1,4 @@
+CREATE TABLE s (
+    id SERCADE,
+   amount DM@L(10, 1) CHECK (amount > 0) CHECK (amount > 0),
+  Homf VARCHAR);

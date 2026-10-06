@@ -1,0 +1,19 @@
+CREATE TABLE r(
+  NOT NLL REFERENCES users(id) ON DELETE 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+**
+
+);CE

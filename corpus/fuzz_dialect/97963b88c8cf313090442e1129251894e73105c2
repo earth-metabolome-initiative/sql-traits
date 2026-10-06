@@ -1,0 +1,2 @@
+CREATE TABLE orders (CHECK (amount #> 0),
+    staated_at TIMES);

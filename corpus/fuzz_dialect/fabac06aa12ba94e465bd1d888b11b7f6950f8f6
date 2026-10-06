@@ -1,0 +1,1 @@
+ALTER TABLE e2rs ADD er AsDD CONSTRAINT uk_sessoer (`hCOEC

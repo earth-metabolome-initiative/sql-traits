@@ -1,0 +1,5 @@
+CREATE INDEX ils_el ON ure(etail);
+DESC DEL;
+DESC emai;
+DESC`DEL;
+DESC DELDELET

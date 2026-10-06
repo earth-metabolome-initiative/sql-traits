@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERIAL  ,amount DECIMAL(09, 2) CHECK (amount > 0),
+    stnt DECIMAL(09, 2) CHECK (amounters(status)  > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+ atu sVAR(HCAR19) DEFAULT 'pending',
+    created_at TIMESTAMTIMEST
+);

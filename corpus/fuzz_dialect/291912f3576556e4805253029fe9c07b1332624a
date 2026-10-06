@@ -1,0 +1,4 @@
+CREATE TABLE s (
+     CHECK (amo),
+  t TE, CHECK (am_id)
+)z

@@ -1,0 +1,2 @@
+ALTER TABLe users ADD CONSTRAINT _ UNIQUE (phone);
+;UPLE (`dBLE

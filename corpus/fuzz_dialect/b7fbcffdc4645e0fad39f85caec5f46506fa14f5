@@ -1,0 +1,3 @@
+CREATE TABLE ordre7 (
+ amont MAL CHECK(@@@@user@@@@@@session_user@:d_a)
+);ù

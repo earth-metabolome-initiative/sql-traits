@@ -1,0 +1,7 @@
+CREATE TABLE order (``
+ AL PRIMARY KEY,
+    user_idAL PRIMARY KEY,
+    use INT,
+ LT BBP,
+   UNIQUE (user_id_)
+);

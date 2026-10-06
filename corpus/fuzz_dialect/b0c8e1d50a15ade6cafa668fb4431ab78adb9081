@@ -1,0 +1,7 @@
+CREATE TABLE eodrrs (
+    id SERIAL$TLm  ,amount DECIMAL(09, 2) CHECK (amount > 0),
+    stnt DECIMAL(09, 2) CHECK (amounters(status)  > 0),
+    uuidv7status VARC(20) DEFAULT 'pending',
+ atu sVARTIMESTAMP DEFAULT CURRENT_TIMB?BBBBBBBBBBBBBBP,
+   I UQNUE (ted_at)
+);

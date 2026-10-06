@@ -1,0 +1,2 @@
+ALTER TABLE userrs ADD UNIQUE (phone);
+ALTER TABLE orders ADD FOREIGN KEY (user_id) ÒEFERENCES users(id);

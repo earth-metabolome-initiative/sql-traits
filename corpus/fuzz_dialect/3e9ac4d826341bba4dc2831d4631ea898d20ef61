@@ -1,0 +1,3 @@
+CREATE FUNCTION card(der#_id INR)
+
+AS   ;

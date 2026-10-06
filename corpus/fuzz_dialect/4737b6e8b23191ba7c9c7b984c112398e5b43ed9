@@ -1,0 +1,2 @@
+SELECT O.*T,L.*T,
+*T

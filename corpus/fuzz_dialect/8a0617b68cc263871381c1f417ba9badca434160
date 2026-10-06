@@ -1,0 +1,6 @@
+CREATE TABLE geo_data (
+    iUUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    point PO_uuid(),
+    point T[] DEFAULT+'{}',a HSTORE,
+  tsv TSVECTOR
+);

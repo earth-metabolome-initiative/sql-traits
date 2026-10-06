@@ -1,0 +1,10 @@
+CREATE TABLE gedo_Wtata (
+  );CREATE TABLE ܷ̲ܴ̺ܸ̲ܻܺWtata (
+  );CREATE TABLE ܷ̲ܴ̺ܸ̲ܻܷ̲ܴ̺ܸ̲ܷ̲ܴ̺ܻܺܺWtata (
+  );CREATE TABLE ܷ̲ܴ̺ܸ̲ܻܷ̲ܴ̺ܸ̲ܷ̲ܴ̺ܸܺ (
+  );CREATE TABLE ̢ܷ̲ܴ̺ܸ̲ܻܷ̲ܴ̺ܸ̲ܷ̲ܴ̺ܸ̲ܻܸ̲ܷ̲ܴ̺ܸ̲ܻܴ̺ܸ̲ܻܷ̲ܴ̺ܸܺܺ�ܷ̲tata (
+  );CREATE TABLE ܷ̲ܷ̲ܴ̺ܸ̲ܻܴ̺ܸ (
+  );CREATE TABLE ̢ܷ̲ܴ̺ܸ̲ܻ�ܷ̲tata (
+  );CREATE TABLE ܷ̲ܷ̲ܴ̺ܸ̲ܻܴ̺CREATE POLICY user_isolation ON users
+    FOR ALL�
+ 

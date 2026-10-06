@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SERCADESTAMP DEFAULT UCRRENT?&I(user_id, c),
+   IIIIIIIIIIII TIMESTAMP DEFAULT UCRRENT?&I(user_id, created_&t)
+);

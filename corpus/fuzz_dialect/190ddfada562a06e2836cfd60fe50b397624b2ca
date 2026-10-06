@@ -1,0 +1,3 @@
+SELECT O.*T,$EFEOL,
+L.*T,
+*T

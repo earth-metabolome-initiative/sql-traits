@@ -1,0 +1,2 @@
+CREATE POLICY o ON re
+    USING (A ( TABLE |>>INGllus( TABLE |>>

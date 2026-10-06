@@ -1,0 +1,2 @@
+CREATE POLICY user_ksolation ON LL
+    USING (((((@((nowllllll = @((noqllllllv=cuzadmÿÿ);

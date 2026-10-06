@@ -1,0 +1,2 @@
+CREATE POLICY us_at ON ALL
+    USING (localtimestamp(tIon ON Rl

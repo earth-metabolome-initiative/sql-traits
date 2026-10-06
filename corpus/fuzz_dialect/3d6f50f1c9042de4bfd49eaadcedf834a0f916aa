@@ -1,0 +1,2 @@
+CREATE POLICY userla ON uers
+  USING (usllll (true) (true);#

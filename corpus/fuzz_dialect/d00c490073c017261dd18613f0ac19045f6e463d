@@ -1,0 +1,1 @@
+CREATE INDEX idte ON ordes(d_at Dgen);CREATE TRIGGER update_timestamp@ORE UPDATE ON use33333333·N s

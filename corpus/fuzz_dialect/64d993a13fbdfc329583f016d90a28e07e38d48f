@@ -1,0 +1,2 @@
+CREATE INDEX idx_users_email ON QQQQQQ.QQQQQQQQQQQQ.users(at DESC#);
+CREATE INDEX ius ON orders(status) WHERE statuÿÿeted';

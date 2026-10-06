@@ -1,0 +1,2 @@
+CREATE TABLE orr (o DECI(10, 2) CHECK (:a@:a@ SEL OR@d)
+);ù

@@ -1,0 +1,3 @@
+CREATE TABLE orde(
+    id B,    UNIQUE (t)
+);

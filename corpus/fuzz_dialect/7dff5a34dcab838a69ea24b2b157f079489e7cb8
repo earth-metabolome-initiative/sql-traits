@@ -1,0 +1,6 @@
+CREATE FUNCTION t#_total(dGE)
+LANGUAGE SQL
+AS $$
+  ( Si
+$$,
+;:

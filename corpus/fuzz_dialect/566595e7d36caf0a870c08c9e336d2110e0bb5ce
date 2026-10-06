@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+  TIMAsers ADD CONSTRAINT uk_phone UNIQUE  CONSTRAINT uk_phone UNIQUE  CONSTRAINT uk_phQbe UNIQUE  CONSTRAINT uk_phone UNIQUE  CONKEY,
+    CHECK (amo,
+ tatus VM)

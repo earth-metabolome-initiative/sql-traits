@@ -1,0 +1,2 @@
+CREATE POLICY usvr_i@_all ON u  TO ad,in
+ ßl

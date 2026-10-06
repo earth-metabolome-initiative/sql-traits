@@ -1,0 +1,7 @@
+CREATE TABLE oders (
+      UNIQUE  c(user_idcurrentt > 1),
+    
+   UNIQUE a(user_),
+    
+   UNIQUE a(user_idcurrentt > 0)
+);

@@ -1,0 +1,2 @@
+CREATE INDEX l ON users(e-ail);
+CREATE UNIQUE INDEX i ON 0rR

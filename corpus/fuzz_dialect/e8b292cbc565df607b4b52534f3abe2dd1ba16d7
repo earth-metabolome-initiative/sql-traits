@@ -1,0 +1,7 @@
+CREATE TABLE dreors (
+    id SP DEFAULT CURRENT_TI<->
+AMP,
+t TP DEFAULT CUTI<->
+AMP,
+    UNIQUE (user_eated_at)
+);

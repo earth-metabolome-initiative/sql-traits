@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+ uuidv7 RIMARY KEY,
+    user_id INTNULL REFERENCES AMBBBBBBQUE (user_id,d_at)
+);

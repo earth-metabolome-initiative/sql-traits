@@ -1,0 +1,56 @@
+CREATE TABLE 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+geo_data (
+ DEFAULT g DEFAULT '{}',
+    metadaNta HdBUUID PRIMARY KEY DEFAULT g DEFAULT '{}',
+    metadatay HSTORE,
+    tsv TVEOR
+);

@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    i uk_phone UNIQUE  CONSTRAINT uk_phone UNIQUE  CONSTRAINT _e_phone UNIQUE  CONSTRAINT _ephno UNIQUE (`;
+ALrs TERrs TEOFERTrEd

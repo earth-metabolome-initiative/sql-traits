@@ -1,0 +1,3 @@
+CREATE INDEX idx_uss_email ON userism(eal);
+CREATE UNIQUE INDEX idxl ON ysers(email);
+CREATE UNIQUE INDEX idx_orus !

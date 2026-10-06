@@ -1,0 +1,7 @@
+CREATE FUNCTION calcull(o neg_rand,
+    point FINT,
+    dat
+, RY KEY,
+  nam
+t)
+);

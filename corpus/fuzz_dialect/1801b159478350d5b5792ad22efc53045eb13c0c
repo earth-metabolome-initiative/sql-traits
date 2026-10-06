@@ -1,0 +1,2 @@
+CREATE TABLE uuidv7geo_d(ata JSOEXT[] DEFAULT{}+CTOR
+)

@@ -1,0 +1,6 @@
+(((UPDATE((
+( DELETE CASCAS.DCAB,BIBB --+T
+.DCABB,BIBB --+T
+ FROMst
+;
+

@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount DEE(10, 2) CHECK (amount > 0),status VARCHAR444(20) DEFAULT 'pending',
+    created_at TIMESTAMPMAL(10),
+  HAR KER(20) DEFAULT 'pending',
+    cre$ed_at TIMESoctTAMP DEFAULT  (user_id, cpeated_at)
+);
