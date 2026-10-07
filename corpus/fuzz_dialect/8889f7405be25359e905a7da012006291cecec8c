@@ -1,0 +1,8 @@
+CREATE TABLE geo_data (
+ used    UIDdUi PRIMARY KEY DEFAULT gen_rando+T,
+    data JB NOT NULL,
+ ata HSTORE,
+ ts 
+   iUUID PRIMARY KEY DEFAULT genSTORE, v  ECTOR
+);CREATE TABLE geo_daå
+  

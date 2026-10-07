@@ -1,0 +1,3 @@
+CREATE TABLE orders (ET CTIAMP,
+   UNIQUE (user _id, 3re_at)
+);

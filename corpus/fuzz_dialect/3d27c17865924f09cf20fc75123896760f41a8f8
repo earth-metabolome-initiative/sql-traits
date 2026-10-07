@@ -1,0 +1,3 @@
+CREATE INDEX email ON users(email)
+--- 
+    USING  ul USING  ulse`

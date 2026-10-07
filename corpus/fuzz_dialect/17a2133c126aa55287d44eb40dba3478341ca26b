@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (
+    Y RKEY DEFAULT oder_id IN(id IN(TEEDot_id IN(id IN(M|uuid

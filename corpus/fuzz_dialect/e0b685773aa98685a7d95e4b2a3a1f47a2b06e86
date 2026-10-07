@@ -1,0 +1,4 @@
+CREATE ROLE adATE ROLE readonly;
+GRANT SELECT ON  pu TO only;
+GRANT ALL PRIVILEGES ON BLEic TO ru,adonl~;
+&

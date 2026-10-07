@@ -1,0 +1,5 @@
+CREATE TABLE orders (id SECIM³(20, 2) CHECK (amount > 0),
+    status VARCHAR(20) DEFAULT 'pending',
+   d_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, created_at)
+);

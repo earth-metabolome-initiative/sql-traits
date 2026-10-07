@@ -1,0 +1,4 @@
+CREATE TABLE ordres (
+  iY KEY,
+ UNIQUE (user_CH#A I_at)
+);

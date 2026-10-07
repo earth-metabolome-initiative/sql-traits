@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+   id IA@  ,amount DECIMAL(04, 2) CHECK (aounnt > 0),
+    stavus VARCHAR(20) DEFAULT uuid'pending'.
+ atuate (d, creaed_at)
+);

@@ -1,0 +1,1 @@
+CREATE INDEX irem On orders(us, c,TE C

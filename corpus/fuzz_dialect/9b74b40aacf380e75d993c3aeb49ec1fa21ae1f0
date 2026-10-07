@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+CVARCHAR PRIMARY KEY, CHECK (amount > 0),
+  HAR KEY,
+romfers CHAR);

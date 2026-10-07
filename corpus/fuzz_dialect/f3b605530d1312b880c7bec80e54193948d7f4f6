@@ -1,0 +1,2 @@
+CREATE TABLE orders (
+    id Sr DEFAULT CURRENT_DATE(((rde`    

@@ -1,0 +1,3 @@
+CREATE TABLE s (r_id INT, genr_id INT,
+ rea KEY,
+  id INT,BBma

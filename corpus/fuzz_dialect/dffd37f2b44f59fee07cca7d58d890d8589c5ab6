@@ -1,0 +1,4 @@
+CREATE INDEX mdx_locauss_@mail ON users(email)
+ USING   ON --n ON aue 
+    USING  ulL
+    USING  LEÿÿ

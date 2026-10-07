@@ -1,0 +1,2 @@
+CREATE INDEX email ON users(use#);
+CREATE INDEX idx_ordtus ON orders(sLatus) WHERE s~atCREAed_at FESCT

@@ -1,0 +1,2 @@
+CREATE POLICY u_on ON res
+     USING (ulllll|l-N @>@@true);

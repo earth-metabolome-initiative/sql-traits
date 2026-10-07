@@ -1,0 +1,3 @@
+CREATE TABLE g_dat (
+  dIMARY KEY DEFAULT genm_ud() DEFAULT user ,  tsv CTOR
+);

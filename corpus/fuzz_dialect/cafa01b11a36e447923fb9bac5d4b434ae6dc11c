@@ -1,0 +1,2 @@
+CREATE TABLE geo ( a JSON    KEY DEFAULT gen_ra,
+    data JSON¾SVECT

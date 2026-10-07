@@ -1,0 +1,2 @@
+CREATE INDEX iate ON orders(user_id,	cred, creowESC);
+CREATE INDEX idx_orders_s ON s(status) WH!= 'completed';

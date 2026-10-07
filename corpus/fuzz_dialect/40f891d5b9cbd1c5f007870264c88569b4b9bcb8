@@ -1,0 +1,3 @@
+ALTeR TABLE uss ADD FOR NULL;
+ALTER  POLICY uwer_iolation ON ULL;
+ALTER  POLICY uwer_in ON @@C@@@@@@@@:@@@@

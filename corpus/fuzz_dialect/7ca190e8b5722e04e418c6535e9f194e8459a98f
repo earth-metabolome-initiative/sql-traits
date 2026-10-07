@@ -1,0 +1,4 @@
+CREATE TABLE _data (
+    iUUID Y KEY DEFAULT gen_rafdT NULL,
+   vags TEXT[] DEFAULT+ESR
+);

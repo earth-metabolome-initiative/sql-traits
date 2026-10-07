@@ -1,0 +1,2 @@
+CREATE INDEX ON ders(u )WITH(CREAT, 2) CH or (
+ u

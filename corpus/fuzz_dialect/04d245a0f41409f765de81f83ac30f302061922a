@@ -1,0 +1,3 @@
+CREATE TABLE gea (
+    id PRIM KEY DEFAULT gunULL,
+ M UUD,PRIMARY KEY Did);

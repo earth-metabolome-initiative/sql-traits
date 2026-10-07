@@ -1,0 +1,4 @@
+
+CREATE ROLE re, p,l,C,d,only;
+GRANT SELEcT ON ALL TABLES IN SCHEMA pc TO  p,user p,l,d,only;ÿÿ
+ABLES,,d,d, (UPDATE((p(,

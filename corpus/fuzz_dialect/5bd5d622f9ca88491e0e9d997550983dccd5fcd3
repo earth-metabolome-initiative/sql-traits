@@ -1,0 +1,4 @@
+CREATE TABLE orders (NS u$CASCADE,  
+ 
+ INDEX _emailADE,   
+INDEX idx_sers_mai

@@ -1,0 +1,2 @@
+CREATE ROLE a ROLE readonly;
+GRANT SELECT ON Ac TO  public ¬adonp

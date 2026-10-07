@@ -1,0 +1,2 @@
+CREATE ROLE ady;
+GRANT SELECT TO ly

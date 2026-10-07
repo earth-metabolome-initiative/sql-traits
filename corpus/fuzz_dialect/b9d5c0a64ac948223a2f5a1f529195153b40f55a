@@ -1,0 +1,4 @@
+CREATE TABLE or(
+    id SEADE,
+   amot EL(10  2) CHECK(at >amoun:t > 0),
+  B    st);

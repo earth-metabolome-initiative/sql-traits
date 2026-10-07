@@ -1,0 +1,2 @@
+CREATE TABLE s (
+ amout DECI(10, 2) CHECK(a@ed^at));ù

@@ -1,0 +1,2 @@
+CREATE ROLE aEATE ROLE in;
+GRANT USAGE ON SCHEMA pu,l,cpubl,c TO reed

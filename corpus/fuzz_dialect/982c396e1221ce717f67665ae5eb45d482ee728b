@@ -1,0 +1,4 @@
+CREATE ROLE aedR admin W PASSWORD '3ecret';
+CREATE ROLE redR admin WaCASC, stCASBB,
+aCCASC, sBbBB,
+TR E

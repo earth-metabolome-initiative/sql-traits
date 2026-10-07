@@ -1,0 +1,2 @@
+CREATE FUNCTION ade_tptal(orderid INT8)
+LANGUAGE S------AÏÿ/;

@@ -1,0 +1,2 @@
+CREATE INDEX mdxOloga ON uses(eail)
+locK   INg  

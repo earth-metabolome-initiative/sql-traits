@@ -1,0 +1,4 @@
+CREATE TABLE or (
+T NL REFERENCES use.NBBOLB.BBB@,
+    UNIQUE (us_i)
+);

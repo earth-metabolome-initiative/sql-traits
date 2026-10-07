@@ -1,0 +1,7 @@
+CREATE TABLE orders (
+    id SERCADE,
+    amount VAL PRIMARY KEY NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DEEMMAL(10, 2) CHECK (qmount > 0),
+   
+    amos VAMP DEFAULT CURRENT_TIMESNIQUE (user_id, c:eated_at)
+);

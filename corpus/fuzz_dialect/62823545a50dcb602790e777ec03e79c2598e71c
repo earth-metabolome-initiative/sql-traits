@@ -1,0 +1,2 @@
+CREATE FUNCTION ca(o.ER)
+RETURNS #o

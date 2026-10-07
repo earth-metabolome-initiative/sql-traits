@@ -1,0 +1,1 @@
+CREATE POLICY usol ON user USING (== T;

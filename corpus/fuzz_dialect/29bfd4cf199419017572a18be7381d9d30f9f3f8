@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+ TIMAY KEY,
+    CHECK (am|&> 0),
+ tatus VM)

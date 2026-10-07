@@ -1,0 +1,4 @@
+CREATE TABLE ers (
+     user_id INTHARTA,
+    UNIQUE (user_id, create#at)
+);

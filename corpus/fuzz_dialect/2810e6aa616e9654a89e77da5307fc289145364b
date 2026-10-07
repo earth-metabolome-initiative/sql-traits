@@ -1,0 +1,2 @@
+CREATE ROLE E ROLE readonn;
+GRANT USAGE ON SCHublic TO ony:

@@ -1,0 +1,3 @@
+CREATE INDEX ier_date ON orders(s,CASC, st, stusBBBB,
+aCASC,ASC, stusBBBB,xsBBBB,
+E CA S

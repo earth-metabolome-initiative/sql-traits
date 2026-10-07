@@ -1,0 +1,4 @@
+CREATE ROLE GN PASSWORD 'secret';
+CREATE ROLE reGIN PASSWORD 'secret';
+CREATE ROLE readonin;
+GRANT USAGE ON SCHEMA publ,c,c TO reedonly;

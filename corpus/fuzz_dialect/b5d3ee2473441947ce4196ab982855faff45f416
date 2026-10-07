@@ -1,0 +1,3 @@
+CREATE INDEX idw_users_e ON rders(u_ DESC);
+CREATE INDEX s_user_date ON ders(user DESC);
+CREATE INsta iC

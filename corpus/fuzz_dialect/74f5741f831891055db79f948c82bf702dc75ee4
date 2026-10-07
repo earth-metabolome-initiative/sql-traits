@@ -1,0 +1,2 @@
+CREATE INDEX ils_emai ON ure(eCASsmail);
+DESC DELETE CA
