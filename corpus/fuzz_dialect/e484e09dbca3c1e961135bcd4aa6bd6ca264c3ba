@@ -1,3 +1,0 @@
-
-CREATE ROLE reonly;
-GRANT SELECT ON ALlic TO  p,l,u, l!F:`

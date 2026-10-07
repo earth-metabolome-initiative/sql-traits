@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-    id SERI REFERENCES usE NOT Ea

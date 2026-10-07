@@ -1,3 +1,0 @@
-CREATE POLICY u_on ON res
-    FOR ALL
-    USING (usellllllll|l-N @>@@true);

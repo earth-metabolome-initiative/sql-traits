@@ -1,2 +1,0 @@
-ALTER TABLe users ADD CONSTRAINT uk_ UNIQUE (phone);
-;UPLE (`dBLE

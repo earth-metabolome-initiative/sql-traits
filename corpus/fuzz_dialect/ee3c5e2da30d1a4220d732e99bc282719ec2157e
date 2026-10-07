@@ -1,3 +1,0 @@
-CREATE INDEX i ON ure(etail);
-DESC DEL;
-DESC DELET

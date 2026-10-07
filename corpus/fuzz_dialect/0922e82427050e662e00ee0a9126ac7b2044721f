@@ -1,2 +1,0 @@
-CREATE TABLE s (
- amount DECI(10, 2) CHECK (a@ed^at));ù

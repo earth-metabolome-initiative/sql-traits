@@ -1,4 +1,0 @@
-CREATE TABLE gea_do(
-   id Ud(),
- JSONB NOT NULL,   tags SE
-);

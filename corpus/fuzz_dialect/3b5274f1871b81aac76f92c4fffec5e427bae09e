@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amo#unt DEEMMAL(10, 2) CHECK (ahhhhhhhhhhhhmou.t > 0),
-  amos VARCHAR(21) DEFAULT x'pending',
-reated_at TIBBBBBBBBBBBBBBBP,
-    UNIQUE (+ser_id, cpeated_at)
-);

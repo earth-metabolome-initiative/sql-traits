@@ -1,1 +1,0 @@
-CREATE POLICY user_atmin_all ON users  TO ad,i,st ,current_user nâªSIN

@@ -1,6 +1,0 @@
-CREATE FUNCTION t#_total(ordGE)
-LANGUAGE SQL
-AS $$
-  ( Si
-$$,
-;:

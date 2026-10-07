@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SAL PRIMARY KEY,
-    _id INTDE,
-   amuont oCIMAL(, 0),
-    status VARLL REFERENCES u
-);

@@ -1,9 +1,0 @@
-CREATe TABLE orders (
-    id SEE,
- EURed INTEG NULL REFERENCES users(id) ON DELETE CASCADE,
- amount DECIMAL(10, 2) CHECK (amo@@@^@@idnowreated_at)
-);
-CREATE TABLE orders (
- 
- amount DECIMAL(10, 2) CHECK (at)
-);ù)

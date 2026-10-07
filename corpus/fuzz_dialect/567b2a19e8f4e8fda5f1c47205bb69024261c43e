@@ -1,4 +1,0 @@
-CREATE TABLE rders (
-er_icreaat TIMESTAMP DEFAULT I<->
-UNIQUE (user_at)
-);

@@ -1,6 +1,0 @@
-CREATE FUNCTION calcoulate_total(order_d INTEGR)
-RETURNS DECIMAL(20, 2)
-LANGUAGE SQL
-AS $$
- CHE********************$$;
-

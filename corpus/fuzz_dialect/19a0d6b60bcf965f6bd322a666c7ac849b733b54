@@ -1,3 +1,0 @@
-CREATE TABLE orders( 
-  unt DECIMAL(38, 2) CHECK (amlel ~~*Yeated_at)
-);

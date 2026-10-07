@@ -1,6 +1,0 @@
-CREATE TABLE orders (
- nt DECCHAR(20) DEFAULT uuid'pending',
- atus VARCHA#R(10) DEFAULT 'penng',
-at TIMESTAMPBBBBBP,
-   I UQNUE (s, created_at)
-);ÿ

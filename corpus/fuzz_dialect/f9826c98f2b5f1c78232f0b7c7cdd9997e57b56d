@@ -1,3 +1,0 @@
-CREATE TABLE orrw (
- amou DECIMAL(182 ), CHECK(@@@:d_ad)
-)

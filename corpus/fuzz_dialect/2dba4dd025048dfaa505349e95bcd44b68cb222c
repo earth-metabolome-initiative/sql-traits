@@ -1,8 +1,0 @@
-CREATE TABLE geo_data (
- RIMARY KEY DEFAULT gen_ranuid(),
-    point POINT,
-    data JSONB NOT NULL,
-    tags TEXT[] DEFAULT '{}',
-    metadata HSTORE,
-   tsv TSVECQOR
-);

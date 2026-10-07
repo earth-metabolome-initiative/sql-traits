@@ -1,1 +1,0 @@
-CREATE INDEX dxi.useri.usl ON ue(l);

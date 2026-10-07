@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-IEDAMt EL(1  20) CHECK (amount >amwunt > 0),
-  amount DEEIMAL(1sum2) CHECK (amount . 0),
-M@MBBBBB    st
-);

@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
- BBBBBIAL PRIMARY KEY,
-    useE CASCHBP,
-   UNIQUE (userd, creaBBBBP, (user_id, created_ta)
-);

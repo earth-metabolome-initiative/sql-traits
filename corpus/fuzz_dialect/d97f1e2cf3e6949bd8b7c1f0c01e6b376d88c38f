@@ -1,2 +1,0 @@
-CREATE TABLE geoIN PASSWORD 'secret/*';
-CREATE ROLE reea

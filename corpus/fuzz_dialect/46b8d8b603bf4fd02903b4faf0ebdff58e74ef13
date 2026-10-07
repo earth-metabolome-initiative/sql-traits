@@ -1,2 +1,0 @@
-CREATE ROLE oly;
-GRANT SELECT ON user`l

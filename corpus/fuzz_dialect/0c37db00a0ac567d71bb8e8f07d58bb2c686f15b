@@ -1,3 +1,0 @@
-CREATE TABLE Ders (s VRIMESTAY KEY,
-   CHECK (amoudat)
-);

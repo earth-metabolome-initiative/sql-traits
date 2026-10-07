@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-     amount DECIMAL(14, 2) CHECK (amount),
-  FAULT CURRENT_@TIMTAMP,
-    UNIQUE (user, created_at)
-);

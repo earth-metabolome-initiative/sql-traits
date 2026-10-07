@@ -1,3 +1,0 @@
-CREATE POLICY uslation ON user  ;
-
-CREATE POLICY min_all ON u2@  USING

@@ -1,2 +1,0 @@
-CREATE INDEX ite ON orders(user_id,t DESC#);
-CREACO WHERE óta;

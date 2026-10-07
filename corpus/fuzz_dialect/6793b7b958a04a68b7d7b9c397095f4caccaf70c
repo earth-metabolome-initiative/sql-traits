@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SDE,
-unt DEEIMAL(1,00) DEFAULT 'pending',
-    created_at TIMESTA PRIMARY KEY DEFAULT _en_|||||||||||||||||||t|||||||IY DEFAULT _en|||
-    UNIQUE (us=er_id, created_at)
-);

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-  ifMAY KEY,
- UNIQUE (user_CH#A Ieated_at)
-);

@@ -1,5 +1,0 @@
-CREATE TABLE os (
-     _ir ITE@ NULL REFERENCES us ON DELETE CASED
-,A;
-
-))taCR$E

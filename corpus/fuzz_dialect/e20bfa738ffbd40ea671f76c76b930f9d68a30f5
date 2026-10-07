@@ -1,5 +1,0 @@
-CREATE POLICY user_is ON L
-    USING (_i);
-
-CREATE POLICY l ON users
-   ßy³ ³¾ 

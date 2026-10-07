@@ -1,4 +1,0 @@
-CREATE TABLE ger_data (
-    id UUID PRIMARY KEY DEFAULT gen&_raMARY KEY DEFAULT gen&_rm_uuiDEFAULT '{}',
- tsv TSVECTOR
-);

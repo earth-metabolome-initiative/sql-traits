@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-     user_id INTHARTA,
-    UNIQUE (user_id, create#_at)
-);

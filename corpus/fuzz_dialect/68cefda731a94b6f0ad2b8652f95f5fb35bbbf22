@@ -1,1 +1,0 @@
-ALTER TABLE userss ADD CONSTRAINT u_phone UNIQUE p(hone));

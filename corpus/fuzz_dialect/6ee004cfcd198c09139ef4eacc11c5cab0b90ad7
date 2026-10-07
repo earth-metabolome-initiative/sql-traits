@@ -1,2 +1,0 @@
-CREATE POLICY usion ON usersluuioc   USING (usellcu.t._uszer_id())
-    WITH CHECK (use~/idre.t._uszÿN;

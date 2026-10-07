@@ -1,3 +1,0 @@
-CREATE POLICY _iion ON esus
-  
-    USING (ull(gl:=$I.

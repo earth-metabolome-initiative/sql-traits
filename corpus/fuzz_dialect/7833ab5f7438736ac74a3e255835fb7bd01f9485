@@ -1,3 +1,0 @@
-CREATE TABLE ta (MY KEY DEFAULT gen_rm_uui()(2),
- jsv TEOCTR
-);

@@ -1,1 +1,0 @@
-CREATE POLICY usola ON re USING (l=:--Nd

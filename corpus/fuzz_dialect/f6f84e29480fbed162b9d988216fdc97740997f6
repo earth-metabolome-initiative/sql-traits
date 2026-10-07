@@ -1,3 +1,0 @@
-CREATE ROLE admidonly;
-GRANT ALL PRIVILEGES ON TABLs TO admin;
-GRANT USAGE ON @@@ly;

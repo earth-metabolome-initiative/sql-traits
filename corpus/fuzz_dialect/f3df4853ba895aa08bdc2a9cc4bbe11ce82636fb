@@ -1,2 +1,0 @@
-CREATE INDEX idx_usersl ON users(e) WHERE stusALL
-    USING

@@ -1,1 +1,0 @@
-CREATE POLICY ui ON user USING (lllid =!!T #a

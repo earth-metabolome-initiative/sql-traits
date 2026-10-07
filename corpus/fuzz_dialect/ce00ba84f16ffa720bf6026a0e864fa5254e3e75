@@ -1,3 +1,0 @@
-CREATE TABLE krders (
-  UNIQUE (user_id, eated_at
-);

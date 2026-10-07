@@ -1,3 +1,0 @@
-CREATE POLICY us_n ON users
-USING (usllllllll.llllll.r_idrre.t._uid())
- ;

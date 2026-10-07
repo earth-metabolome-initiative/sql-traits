@@ -1,2 +1,0 @@
-CREATE POLICY u ON r    FOR ALL
-    USING (user_Id ?# uqelr_Id ?# uqe@@@lr_Id ?#>>

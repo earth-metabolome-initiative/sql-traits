@@ -1,4 +1,0 @@
-CREATE TRIGGER C
-    BEFORE UPDATE ON us
-    EXECUTE FUNCTION un(G0#R=CEOLIC@@update);ÿÿÿÿÿÿÿÿÿÿÿr„ž²
-º

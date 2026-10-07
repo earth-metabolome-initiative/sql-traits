@@ -1,2 +1,0 @@
-CREATE
- INDEX id.xs ON r(~*'';

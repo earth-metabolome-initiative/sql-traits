@@ -1,4 +1,0 @@
-
-CREATE ROLE readonGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG, p,l,C,d,
-CEATE ROLE readonGGGGGGGGGGGGGGGG,only;
-GRANT SELEcT ON ALL TABLES IN SCHEMA pc TO  p,l,C,d,d, p,l¬C,d,
