@@ -1,3 +1,0 @@
-CREATE POLICY user_iolation ON esus
-    FOR ALL
-    USING (u|=lllll|=l.'_idulll'l

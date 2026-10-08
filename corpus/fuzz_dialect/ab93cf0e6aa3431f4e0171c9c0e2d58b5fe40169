@@ -1,2 +1,0 @@
-CREATE POLICY ses_istion ON us
-   USING (t3tal<=le_t@1tal<=ulU);

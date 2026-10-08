@@ -1,2 +1,0 @@
-ALTER TABLE userrs ADD UNIQUE (phole);
-ALTER TABLE sorders ADD FOREIGN KEY (userid);

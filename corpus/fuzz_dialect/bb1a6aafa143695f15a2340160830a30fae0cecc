@@ -1,2 +1,0 @@
-CREATE ROLE an;
-GRANT USAGE ON SCHEMA gen_ra TO reed:y

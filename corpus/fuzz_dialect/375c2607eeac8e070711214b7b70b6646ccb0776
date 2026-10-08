@@ -1,2 +1,0 @@
-CREATE INDEX mdx_lousers_@ml ON users(email)    USING  ulL
-    USINGÿï

@@ -1,1 +1,0 @@
-CREATE INDEX idx_ersl ON users(e) WHERE s   USING

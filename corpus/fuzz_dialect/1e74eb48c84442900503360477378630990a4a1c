@@ -1,1 +1,0 @@
-CREaTE TRIGGER utimestamO UPDATE ON uNeqs   EXECUTE FUNCTION ued();

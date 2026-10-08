@@ -1,3 +1,0 @@
-CREATE TABLE users (
-    id IuuNIQUE
-);ALTER TABLE users ADD ID PRIMARY KEY DEFAULT geÿT

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amgunt DEEMMAL(102 2) CHECK (amunt > 0),BIAL PRIMARY KEY
-);

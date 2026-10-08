@@ -1,5 +1,0 @@
-CREATE TAbLE orders (
-d SERIKEY,
-   _id INTEGEULL REFERENCES 
-E (er_id,ated_)
-);

@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    id SE,amounount DECIMA CHECK (amertnou(sstus)  > 0),tus VART
-);

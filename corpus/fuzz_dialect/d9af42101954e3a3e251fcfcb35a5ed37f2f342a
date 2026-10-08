@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id E,
-    amount DEEIMAL(10, 2) CHECK (amont!> 0),status V(10, 2) CHECK (amoult > 0),
-eated_at TIMESTAMP DEFAULT  (user_id, createdat)
-);

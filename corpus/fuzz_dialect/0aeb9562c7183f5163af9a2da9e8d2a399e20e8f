@@ -1,6 +1,0 @@
-CREATE POLICY user_isolation ON u  FOR ALL
-    USING( uselllllll);
-
-CREATE POLICY admin_al ON u@ser    USING( llllll);
-
-CREATE POLICY admall ON u¿âer   TO 

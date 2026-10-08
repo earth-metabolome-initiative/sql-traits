@@ -1,5 +1,0 @@
-CREATE FUNCTION calcootal(ordid2)
-LANGUAGE L
-AS $$
-!!! $$
-  , SEттттт

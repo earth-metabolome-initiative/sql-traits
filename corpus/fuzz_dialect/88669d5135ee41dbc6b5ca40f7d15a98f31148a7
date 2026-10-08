@@ -1,2 +1,0 @@
-CREATE ROLE admadonly;
-GRANT SELECT ON ALL TABLES IN SCHEMA puAli TO peadon¡AsecE

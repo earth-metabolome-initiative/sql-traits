@@ -1,4 +1,0 @@
-CREATE INDEX mdx_s_email ON users(eml)
-
-    USING  ulL
-    USING  uLEÿÿ

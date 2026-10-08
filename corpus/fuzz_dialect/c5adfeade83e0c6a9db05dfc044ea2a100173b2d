@@ -1,3 +1,0 @@
-CREATE TABLE oders (
-id INTULL REFERENCES usenow.S(idatt)
-);

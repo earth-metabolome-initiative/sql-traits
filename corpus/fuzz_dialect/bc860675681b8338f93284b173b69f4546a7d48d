@@ -1,5 +1,0 @@
-CREATE POLICY _isolation ON ers
-    FOR ALL
-    USING (lllller/id@ = _u());
-
-CREATE POLICY admiser

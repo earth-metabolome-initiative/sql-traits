@@ -1,3 +1,0 @@
-CREATE POLICY userol ON re
-    FOR ALL
-    USING (+++++++++++++++++T #-#+ccccc+++++

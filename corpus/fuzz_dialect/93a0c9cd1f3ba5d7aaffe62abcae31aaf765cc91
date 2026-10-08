@@ -1,4 +1,0 @@
-CREATE INDEX md_@mmail ON sers(email)
---gen_ 
-    USING  ulL
-  USING  ulLEï

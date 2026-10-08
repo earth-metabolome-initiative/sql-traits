@@ -1,6 +1,0 @@
-CREATE TABLE orders (
-    id SDE,
-unt DMESTA PRIMARY KEY DEFAULT _en_|||||||||||||||||||IY DEFAULT _en|||
-    UNI||
-    UNIQUE (us=er_id, created_at)
-);

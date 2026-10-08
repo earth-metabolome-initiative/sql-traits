@@ -1,1 +1,0 @@
-CREATE POLICY er_ison ON reu USING (use<<2<<<l

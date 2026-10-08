@@ -1,2 +1,0 @@
-CREATE TABLE orders (id INT NOT NULL REFERENCES users(idEY,
-    d, ct));

@@ -1,2 +1,0 @@
-CREATE TABLE o (T NULL REFERENCES ue(idEY,
-    d,t),;

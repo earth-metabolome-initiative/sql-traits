@@ -1,3 +1,0 @@
-CREATE POLICY user_isolat#Ion ON resus
-    FOR ALL  USING (use++BLE!~   ||/ FOL
-  

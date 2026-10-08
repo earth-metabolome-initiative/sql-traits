@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-  NOT NULL REFERENCES users(id) ON DELETE CASCADE  
-  ,amuui DEIMAL(09, 2) CHECK (a^ created_at)
-);

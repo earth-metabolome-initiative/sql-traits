@@ -1,3 +1,0 @@
-CREATE TABLE orers (
-   at TIMESTAMP DEFAULT CURRE(ut)
-)

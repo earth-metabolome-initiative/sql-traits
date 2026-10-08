@@ -1,4 +1,0 @@
-CREATE FUNCTION loc(_i )
-LANGUAGE SQL#
-AS $$
-$$;

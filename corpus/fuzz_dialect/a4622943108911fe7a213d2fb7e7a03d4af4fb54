@@ -1,3 +1,0 @@
-CREATE TABLE o_data (
-    id UUD PRIMARY KEY DEFAULT :en_,Y KEY DEFAULT :en_
-   );

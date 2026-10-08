@@ -1,4 +1,0 @@
-CREATE TABLE _data (
-    iUUID Y KEY DEFAULT gen_randT NULL,
-    tags TEXT[] DEFAULT+ESR
-);

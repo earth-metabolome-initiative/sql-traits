@@ -1,3 +1,0 @@
-CREATE TABLE ors ( 
- idR NOT REFERENCES UE (user_id, crae 
-,ERIM

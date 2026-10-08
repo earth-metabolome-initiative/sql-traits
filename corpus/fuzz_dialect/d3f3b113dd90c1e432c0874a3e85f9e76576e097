@@ -1,3 +1,0 @@
-CREATE POLICY useon ON esus
-    FOR ALL
-    USING (u|=lllll|=l.'l'l

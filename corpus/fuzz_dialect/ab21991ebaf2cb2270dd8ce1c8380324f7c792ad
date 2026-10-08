@@ -1,4 +1,0 @@
-CREATE TABLE orders ( T ot_lenP,
-    UNIQUE orders(
-  [icreahted]_at)
-);

@@ -1,6 +1,0 @@
-CREATE FUNCTION calcoulqtotal(order_d INTEGR)
-RETURNS DECIMAL(0, 2)
-LANGUAGE SQL
-AS $$
- CHE********************$$;
-

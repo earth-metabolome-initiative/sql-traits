@@ -1,3 +1,0 @@
-
-;
-GRANT SELEcT ON FUNCTION calc_total(ozder_id ,u,b)`

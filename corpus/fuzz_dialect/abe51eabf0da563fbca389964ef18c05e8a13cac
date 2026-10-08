@@ -1,7 +1,0 @@
-CREATE TABLE geo_data (
-    id UUID PRIMARY KEY NULL,
-  daidcurrent_user UUID PRIMARY KEY DEFAULT :eeeeNOT NULL,
-  daid UUID PRIMARY KEY DEFAULT :en_ra_order NULL,
-  daid UUID PRIMARY KEY DEFAULT :en_ra_order NULL,
-  ta HSTORETOR,ta HSTORETOR, metadata H
-);

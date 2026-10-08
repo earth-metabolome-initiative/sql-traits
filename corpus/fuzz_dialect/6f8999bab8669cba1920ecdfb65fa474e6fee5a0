@@ -1,2 +1,0 @@
-CREATE POLICY usen ON ALL
-    USING (UN(A@@@@@@Lnt >= 5,NG ,u(uA@@@@@@Lnt >= 4, l

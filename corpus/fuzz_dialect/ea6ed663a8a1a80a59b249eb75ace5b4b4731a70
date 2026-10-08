@@ -1,2 +1,0 @@
-CREATE FUNCTION call(o.ER)
-RETURNS #o

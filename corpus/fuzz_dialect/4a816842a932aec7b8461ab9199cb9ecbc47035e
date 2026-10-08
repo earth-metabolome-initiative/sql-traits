@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
- BBBBBIAL PRIMARY KEY,
-    uR NOLL REFERENCES u.ser
-);³

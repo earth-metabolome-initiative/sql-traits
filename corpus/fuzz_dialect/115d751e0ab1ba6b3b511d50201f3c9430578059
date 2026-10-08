@@ -1,3 +1,0 @@
-CREATE TRIGGER RE UPDATE ON user(TABLE r);CREATE TRIGGER RE UPDATE ON user(TABLE rse(ocser_id, create
-d_at)
-);

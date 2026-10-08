@@ -1,2 +1,0 @@
-CREATE TABLE ors (
-    id SEEL(10  2) CHECK(amount >= TE >^m> 0),tNOTETE CASC);

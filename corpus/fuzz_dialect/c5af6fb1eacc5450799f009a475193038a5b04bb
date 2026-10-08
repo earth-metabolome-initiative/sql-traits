@@ -1,7 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-    amount DEEIMAL(10, 2) CHECK (amount > 0),statCO VARCHAR44444STAMP DEFAULT CURRENT_TIMESTAMAL(10, 2) CHECK (amount > 0),
-  HAR KEY,
-   s VARCHAR(20),
-   ated_at P DEFAULT  (ur_id, created_at)
-);

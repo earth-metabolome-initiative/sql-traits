@@ -1,2 +1,0 @@
-CREATE INDEX mdxOloga ON users(email)
-locK   INg  

@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id ST  REFERENCES C,
-    amos P DEFAULT CURRENT_SE (user_id, c:eatt)
-);

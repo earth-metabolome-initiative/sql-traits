@@ -1,2 +1,0 @@
-CREATE INDEX idx_u_u@eremli ON use(email);
-DESC ON

@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SIMARY KEY,
-    useE CASCHBP,
-   UNIQUE (userd, creaBBBBP, (user_id, created_ta)
-);

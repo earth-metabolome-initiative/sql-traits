@@ -1,2 +1,0 @@
-CREATE ROLE onin;
-GRANT USAGE ON SCHEMA pu,l,c TO relAN;

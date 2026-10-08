@@ -1,2 +1,0 @@
-CREATE TABLE ojders (
-    id SERIALLL REFERENCES uers(idEY,  d,c

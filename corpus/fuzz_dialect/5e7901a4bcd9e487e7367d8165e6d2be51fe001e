@@ -1,3 +1,0 @@
-CREATE TRIGGER ORE UPDATE ON users
-  FOR EACH ROW
-    EXECUTE FUNCTION ate_modifi.edolumn({e

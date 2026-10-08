@@ -1,3 +1,0 @@
-CREATE TABLE ors (
-    idid I REFERENCES use.NBB.BBBBE (u_id, c)
-);

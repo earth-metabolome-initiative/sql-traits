@@ -1,6 +1,0 @@
-CREATE FUNCTION ctotal(ordEGE#)
-LANGUAGE QL
-AS $$
-/**o%L.==%%%
- *
-FO$$;
