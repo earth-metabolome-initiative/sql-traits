@@ -13,6 +13,11 @@ use crate::{
     traits::{ColumnLike, DatabaseLike, TableLike},
 };
 
+mod output_columns;
+
+pub(crate) use output_columns::QueryId;
+use output_columns::{OutputEntry, QueryNode};
+
 pub(super) enum AstRef<'query, 'db, T: ?Sized> {
     Query(&'query T),
     Database(&'db T),
@@ -111,6 +116,7 @@ struct ScopeNode<'query, 'db, DB: DatabaseLike> {
     parent: Option<ScopeCursor>,
     owner: Option<ScopeId>,
     data: FromScope<'query, 'db, DB, DefinitionId>,
+    outputs: Vec<OutputEntry<'query, 'db>>,
 }
 
 struct SelectIndex {
@@ -126,6 +132,7 @@ pub(crate) struct DefinitionGraph<'query, 'db, DB: DatabaseLike> {
     definitions: Vec<DefinitionNode<'query, 'db, DB>>,
     scopes: Vec<ScopeNode<'query, 'db, DB>>,
     select_index: Vec<SelectIndex>,
+    queries: Vec<QueryNode<'query, 'db>>,
 }
 
 impl<'query, 'db, DB: DatabaseLike> DefinitionGraph<'query, 'db, DB> {
@@ -263,6 +270,7 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionDerivation<'query, 'db, DB> {
                 definitions: alloc::vec![DefinitionNode::Opaque],
                 scopes: Vec::new(),
                 select_index: Vec::new(),
+                queries: Vec::new(),
             },
             marker: PhantomData,
         }
@@ -290,6 +298,7 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionDerivation<'query, 'db, DB> {
             parent: None,
             owner: None,
             data: FromScope::new(),
+            outputs: Vec::new(),
         });
         self.finish(scope)
     }
@@ -321,6 +330,7 @@ impl<'query, 'db, DB: DatabaseLike> DerivationProfile<'query, 'db, DB>
             parent,
             owner,
             data: FromScope::new(),
+            outputs: Vec::new(),
         });
         self.graph.select_index.push(SelectIndex { address: select_address(select.get()), scope });
         scope
@@ -433,6 +443,7 @@ pub(crate) fn table_graph<'db, DB: DatabaseLike>(
         parent: None,
         owner: None,
         data: FromScope::new(),
+        outputs: Vec::new(),
     });
     let mut output_columns = Vec::new();
     if let Ok(columns) = table.columns(database) {

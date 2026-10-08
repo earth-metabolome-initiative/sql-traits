@@ -8,7 +8,7 @@ use crate::{
     errors::LookupError,
     impls::dql::{
         build_definition_graph,
-        definition_graph::{DefinitionGraph, DefinitionId, ScopeCursor, table_graph},
+        definition_graph::{DefinitionGraph, DefinitionId, QueryId, ScopeCursor, table_graph},
     },
     traits::DatabaseLike,
 };
@@ -177,6 +177,97 @@ impl<'scope, 'query, 'db, DB: DatabaseLike> ColumnDefinitionScope<'scope, 'query
         self.graph.resolve_definition(self.cursor, reference)
     }
 
+    /// Resolves a whole `GROUP BY` key of this scope's `SELECT` under
+    /// PostgreSQL's rules, preferring a `FROM` column over a select-list output
+    /// name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] for an ambiguous reference
+    /// or output name and relation-name lookup errors from modeled definitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, GroupByExpr, Ident, SetExpr, Statement},
+    ///     dialect::PostgreSqlDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE a(id INT, x INT);")?;
+    /// let sql = "SELECT id AS x, id AS y FROM a GROUP BY x, y";
+    /// let Statement::Query(query) = Parser::parse_sql(&PostgreSqlDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let SetExpr::Select(select) = query.body.as_ref() else { unreachable!() };
+    /// let GroupByExpr::Expressions(keys, _) = &select.group_by else { unreachable!() };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let select_scope = scope.scope_for_select(select).expect("the root scope is recorded");
+    /// for (key, expected) in keys.iter().zip(["x", "id"]) {
+    ///     let Some(ColumnDefinition::Base { column, .. }) =
+    ///         select_scope.resolve_group_by_definition(key)?
+    ///     else {
+    ///         unreachable!()
+    ///     };
+    ///     assert_eq!(column.column_name(), expected);
+    /// }
+    /// let parameter = Expr::Identifier(Ident::new("p"));
+    /// assert!(select_scope.resolve_group_by_definition(&parameter)?.is_none());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    pub fn resolve_group_by_definition(
+        &self,
+        key: &Expr,
+    ) -> Result<Option<ColumnDefinition<'scope, 'query, 'db, DB>>, LookupError> {
+        self.graph.resolve_input_first(self.cursor, key)
+    }
+
+    /// Resolves a whole `DISTINCT ON` key of this scope's `SELECT` under
+    /// PostgreSQL's rules, preferring a select-list output name over an input
+    /// column.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] for an ambiguous reference
+    /// or output name and relation-name lookup errors from modeled definitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Distinct, SetExpr, Statement},
+    ///     dialect::PostgreSqlDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE a(id INT, x INT);")?;
+    /// let sql = "SELECT DISTINCT ON (x, x + 1) id AS x FROM a";
+    /// let Statement::Query(query) = Parser::parse_sql(&PostgreSqlDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let SetExpr::Select(select) = query.body.as_ref() else { unreachable!() };
+    /// let Some(Distinct::On(keys)) = &select.distinct else { unreachable!() };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let select_scope = scope.scope_for_select(select).expect("the root scope is recorded");
+    /// let Some(ColumnDefinition::Base { column, .. }) =
+    ///     select_scope.resolve_distinct_on_definition(&keys[0])?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!(column.column_name(), "id");
+    /// assert!(select_scope.resolve_distinct_on_definition(&keys[1])?.is_none());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    pub fn resolve_distinct_on_definition(
+        &self,
+        key: &Expr,
+    ) -> Result<Option<ColumnDefinition<'scope, 'query, 'db, DB>>, LookupError> {
+        self.graph.resolve_output_first(self.cursor, key)
+    }
+
     /// Returns the recorded scope for this exact nested `Select`.
     ///
     /// # Examples
@@ -237,6 +328,76 @@ impl<DB: DatabaseLike> Clone for ColumnDefinitionScope<'_, '_, '_, DB> {
 impl<DB: DatabaseLike> fmt::Debug for ColumnDefinitionScope<'_, '_, '_, DB> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_tuple("ColumnDefinitionScope").field(&self.cursor).finish()
+    }
+}
+
+/// A borrowed resolver for one query's `ORDER BY` keys under PostgreSQL's
+/// rules.
+pub struct ColumnQueryScope<'scope, 'query, 'db, DB: DatabaseLike> {
+    graph: &'scope DefinitionGraph<'query, 'db, DB>,
+    query: QueryId,
+}
+
+impl<'scope, 'query, 'db, DB: DatabaseLike> ColumnQueryScope<'scope, 'query, 'db, DB> {
+    /// Resolves a whole `ORDER BY` key, preferring a select-list output name
+    /// over an input column and seeing only output names after a set operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LookupError::AmbiguousTableLookup`] for an ambiguous reference
+    /// or output name and relation-name lookup errors from modeled definitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, OrderByKind, Statement},
+    ///     dialect::PostgreSqlDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE a(id INT, row_alias INT);")?;
+    /// let sql = "SELECT id AS row_alias FROM a ORDER BY row_alias";
+    /// let Statement::Query(query) = Parser::parse_sql(&PostgreSqlDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let Some(OrderByKind::Expressions(keys)) = query.order_by.as_ref().map(|order| &order.kind)
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let order = scope.scope_for_query(&query).expect("the root query is recorded");
+    /// let Some(ColumnDefinition::Base { column, .. }) =
+    ///     order.resolve_order_by_definition(&keys[0].expr)?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!(column.column_name(), "id");
+    /// let parameter = Expr::Identifier(Ident::new("p"));
+    /// assert!(order.resolve_order_by_definition(&parameter)?.is_none());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    pub fn resolve_order_by_definition(
+        &self,
+        key: &Expr,
+    ) -> Result<Option<ColumnDefinition<'scope, 'query, 'db, DB>>, LookupError> {
+        self.graph.resolve_order_by(self.query, key)
+    }
+}
+
+impl<DB: DatabaseLike> Copy for ColumnQueryScope<'_, '_, '_, DB> {}
+
+#[expect(clippy::expl_impl_clone_on_copy, reason = "derive would require DB: Clone")]
+impl<DB: DatabaseLike> Clone for ColumnQueryScope<'_, '_, '_, DB> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<DB: DatabaseLike> fmt::Debug for ColumnQueryScope<'_, '_, '_, DB> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_tuple("ColumnQueryScope").field(&self.query).finish()
     }
 }
 
@@ -399,6 +560,43 @@ impl<'query, 'db, DB: DatabaseLike> ColumnScope<'query, 'db, DB> {
         select: &Select,
     ) -> Option<ColumnDefinitionScope<'_, 'query, 'db, DB>> {
         self.graph.scope_for_select(None, select)
+    }
+
+    /// Returns the recorded `ORDER BY` scope for this exact query or one nested
+    /// in it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, SetExpr, Statement},
+    ///     dialect::PostgreSqlDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db =
+    ///     ParserDB::parse::<PostgreSqlDialect>("CREATE TABLE a(id INT); CREATE TABLE b(id INT);")?;
+    /// let sql = "SELECT id FROM a WHERE id = (SELECT id AS x FROM b ORDER BY x LIMIT 1)";
+    /// let Statement::Query(query) = Parser::parse_sql(&PostgreSqlDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let SetExpr::Select(select) = query.body.as_ref() else { unreachable!() };
+    /// let Some(Expr::BinaryOp { right, .. }) = &select.selection else { unreachable!() };
+    /// let Expr::Subquery(nested) = right.as_ref() else { unreachable!() };
+    /// let order = scope.scope_for_query(nested).expect("the nested query is recorded");
+    /// let Some(ColumnDefinition::Base { table, .. }) =
+    ///     order.resolve_order_by_definition(&Expr::Identifier(Ident::new("x")))?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!(table.table_name(), "b");
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    #[must_use]
+    pub fn scope_for_query(&self, query: &Query) -> Option<ColumnQueryScope<'_, 'query, 'db, DB>> {
+        self.graph.query_id(query).map(|query| ColumnQueryScope { graph: &self.graph, query })
     }
 }
 
