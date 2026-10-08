@@ -191,6 +191,16 @@ fn set_operations_order_by_their_output_names_alone() {
         order_by("VALUES (1) UNION SELECT id FROM b ORDER BY column1").unwrap(),
         "UNION(opaque, b.id)"
     );
+    assert_eq!(
+        order_by("SELECT * FROM generate_series(1, 2) AS g UNION SELECT id FROM b ORDER BY id")
+            .unwrap(),
+        "opaque"
+    );
+    assert_eq!(order_by("(TABLE b) UNION SELECT id FROM a ORDER BY id").unwrap(), "opaque");
+    assert_eq!(
+        order_by("SELECT id AS x FROM a UNION SELECT id FROM b ORDER BY x + 1").unwrap(),
+        "none"
+    );
 }
 
 #[test]
@@ -206,6 +216,13 @@ fn duplicate_output_names_are_ambiguous_only_for_different_values() {
         order_by("SELECT id AS x, id + 1 AS x FROM a ORDER BY x"),
         Err(LookupError::AmbiguousTableLookup { .. })
     ));
+    assert_eq!(
+        order_by("SELECT *, id + 1 AS id FROM b ORDER BY id"),
+        Err(LookupError::AmbiguousTableLookup {
+            object_name: "id".to_owned(),
+            candidates: vec!["id".to_owned(), "id + 1".to_owned()],
+        })
+    );
 }
 
 #[test]
@@ -238,6 +255,43 @@ fn unaliased_expressions_carry_postgres_implicit_names() {
             "(DATE '2020-01-01', DATE '2020-02-01') OVERLAPS (DATE '2020-01-15', DATE '2020-03-01')",
             "overlaps",
         ),
+        ("(SELECT 1 AS q UNION SELECT 2)", "q"),
+        ("(WITH c AS (SELECT 1) (SELECT 1 AS q))", "q"),
+        ("(SELECT id + 1 FROM b)", "\"?column?\""),
+        ("(WITH c AS (SELECT 1) VALUES (1))", "column1"),
+        ("(ROW(1, 2)).f1", "f1"),
+        ("(ARRAY[1])[1]", "\"array\""),
+        ("DATE '2020-01-01'", "\"date\""),
+        ("INTERVAL '1 day'", "\"interval\""),
+        ("now() AT TIME ZONE 'UTC'", "\"timezone\""),
+        ("extract(year FROM DATE '2020-01-01')", "\"extract\""),
+        ("ceil(1.5)", "\"ceil\""),
+        ("floor(1.5)", "\"floor\""),
+        ("position('a' IN 'abc')", "\"position\""),
+        ("overlay('abc' PLACING 'x' FROM 1)", "\"overlay\""),
+        ("substring('abc' FROM 1 FOR 1)", "\"substring\""),
+        ("trim(trailing 'a' FROM 'abc')", "\"rtrim\""),
+        ("trim('a')", "\"btrim\""),
+        ("1::smallint", "int2"),
+        ("1::bigint", "int8"),
+        ("1::numeric", "\"numeric\""),
+        ("true::boolean", "bool"),
+        ("1::float(10)", "float4"),
+        ("1::real", "float4"),
+        ("'2020-01-01'::date", "\"date\""),
+        ("'{}'::json", "\"json\""),
+        ("'{}'::jsonb", "\"jsonb\""),
+        ("'a'::char", "bpchar"),
+        ("'a'::bytea", "\"bytea\""),
+        ("'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid", "\"uuid\""),
+        ("'1 day'::interval", "\"interval\""),
+        ("'1'::bit(1)", "\"bit\""),
+        ("'1'::varbit", "varbit"),
+        ("'10:00'::time", "\"time\""),
+        ("'10:00'::timetz", "timetz"),
+        ("'2020-01-01'::timestamp", "\"timestamp\""),
+        ("'2020-01-01'::timestamptz", "timestamptz"),
+        ("'a'::name", "\"name\""),
     ] {
         let sql = format!("SELECT {projection} FROM b ORDER BY {key}");
         let resolved = order_by(&sql).unwrap();
@@ -257,6 +311,15 @@ fn unknown_output_names_answer_opaque() {
         "opaque"
     );
     assert_eq!(order_by("SELECT 'a' IS NORMALIZED, id AS x FROM b ORDER BY x").unwrap(), "b.id");
+    for projection in [
+        "'a'::tsvector",
+        "(WITH c AS (SELECT 1) TABLE b)",
+        "(SELECT * FROM b)",
+        "(SELECT 'a' IS NORMALIZED)",
+    ] {
+        let sql = format!("SELECT {projection} FROM b ORDER BY argument_only");
+        assert_eq!(order_by(&sql).unwrap(), "opaque", "`{sql}`");
+    }
 }
 
 #[test]
@@ -289,6 +352,7 @@ fn group_by_prefers_a_local_from_column_then_an_output_name_then_an_outer_column
     assert_eq!(group_by("SELECT id AS x FROM a GROUP BY x").unwrap(), "a.id");
     assert_eq!(group_by("SELECT id AS x FROM a GROUP BY (x)").unwrap(), "a.id");
     assert_eq!(group_by("SELECT id AS x FROM a GROUP BY argument_only").unwrap(), "none");
+    assert_eq!(group_by("SELECT row_alias AS id FROM a GROUP BY a.id").unwrap(), "a.id");
     assert!(matches!(
         group_by("SELECT id AS x, id + 1 AS x FROM a GROUP BY x"),
         Err(LookupError::AmbiguousTableLookup { .. })

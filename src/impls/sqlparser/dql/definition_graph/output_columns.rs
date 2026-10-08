@@ -52,14 +52,6 @@ impl OutputColumn<'_, '_> {
                 (Some(left), Some(right)) if left.get() == right.get()
             )
     }
-
-    fn rendered(&self) -> String {
-        match (&self.expression, &self.name) {
-            (Some(expression), _) => format!("{}", expression.get()),
-            (None, OutputName::Known { name, .. }) => name.clone(),
-            (None, OutputName::Unknown) => String::new(),
-        }
-    }
 }
 
 /// One select-list position, or a wildcard whose columns cannot be enumerated.
@@ -137,7 +129,14 @@ fn match_output(entries: &[OutputEntry<'_, '_>], key: &Ident) -> Result<OutputMa
     if columns().filter(named).all(|column| first.same_value(column)) {
         return Ok(OutputMatch::Found(first.definition));
     }
-    let mut candidates = columns().filter(named).map(OutputColumn::rendered).collect::<Vec<_>>();
+    let mut candidates = columns()
+        .filter(named)
+        .map(|column| {
+            column
+                .expression
+                .map_or_else(|| key.value.clone(), |expression| format!("{}", expression.get()))
+        })
+        .collect::<Vec<_>>();
     candidates.sort_unstable();
     candidates.dedup();
     Err(LookupError::AmbiguousTableLookup { object_name: key.value.clone(), candidates })
@@ -328,7 +327,9 @@ fn values_entries<'query, 'db>(values: &Values) -> Vec<OutputEntry<'query, 'db>>
 impl<'query, 'db, DB: DatabaseLike> DefinitionDerivation<'query, 'db, DB> {
     pub(crate) fn record_outputs(&mut self, query: &Query) -> Result<(), LookupError> {
         for scope in (0..self.graph.scopes.len()).map(ScopeId) {
-            self.graph.scopes[scope.0].outputs = self.select_outputs(scope)?;
+            if let Some(select) = self.graph.scopes[scope.0].select {
+                self.graph.scopes[scope.0].outputs = self.select_outputs(scope, select)?;
+            }
         }
         self.graph.select_index.sort_by_key(|entry| entry.address);
         let mut collector = QueryCollector { derivation: self, queries: BTreeMap::new() };
@@ -342,10 +343,8 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionDerivation<'query, 'db, DB> {
     fn select_outputs(
         &mut self,
         scope: ScopeId,
+        select: AstRef<'query, 'db, Select>,
     ) -> Result<Vec<OutputEntry<'query, 'db>>, LookupError> {
-        let Some(select) = self.graph.scopes[scope.0].select else {
-            return Ok(Vec::new());
-        };
         let cursor = ScopeCursor {
             scope,
             visible_entries: self.graph.scopes[scope.0].data.from_entry_count,
@@ -457,10 +456,9 @@ impl<'query, 'db, DB: DatabaseLike> QueryCollector<'_, 'query, 'db, DB> {
         let scope = match arm {
             Arm::Scope(scope) => *scope,
             Arm::Query(address) => {
-                match self.queries.get(address) {
-                    Some(QueryOutputs::Select(scope)) => *scope,
-                    Some(QueryOutputs::Merged(entries)) => return entries,
-                    None => return &[],
+                match &self.queries[address] {
+                    QueryOutputs::Select(scope) => *scope,
+                    QueryOutputs::Merged(entries) => return entries,
                 }
             }
             Arm::Owned(entries) => return entries,
@@ -599,8 +597,7 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionGraph<'query, 'db, DB> {
                 LookupOutcome::Found(ResolvedColumn { definition, .. }) => {
                     return Ok(Some(self.definition(definition)));
                 }
-                LookupOutcome::Stop => return Ok(None),
-                LookupOutcome::SearchParent => {
+                LookupOutcome::Stop | LookupOutcome::SearchParent => {
                     if let Some(definition) =
                         self.output_definition(&self.scopes[cursor.scope.0].outputs, name)?
                     {
