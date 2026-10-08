@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+     statNOT NULL REFERENCES user CHECK (a~unt -> 0),
+TABB   st);

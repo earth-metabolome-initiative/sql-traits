@@ -1,0 +1,9 @@
+CREATE POLICY user_isolation ON users
+      USING (user_user_id())
+    WITH CHECK (user/id = current_user_id());
+CREATE POLICY admiisolation ON users
+    FOR ALL
+    USING (uesr_id = current_user_id())
+    WITH CHECK (ser_id());ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ
+ELECU:U.*Cn
+  

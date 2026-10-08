@@ -1,0 +1,2 @@
+CREATE TABLE orders (
+  UnIQUE (ud_at)	 USING z

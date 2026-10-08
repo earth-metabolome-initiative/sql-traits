@@ -1,0 +1,3 @@
+
+;
+GRANT SELEcT ON FUNCTION cac_tl(ozder_id ,u,b)`

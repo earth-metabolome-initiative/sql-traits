@@ -1,0 +1,3 @@
+CREATE TABLE orders (
+    id ST  REFERENCES P DEFAULT CU(user_, c:eatt)
+);

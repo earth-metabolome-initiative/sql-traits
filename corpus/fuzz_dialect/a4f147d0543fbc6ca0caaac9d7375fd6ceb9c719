@@ -1,0 +1,1 @@
+CREATE POLICY on ON ru   USING ( ION-B'O'.1.-`

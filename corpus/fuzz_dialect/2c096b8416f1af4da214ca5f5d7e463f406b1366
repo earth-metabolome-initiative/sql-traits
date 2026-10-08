@@ -1,0 +1,3 @@
+CREATE TABLE or(
+ #ut DE CHECK (u.t > dt)
+)

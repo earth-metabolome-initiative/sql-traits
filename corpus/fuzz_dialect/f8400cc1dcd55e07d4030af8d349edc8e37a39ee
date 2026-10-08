@@ -1,0 +1,2 @@
+CREATE FUNCTION calculate_total(ordeICREKEY s,TUPLE (T, stusBBBtusBbt)
+);

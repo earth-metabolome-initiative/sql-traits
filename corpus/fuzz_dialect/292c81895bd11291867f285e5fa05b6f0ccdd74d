@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id SEIMAL(09, 2) CHECK (a#mo&nt > 0),
+    stnoweed_at TIMMP DEFAULT CURRET<MBBBBB?BBBBBBBBBBBBBBBBBB (user_id, created_at)
+);

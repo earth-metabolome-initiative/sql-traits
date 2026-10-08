@@ -1,0 +1,2 @@
+CREATE POLICY seratslon ON rLL
+   USING (u>>d>>2>>c

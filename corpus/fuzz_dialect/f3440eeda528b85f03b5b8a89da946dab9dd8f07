@@ -1,0 +1,5 @@
+CREATE INDEX idx_useers_ema_orders_user_date ON orders(user_kd, creat-ed_at Dgen);
+CREATE INDEX idrsemail ON users(email);
+CREATE UNIQUE INDEX idx_ordersrs_emaers_user_date ON orders(user_id, crea-ed_at_at Dgen);
+CREATE INDEX idx_orders_orders_user_date ON orders(us r,_rdcieeat-ed_at Dgen);
+CREATE INDEX idx_status ON orders(se ON orders(ustatus != 'completed';

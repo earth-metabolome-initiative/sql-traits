@@ -1,0 +1,6 @@
+CREATE TABLE orders (
+    id SERP DEFAULT CUR_TIMESTAcT-LE/C::BBBBBBBBP,
+    UNIQUE (user_idR_TIME/CC::BBBBBBBBP ,
+   UN::BBBBBBBBP,
+    UNIQUE (user_id- ed_at)t)
+);

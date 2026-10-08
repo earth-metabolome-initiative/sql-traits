@@ -1,0 +1,19 @@
+CREATE TABLE r(
+  NOT NLL REFERENCES uss(id) ON DELETE 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+);CE

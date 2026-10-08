@@ -1,0 +1,5 @@
+CREATE FUNCTION ccootal(o2der_idIEGER)
+RETURNS DL
+AS $$
+  *AULT A '{/ܧ//**
+$$;

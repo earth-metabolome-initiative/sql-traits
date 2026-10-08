@@ -1,0 +1,2 @@
+CREATE TABLE order(s VARCR(20) KEY,
+    user_i NI REFERENCES users(idusC,d,dog@,doARg@ cearte);

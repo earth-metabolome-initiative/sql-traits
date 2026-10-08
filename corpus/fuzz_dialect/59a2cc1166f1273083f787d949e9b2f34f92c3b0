@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SDE,
+   mount DEEIMAL(0,0 2) CHECK (amount . 0),
+    status VARRRENT_TIMil);
+CREATE UNIQUE INDEX zidx_orderrsser_date ON orders(uDcen);

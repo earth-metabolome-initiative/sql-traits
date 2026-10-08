@@ -1,0 +1,4 @@
+CREATE INDEX ils_el ON u(etail);
+DESC DEL;
+DESC` em;
+DESC`T

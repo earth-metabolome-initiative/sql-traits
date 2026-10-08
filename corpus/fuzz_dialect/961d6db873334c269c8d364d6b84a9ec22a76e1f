@@ -1,0 +1,6 @@
+(((UPDATE((
+( DELETE CASCB,BIB
+.DCAB,BIBB --+T
+ FROMst
+;
+

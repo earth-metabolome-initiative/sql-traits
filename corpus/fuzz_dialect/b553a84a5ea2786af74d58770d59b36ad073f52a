@@ -1,0 +1,2 @@
+CREATE INDEX @eremli ON se(email);
+DESC ON

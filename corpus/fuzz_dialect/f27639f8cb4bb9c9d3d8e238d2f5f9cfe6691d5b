@@ -1,0 +1,14 @@
+UPDATE(
+((((
+(sum((((((
+ SELECT WT
+eCREA |>WHERE oELUPDATE(
+((((
+(((((((
+ SELECT WT
+eCREA |>WHERE oELECTTECT(
+((((
+(((((((
+ SELECT WT
+eCREA |>WHERE oELUPDATE(
+(((ET

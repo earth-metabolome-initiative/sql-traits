@@ -1,0 +1,2 @@
+CREATE TABLE omders (d SERCADE,o#unt DMaMBBBBBBP,
+    UNIQUE (used_at)   USING l(

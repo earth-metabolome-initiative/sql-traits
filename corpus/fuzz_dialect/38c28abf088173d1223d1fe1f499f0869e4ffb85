@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERCAE,
+ BBBBBIAL PRIMARY KEY,
+   uR NOLL REFERENCES u.ser
+);³

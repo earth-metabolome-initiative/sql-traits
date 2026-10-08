@@ -1,0 +1,1 @@
+CREATE INDEX  ON users(e)WHERE s   USING

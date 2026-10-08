@@ -1,0 +1,5 @@
+CREATE FUNCTION caloul(r_id IER)
+RETURNS DEQL
+AS $$
+ (o/#*//_i
+$$;

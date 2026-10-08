@@ -1,0 +1,3 @@
+ALTeR TABLE uss ADD F NULL;
+ALTER  POLICY uwer_ ON r
+  USING (u)ellle

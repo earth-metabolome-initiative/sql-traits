@@ -1,0 +1,4 @@
+CREATE TABLE orders (
+    id$L PRIMARY KEY,
+   CHECK (a/mated_at)
+);

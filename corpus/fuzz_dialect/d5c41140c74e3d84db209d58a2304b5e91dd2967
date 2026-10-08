@@ -1,0 +1,3 @@
+
+CREATE ROLE read;
+GRANT ADD cT ON 

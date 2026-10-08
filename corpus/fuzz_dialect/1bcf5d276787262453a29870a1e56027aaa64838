@@ -1,0 +1,6 @@
+CREATE TABLE rs (
+
+ CURREN PRIARY KEY,
+    user_id I NOT NULL REFERENCES use,
+mos VARCHAR(20) DEFAULT     UN	
+);

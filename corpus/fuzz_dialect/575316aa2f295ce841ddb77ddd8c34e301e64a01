@@ -1,0 +1,3 @@
+CREATE TABLE orrs (
+    iat ToctSTAMP DEFAULT CB(BP,_id, createdd, crt)
+);

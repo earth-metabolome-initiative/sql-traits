@@ -1,0 +1,4 @@
+SELECT OEE,
+A*L.*TLL,
+A*L.*TEL,
+A*L.*TEL.

@@ -1,0 +1,2 @@
+CREATE INDEX ON uers(ail);
+CREATE TABLE g
