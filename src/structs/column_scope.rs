@@ -121,7 +121,7 @@ impl<'scope, 'query, 'db, DB: DatabaseLike> ColumnDefinitionScope<'scope, 'query
         &self,
         select: &Select,
     ) -> Option<ColumnDefinitionScope<'scope, 'query, 'db, DB>> {
-        self.graph.scope_for_select(self.cursor, select)
+        self.graph.scope_for_select(Some(self.cursor), select)
     }
 }
 
@@ -147,7 +147,8 @@ pub struct ColumnScope<'query, 'db, DB: DatabaseLike> {
 }
 
 impl<'query, 'db, DB: DatabaseLike> ColumnScope<'query, 'db, DB> {
-    /// Builds the column scope of a query's outer body.
+    /// Builds the column scope of a query's outer body and records the scope of
+    /// every `Select` in the query.
     ///
     /// # Errors
     ///
@@ -182,6 +183,15 @@ impl<'query, 'db, DB: DatabaseLike> ColumnScope<'query, 'db, DB> {
         reference: &Expr,
     ) -> Result<Option<ColumnDefinition<'_, 'query, 'db, DB>>, LookupError> {
         self.graph.resolve_definition(self.root, reference)
+    }
+
+    /// Returns the recorded scope for this exact `Select` of the query.
+    #[must_use]
+    pub fn scope_for_select(
+        &self,
+        select: &Select,
+    ) -> Option<ColumnDefinitionScope<'_, 'query, 'db, DB>> {
+        self.graph.scope_for_select(None, select)
     }
 }
 

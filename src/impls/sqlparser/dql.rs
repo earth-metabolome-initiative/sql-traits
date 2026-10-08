@@ -448,7 +448,6 @@ trait DerivationProfile<'query, 'db, DB: DatabaseLike> {
         recursive: Self::Definition,
     ) -> Self::Definition;
     fn checkpoint(&self) -> Self::Checkpoint;
-    fn rollback(&mut self, checkpoint: Self::Checkpoint);
 }
 
 struct SourceDerivation;
@@ -526,8 +525,6 @@ where
     fn recursive_definition(&mut self, _anchor: Self::Definition, _recursive: Self::Definition) {}
 
     fn checkpoint(&self) {}
-
-    fn rollback(&mut self, _checkpoint: Self::Checkpoint) {}
 }
 
 enum RelationContribution<'query, 'db, DB: DatabaseLike, D: Copy> {
@@ -705,7 +702,30 @@ where
         }
         profile.scope_mut(&mut scope).wildcard_plans.push(plan.unwrap_or_default());
     }
-    Ok(scope)
+    Ok(append_unmodeled_relations(select, profile, scope))
+}
+
+/// Makes lookups opaque where `LATERAL VIEW` relations or `CONNECT BY`
+/// pseudo-columns could answer.
+fn append_unmodeled_relations<'query, 'db, DB, P>(
+    select: AstRef<'query, 'db, Select>,
+    profile: &mut P,
+    mut scope: P::Scope,
+) -> P::Scope
+where
+    DB: DatabaseLike,
+    DB::Table: 'db,
+    P: DerivationProfile<'query, 'db, DB>,
+{
+    for view in select.map(|select| select.lateral_views.as_slice()).iter() {
+        let identity = object_name_key(view.map(|view| &view.lateral_view_name))
+            .map_or(OpaqueIdentity::Anonymous, |key| OpaqueIdentity::Known { key, schema: None });
+        append_factor(profile, &mut scope, opaque_factor(identity));
+    }
+    if !select.get().connect_by.is_empty() {
+        profile.scope_mut(&mut scope).unqualified_poison = true;
+    }
+    scope
 }
 
 /// Whether each side of a join can be null-extended: `(left, right)`. An
@@ -903,6 +923,15 @@ where
         let position = if with.get().recursive { base + index } else { shapes.len() };
         if with.get().recursive {
             if mutually_recursive[index] {
+                if P::INDEX_NESTED_QUERIES {
+                    index_nested_query_scopes(
+                        cte.map(|cte| cte.query.as_ref()),
+                        &shapes,
+                        deriving,
+                        parent,
+                        profile,
+                    )?;
+                }
                 continue;
             }
             let body = derive_recursive_cte_query_shape(
@@ -1023,7 +1052,6 @@ where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
 {
-    let checkpoint = profile.checkpoint();
     let mut scoped;
     let scope = if let Some(with) = query.try_map(|query| query.with.as_ref()) {
         scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
@@ -1031,7 +1059,7 @@ where
     } else {
         cte_scope
     };
-    let result = derive_recursive_cte_set_expr_shape(
+    let shape = derive_recursive_cte_set_expr_shape(
         query.map(|query| query.body.as_ref()),
         scope,
         position,
@@ -1039,11 +1067,12 @@ where
         deriving,
         parent,
         profile,
-    );
-    if !matches!(result, Ok(Some(_))) {
-        profile.rollback(checkpoint);
+    )?;
+    if P::INDEX_NESTED_QUERIES {
+        let cursor = derived_body_cursor(query.map(|query| query.body.as_ref()), parent, profile);
+        index_query_expression_queries(query, scope, deriving, cursor, profile)?;
     }
-    result
+    Ok(shape)
 }
 
 fn derive_recursive_cte_set_expr_shape<'query, 'db, DB, P>(
@@ -1067,28 +1096,21 @@ where
             )
         }
         SetExprRef::SetOperation { operator: SetOperator::Union, quantifier, left, right } => {
-            let Some(left_shape) =
-                derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?
+            let left_shape =
+                derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?;
+            cte_scope[position].shape = apply_alias_columns(left_shape, alias.get());
+            if cte_scope[position].shape.is_none() && !P::INDEX_NESTED_QUERIES {
+                return Ok(None);
+            }
+            let right_names = cte_scope[position]
+                .shape
+                .as_ref()
+                .map(|left_shape| OutputNameSource::Columns(&left_shape.columns));
+            let right_shape =
+                derive_set_expr_shape(right, cte_scope, right_names, deriving, parent, profile)?;
+            let (Some(left_shape), Some(right_shape)) =
+                (cte_scope[position].shape.take(), right_shape)
             else {
-                return Ok(None);
-            };
-            cte_scope[position].shape = apply_alias_columns(Some(left_shape), alias.get());
-            let Some(right_shape) = ({
-                let Some(left_shape) = cte_scope[position].shape.as_ref() else {
-                    return Ok(None);
-                };
-                derive_set_expr_shape(
-                    right,
-                    cte_scope,
-                    Some(OutputNameSource::Columns(&left_shape.columns)),
-                    deriving,
-                    parent,
-                    profile,
-                )?
-            }) else {
-                return Ok(None);
-            };
-            let Some(left_shape) = cte_scope[position].shape.take() else {
                 return Ok(None);
             };
             Ok(merge_set_operation_shapes(
@@ -1119,7 +1141,6 @@ where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
 {
-    let checkpoint = profile.checkpoint();
     let scoped;
     let scope = if let Some(with) = query.try_map(|query| query.with.as_ref()) {
         scoped = derive_cte_shapes(with, cte_scope, deriving, parent, profile)?;
@@ -1127,27 +1148,19 @@ where
     } else {
         cte_scope
     };
-    let result = derive_set_expr_shape(
+    let shape = derive_set_expr_shape(
         query.map(|query| query.body.as_ref()),
         scope,
         output_names,
         deriving,
         parent,
         profile,
-    );
-    let result = match result {
-        Ok(Some(shape)) if P::INDEX_NESTED_QUERIES => {
-            let cursor =
-                derived_body_cursor(query.map(|query| query.body.as_ref()), parent, profile);
-            index_query_expression_queries(query, scope, deriving, cursor, profile)
-                .map(|()| Some(shape))
-        }
-        other => other,
-    };
-    if !matches!(result, Ok(Some(_))) {
-        profile.rollback(checkpoint);
+    )?;
+    if P::INDEX_NESTED_QUERIES {
+        let cursor = derived_body_cursor(query.map(|query| query.body.as_ref()), parent, profile);
+        index_query_expression_queries(query, scope, deriving, cursor, profile)?;
     }
-    result
+    Ok(shape)
 }
 
 /// Derives the output shape of a body. A set operation merges its arms by
@@ -1173,20 +1186,17 @@ where
             derive_query_shape(query, cte_scope, output_names, deriving, parent, profile)
         }
         SetExprRef::SetOperation { operator, quantifier, left, right } => {
-            let Some(left_shape) =
-                derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?
-            else {
+            let left_shape =
+                derive_set_expr_shape(left, cte_scope, output_names, deriving, parent, profile)?;
+            if left_shape.is_none() && !P::INDEX_NESTED_QUERIES {
                 return Ok(None);
-            };
-            let Some(right_shape) = derive_set_expr_shape(
-                right,
-                cte_scope,
-                Some(OutputNameSource::Columns(&left_shape.columns)),
-                deriving,
-                parent,
-                profile,
-            )?
-            else {
+            }
+            let right_names = left_shape
+                .as_ref()
+                .map(|left_shape| OutputNameSource::Columns(&left_shape.columns));
+            let right_shape =
+                derive_set_expr_shape(right, cte_scope, right_names, deriving, parent, profile)?;
+            let (Some(left_shape), Some(right_shape)) = (left_shape, right_shape) else {
                 return Ok(None);
             };
             Ok(merge_set_operation_shapes(
@@ -1199,7 +1209,13 @@ where
                 profile,
             ))
         }
-        SetExprRef::Values(_) | SetExprRef::Other => Ok(None),
+        SetExprRef::Values(values) => {
+            if P::INDEX_NESTED_QUERIES {
+                index_values_expression_queries(values, cte_scope, deriving, parent, profile)?;
+            }
+            Ok(None)
+        }
+        SetExprRef::Other => Ok(None),
     }
 }
 
@@ -2810,17 +2826,20 @@ where
     DB: DatabaseLike,
     P: DerivationProfile<'query, 'db, DB>,
 {
-    if !select.get().lateral_views.is_empty()
+    let unsupported = !select.get().lateral_views.is_empty()
         || select.get().exclude.is_some()
         || select.get().value_table_mode.is_some()
-        || !select.get().connect_by.is_empty()
-    {
+        || !select.get().connect_by.is_empty();
+    if unsupported && !P::INDEX_NESTED_QUERIES {
         return Ok(None);
     }
     let scope = collect_select_from(select, cte_scope, deriving, parent, profile)?;
     let scope_cursor = profile.cursor(&scope);
     if P::INDEX_NESTED_QUERIES {
         index_select_expression_queries(select, cte_scope, deriving, scope_cursor, profile)?;
+    }
+    if unsupported {
+        return Ok(None);
     }
     let mut columns = Vec::new();
     for item in select.map(|select| select.projection.as_slice()).iter() {
@@ -3912,16 +3931,14 @@ pub(crate) fn build_definition_graph<'query, 'db, DB: DatabaseLike>(
     let deriving = Deriving::of(database);
     let mut profile = DefinitionDerivation::new();
     let parent = profile.no_parent();
-    let SetExpr::Select(select) = query.body.as_ref() else {
-        return Ok(profile.empty_scope());
-    };
-    let cte_scope = match &query.with {
-        Some(with) => derive_cte_shapes(AstRef::Query(with), &[], deriving, parent, &mut profile)?,
-        None => Vec::new(),
-    };
     let root =
-        collect_select_from(AstRef::Query(select), &cte_scope, deriving, parent, &mut profile)?;
-    Ok(profile.finish(root))
+        index_nested_query_scopes(AstRef::Query(query), &[], deriving, parent, &mut profile)?;
+    Ok(match root {
+        Some(cursor) if matches!(query.body.as_ref(), SetExpr::Select(_)) => {
+            profile.finish(cursor.scope)
+        }
+        _ => profile.empty_scope(),
+    })
 }
 
 impl<DB: DatabaseLike> DQLLike<DB> for Query {
