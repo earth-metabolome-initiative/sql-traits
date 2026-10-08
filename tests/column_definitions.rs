@@ -2002,3 +2002,163 @@ fn wide_wildcard_chains_become_opaque_at_the_width_limit() {
         Some(ColumnDefinition::Opaque)
     ));
 }
+
+fn definition_kind(scope: ColumnDefinitionScope<'_, '_, '_, ParserDB>, sql: &str) -> String {
+    match scope.resolve_column_definition(&reference(sql)).expect("definition resolves") {
+        Some(ColumnDefinition::Base { table, .. }) => format!("base {}", table.table_name()),
+        Some(ColumnDefinition::Opaque) => "opaque".to_owned(),
+        Some(_) => "other".to_owned(),
+        None => "missing".to_owned(),
+    }
+}
+
+#[test]
+fn query_root_set_operands_resolve_in_their_own_scopes() {
+    let db = schema_db();
+    let query = query("SELECT id FROM a UNION ALL SELECT id FROM b");
+    let scope = ColumnScope::from_query(&query, &db).expect("scope builds");
+    let SetExpr::SetOperation { left, right, .. } = query.body.as_ref() else {
+        panic!("expected a set operation body")
+    };
+    for (operand, expected) in [(left, "base a"), (right, "base b")] {
+        let SetExpr::Select(select) = operand.as_ref() else { panic!("expected a SELECT operand") };
+        let operand = scope.scope_for_select(select).expect("operand scope is indexed");
+        assert_eq!(definition_kind(operand, "id"), expected);
+        assert_eq!(definition_kind(operand, "argument_only"), "missing");
+    }
+    assert!(scope.resolve_column_definition(&reference("id")).expect("root resolves").is_none());
+}
+
+#[test]
+fn query_root_nested_scopes_keep_local_precedence_and_outer_correlation() {
+    let db = schema_db();
+    let query = query(
+        "SELECT id FROM a WHERE EXISTS (SELECT 1 FROM b WHERE b.id = a.id) \
+         UNION ALL \
+         (SELECT id FROM b WHERE id IN (SELECT id FROM a WHERE a.payload = b.payload))",
+    );
+    let scope = ColumnScope::from_query(&query, &db).expect("scope builds");
+    let SetExpr::SetOperation { left, right, .. } = query.body.as_ref() else {
+        panic!("expected a set operation body")
+    };
+    let SetExpr::Select(left) = left.as_ref() else { panic!("expected a SELECT operand") };
+    let SetExpr::Query(right) = right.as_ref() else { panic!("expected a parenthesized operand") };
+    let right = select_body(right);
+    let exists = exists_nested_select(left.selection.as_ref().expect("WHERE clause"));
+    let in_subquery = in_nested_select(right.selection.as_ref().expect("WHERE clause"));
+    for (select, local, outer, outer_table) in
+        [(exists, "base b", "a.payload", "base a"), (in_subquery, "base a", "b.payload", "base b")]
+    {
+        let nested = scope.scope_for_select(select).expect("nested scope is indexed");
+        assert_eq!(definition_kind(nested, "id"), local);
+        assert_eq!(definition_kind(nested, outer), outer_table);
+        assert_eq!(definition_kind(nested, "argument_only"), "missing");
+    }
+    let right_scope = scope.scope_for_select(right).expect("parenthesized operand is indexed");
+    assert_eq!(definition_kind(right_scope, "a.payload"), "missing");
+}
+
+#[derive(Default)]
+struct SelectCollector {
+    selects: Vec<*const Select>,
+}
+
+impl SelectCollector {
+    fn body(&mut self, body: &SetExpr) {
+        match body {
+            SetExpr::Select(select) => self.selects.push(select.as_ref()),
+            SetExpr::SetOperation { left, right, .. } => {
+                self.body(left);
+                self.body(right);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Visitor for SelectCollector {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<Self::Break> {
+        self.body(&query.body);
+        ControlFlow::Continue(())
+    }
+}
+
+fn input_selects(query: &Query) -> Vec<&Select> {
+    let mut collector = SelectCollector::default();
+    let _ = query.visit(&mut collector);
+    collector
+        .selects
+        .into_iter()
+        // SAFETY: every pointer was taken from a node owned by `query`, which the returned
+        // references borrow immutably, so each node stays alive, aligned and unaliased by `&mut`.
+        .map(|select| unsafe { &*select })
+        .collect()
+}
+
+#[test]
+fn query_scope_indexes_every_select_of_the_input() {
+    let db = schema_db();
+    let mut missing = Vec::new();
+    for sql in [
+        "WITH c AS (SELECT payload FROM a) \
+         SELECT (SELECT max(id) FROM b) FROM c \
+         WHERE EXISTS (SELECT 1 FROM b WHERE b.payload = c.payload) \
+         ORDER BY (SELECT min(id) FROM a)",
+        "SELECT d.id FROM (SELECT id FROM a UNION ALL SELECT id FROM b) AS d, \
+         LATERAL (SELECT d.id AS x) AS l",
+        "SELECT v.x FROM (SELECT 1 AS x UNION ALL VALUES (2)) AS v",
+        "SELECT v.x FROM (VALUES (1) UNION ALL SELECT id FROM b) AS v(x)",
+        "SELECT v.x FROM (VALUES ((SELECT max(id) FROM a))) AS v(x)",
+        "SELECT t.id FROM (SELECT id FROM a START WITH id = 1 CONNECT BY PRIOR id = id) AS t",
+        "SELECT id FROM a UNION ALL VALUES (1)",
+        "WITH RECURSIVE t(n) AS (\
+             SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3 \
+             ORDER BY (SELECT min(id) FROM a)\
+         ) SELECT n FROM t",
+        "WITH RECURSIVE x(v) AS (SELECT y.v FROM y), y(v) AS (SELECT x.v FROM x) \
+         SELECT x.v FROM x",
+        "SELECT t.x FROM (SELECT * FROM generate_series(1, 3)) AS t",
+        "SELECT id FROM a WHERE id IN (SELECT id FROM b UNION SELECT id FROM a)",
+    ] {
+        let query = query(sql);
+        let scope = ColumnScope::from_query(&query, &db).expect("scope builds");
+        for select in input_selects(&query) {
+            if scope.scope_for_select(select).is_none() {
+                missing.push(format!("`{select}` in `{sql}`"));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "selects without a scope: {missing:#?}");
+}
+
+#[test]
+fn lateral_views_and_connect_by_scopes_stay_opaque_for_unmodeled_columns() {
+    let db = ParserDB::parse::<GenericDialect>("CREATE TABLE t(id INT, arr INT, col INT);")
+        .expect("schema parses");
+    let lateral = query_with(
+        &HiveDialect {},
+        "SELECT x.v FROM (SELECT col AS v FROM t LATERAL VIEW explode(arr) e AS col) AS x",
+    );
+    let scope = ColumnScope::from_query(&lateral, &db).expect("scope builds");
+    let SetExpr::Select(outer) = lateral.body.as_ref() else { panic!("expected a SELECT body") };
+    let sqlparser::ast::TableFactor::Derived { subquery, .. } = &outer.from[0].relation else {
+        panic!("expected a derived table")
+    };
+    let inner = scope.scope_for_select(select_body(subquery)).expect("lateral scope is indexed");
+    for (sql, expected) in
+        [("col", "opaque"), ("e.col", "opaque"), ("t.id", "base t"), ("other.col", "missing")]
+    {
+        assert_eq!(definition_kind(inner, sql), expected, "`{sql}`");
+    }
+    let root = query_with(&HiveDialect {}, "SELECT id FROM t LATERAL VIEW explode(arr) e AS col");
+    assert!(root.projection_source_table(&db).expect("source resolves").is_none());
+
+    let hierarchy = query("SELECT id FROM t START WITH id = 1 CONNECT BY PRIOR id = id");
+    let scope = ColumnScope::from_query(&hierarchy, &db).expect("scope builds");
+    let root = scope.scope_for_select(select_body(&hierarchy)).expect("root scope is indexed");
+    for (sql, expected) in [("level", "opaque"), ("t.id", "base t")] {
+        assert_eq!(definition_kind(root, sql), expected, "`{sql}`");
+    }
+}

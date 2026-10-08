@@ -95,9 +95,7 @@ pub(crate) struct ScopeCursor {
 
 #[derive(Clone, Copy)]
 pub(super) struct GraphCheckpoint {
-    definitions: usize,
     scopes: usize,
-    select_index: usize,
 }
 
 enum DefinitionNode<'query, 'db, DB: DatabaseLike> {
@@ -214,7 +212,7 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionGraph<'query, 'db, DB> {
 
     pub(crate) fn scope_for_select<'scope>(
         &'scope self,
-        origin: ScopeCursor,
+        origin: Option<ScopeCursor>,
         select: &Select,
     ) -> Option<ColumnDefinitionScope<'scope, 'query, 'db, DB>> {
         let address = select_address(select);
@@ -226,7 +224,7 @@ impl<'query, 'db, DB: DatabaseLike> DefinitionGraph<'query, 'db, DB> {
                 self.scopes[entry.scope.0]
                     .select
                     .is_some_and(|recorded| core::ptr::eq(recorded.get(), select))
-                    && self.descends_from(entry.scope, origin.scope)
+                    && origin.is_none_or(|origin| self.descends_from(entry.scope, origin.scope))
             })
             .map(|entry| {
                 let scope = &self.scopes[entry.scope.0];
@@ -420,17 +418,7 @@ impl<'query, 'db, DB: DatabaseLike> DerivationProfile<'query, 'db, DB>
     }
 
     fn checkpoint(&self) -> Self::Checkpoint {
-        GraphCheckpoint {
-            definitions: self.graph.definitions.len(),
-            scopes: self.graph.scopes.len(),
-            select_index: self.graph.select_index.len(),
-        }
-    }
-
-    fn rollback(&mut self, checkpoint: Self::Checkpoint) {
-        self.graph.definitions.truncate(checkpoint.definitions.max(1));
-        self.graph.scopes.truncate(checkpoint.scopes);
-        self.graph.select_index.truncate(checkpoint.select_index);
+        GraphCheckpoint { scopes: self.graph.scopes.len() }
     }
 }
 

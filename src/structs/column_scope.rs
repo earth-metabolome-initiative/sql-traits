@@ -67,6 +67,35 @@ impl<'scope, 'query, 'db, DB: DatabaseLike> ColumnDefinitionRef<'scope, 'query, 
     }
 
     /// Returns this node's definition view.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, Statement},
+    ///     dialect::GenericDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT); CREATE TABLE b(id INT);")?;
+    /// let sql = "SELECT u.id FROM (SELECT id FROM a UNION ALL SELECT id FROM b) AS u";
+    /// let Statement::Query(query) = Parser::parse_sql(&GenericDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let reference = Expr::CompoundIdentifier(vec![Ident::new("u"), Ident::new("id")]);
+    /// let Some(ColumnDefinition::SetOperation { left, right, .. }) =
+    ///     scope.resolve_column_definition(&reference)?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// for (side, expected) in [(left, "a"), (right, "b")] {
+    ///     let ColumnDefinition::Base { table, .. } = side.definition() else { unreachable!() };
+    ///     assert_eq!(table.table_name(), expected);
+    /// }
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
     #[must_use]
     pub fn definition(self) -> ColumnDefinition<'scope, 'query, 'db, DB> {
         self.graph.definition(self.id)
@@ -108,6 +137,39 @@ impl<'scope, 'query, 'db, DB: DatabaseLike> ColumnDefinitionScope<'scope, 'query
     ///
     /// Returns [`LookupError::AmbiguousTableLookup`] for an ambiguous reference
     /// and relation-name lookup errors from modeled definitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, Statement},
+    ///     dialect::GenericDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT);")?;
+    /// let sql = "SELECT d.doubled FROM (SELECT id * 2 AS doubled FROM a) AS d";
+    /// let Statement::Query(query) = Parser::parse_sql(&GenericDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let output = Expr::CompoundIdentifier(vec![Ident::new("d"), Ident::new("doubled")]);
+    /// let Some(ColumnDefinition::Expression { scope: defining, .. }) =
+    ///     scope.resolve_column_definition(&output)?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// let Some(ColumnDefinition::Base { table, column }) =
+    ///     defining.resolve_column_definition(&Expr::Identifier(Ident::new("id")))?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!((table.table_name(), column.column_name()), ("a", "id"));
+    /// let missing = Expr::Identifier(Ident::new("missing"));
+    /// assert!(defining.resolve_column_definition(&missing)?.is_none());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
     pub fn resolve_column_definition(
         &self,
         reference: &Expr,
@@ -116,12 +178,50 @@ impl<'scope, 'query, 'db, DB: DatabaseLike> ColumnDefinitionScope<'scope, 'query
     }
 
     /// Returns the recorded scope for this exact nested `Select`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, SetExpr, Statement},
+    ///     dialect::GenericDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT); CREATE TABLE b(id INT);")?;
+    /// let sql = "SELECT d.x FROM (SELECT (SELECT id FROM b WHERE b.id = a.id) AS x FROM a) AS d";
+    /// let Statement::Query(query) = Parser::parse_sql(&GenericDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let output = Expr::CompoundIdentifier(vec![Ident::new("d"), Ident::new("x")]);
+    /// let Some(ColumnDefinition::Expression { expression: Expr::Subquery(nested), scope: defining }) =
+    ///     scope.resolve_column_definition(&output)?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// let SetExpr::Select(select) = nested.body.as_ref() else { unreachable!() };
+    /// let nested_scope = defining.scope_for_select(select).expect("the subquery scope is recorded");
+    /// for (reference, expected) in [
+    ///     (Expr::Identifier(Ident::new("id")), "b"),
+    ///     (Expr::CompoundIdentifier(vec![Ident::new("a"), Ident::new("id")]), "a"),
+    /// ] {
+    ///     let Some(ColumnDefinition::Base { table, .. }) =
+    ///         nested_scope.resolve_column_definition(&reference)?
+    ///     else {
+    ///         unreachable!()
+    ///     };
+    ///     assert_eq!(table.table_name(), expected);
+    /// }
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
     #[must_use]
     pub fn scope_for_select(
         &self,
         select: &Select,
     ) -> Option<ColumnDefinitionScope<'scope, 'query, 'db, DB>> {
-        self.graph.scope_for_select(self.cursor, select)
+        self.graph.scope_for_select(Some(self.cursor), select)
     }
 }
 
@@ -147,13 +247,40 @@ pub struct ColumnScope<'query, 'db, DB: DatabaseLike> {
 }
 
 impl<'query, 'db, DB: DatabaseLike> ColumnScope<'query, 'db, DB> {
-    /// Builds the column scope of a query's outer body.
+    /// Builds the column scope of a query's outer body and records the scope of
+    /// every `Select` in the query.
     ///
     /// # Errors
     ///
     /// Returns relation-name lookup errors and
     /// [`LookupError::AmbiguousTableLookup`] when a modeled relation lookup is
     /// ambiguous.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, Statement},
+    ///     dialect::GenericDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT);")?;
+    /// let Statement::Query(query) =
+    ///     Parser::parse_sql(&GenericDialect {}, "SELECT id FROM a")?.remove(0)
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let Some(ColumnDefinition::Base { table, column }) =
+    ///     scope.resolve_column_definition(&Expr::Identifier(Ident::new("id")))?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!((table.table_name(), column.column_name()), ("a", "id"));
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
     pub fn from_query(query: &'query Query, database: &'db DB) -> Result<Self, LookupError> {
         let (graph, root) = build_definition_graph(query, database)?;
         Ok(Self { graph, root })
@@ -166,6 +293,29 @@ impl<'query, 'db, DB: DatabaseLike> ColumnScope<'query, 'db, DB> {
     ///
     /// Returns [`LookupError::AmbiguousTableLookup`] when more than one local
     /// relation exposes the reference.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, Statement},
+    ///     dialect::GenericDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT); CREATE TABLE b(id INT);")?;
+    /// let Statement::Query(query) =
+    ///     Parser::parse_sql(&GenericDialect {}, "SELECT a.id FROM a JOIN b ON true")?.remove(0)
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let qualified = Expr::CompoundIdentifier(vec![Ident::new("a"), Ident::new("id")]);
+    /// assert_eq!(scope.resolve_column(&qualified)?.map(TableLike::table_name), Some("a"));
+    /// assert!(scope.resolve_column(&Expr::Identifier(Ident::new("id"))).is_err());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
     pub fn resolve_column(&self, reference: &Expr) -> Result<Option<&'db DB::Table>, LookupError> {
         self.graph.resolve_source(self.root, reference)
     }
@@ -177,16 +327,107 @@ impl<'query, 'db, DB: DatabaseLike> ColumnScope<'query, 'db, DB> {
     /// Returns [`LookupError::AmbiguousTableLookup`] when more than one
     /// relation exposes the reference and relation-name lookup errors from
     /// modeled definitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, Statement},
+    ///     dialect::GenericDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT);")?;
+    /// let sql = "WITH c AS (SELECT id FROM a) SELECT c.id FROM c";
+    /// let Statement::Query(query) = Parser::parse_sql(&GenericDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let reference = Expr::CompoundIdentifier(vec![Ident::new("c"), Ident::new("id")]);
+    /// let Some(ColumnDefinition::Base { table, column }) =
+    ///     scope.resolve_column_definition(&reference)?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!((table.table_name(), column.column_name()), ("a", "id"));
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
     pub fn resolve_column_definition(
         &self,
         reference: &Expr,
     ) -> Result<Option<ColumnDefinition<'_, 'query, 'db, DB>>, LookupError> {
         self.graph.resolve_definition(self.root, reference)
     }
+
+    /// Returns the recorded scope for this exact `Select` of the query.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident, SetExpr, Statement},
+    ///     dialect::GenericDialect,
+    ///     parser::Parser,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT); CREATE TABLE b(id INT);")?;
+    /// let sql = "SELECT id FROM a UNION ALL SELECT id FROM b";
+    /// let Statement::Query(query) = Parser::parse_sql(&GenericDialect {}, sql)?.remove(0) else {
+    ///     unreachable!()
+    /// };
+    /// let scope = ColumnScope::from_query(&query, &db)?;
+    /// let SetExpr::SetOperation { left, right, .. } = query.body.as_ref() else { unreachable!() };
+    /// for (operand, expected) in [(left, "a"), (right, "b")] {
+    ///     let SetExpr::Select(select) = operand.as_ref() else { unreachable!() };
+    ///     let operand_scope = scope.scope_for_select(select).expect("the operand scope is recorded");
+    ///     let Some(ColumnDefinition::Base { table, .. }) =
+    ///         operand_scope.resolve_column_definition(&Expr::Identifier(Ident::new("id")))?
+    ///     else {
+    ///         unreachable!()
+    ///     };
+    ///     assert_eq!(table.table_name(), expected);
+    ///     let parameter = Expr::Identifier(Ident::new("argument_only"));
+    ///     assert!(operand_scope.resolve_column_definition(&parameter)?.is_none());
+    /// }
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
+    #[must_use]
+    pub fn scope_for_select(
+        &self,
+        select: &Select,
+    ) -> Option<ColumnDefinitionScope<'_, 'query, 'db, DB>> {
+        self.graph.scope_for_select(None, select)
+    }
 }
 
 impl<'db, DB: DatabaseLike> ColumnScope<'db, 'db, DB> {
     /// Builds the definition scope for one stored table.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sql_traits::prelude::*;
+    /// use sqlparser::{
+    ///     ast::{Expr, Ident},
+    ///     dialect::GenericDialect,
+    /// };
+    ///
+    /// let db = ParserDB::parse::<GenericDialect>("CREATE TABLE a(id INT);")?;
+    /// let table = db
+    ///     .table_by_target(TargetName::new("a", false), IdentifierCase::AsWritten)?
+    ///     .expect("table a exists");
+    /// let scope = ColumnScope::for_table(table, &db);
+    /// let Some(ColumnDefinition::Base { column, .. }) =
+    ///     scope.resolve_column_definition(&Expr::Identifier(Ident::new("id")))?
+    /// else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!(column.column_name(), "id");
+    /// assert!(scope.resolve_column_definition(&Expr::Identifier(Ident::new("missing")))?.is_none());
+    /// # Ok::<(), sql_traits::errors::Error>(())
+    /// ```
     #[must_use]
     pub fn for_table(table: &'db DB::Table, database: &'db DB) -> Self {
         let (graph, root) = table_graph(table, database);
