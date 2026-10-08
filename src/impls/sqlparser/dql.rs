@@ -3933,6 +3933,7 @@ pub(crate) fn build_definition_graph<'query, 'db, DB: DatabaseLike>(
     let parent = profile.no_parent();
     let root =
         index_nested_query_scopes(AstRef::Query(query), &[], deriving, parent, &mut profile)?;
+    profile.record_outputs(query)?;
     Ok(match root {
         Some(cursor) if matches!(query.body.as_ref(), SetExpr::Select(_)) => {
             profile.finish(cursor.scope)
