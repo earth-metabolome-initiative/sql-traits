@@ -1,3 +1,0 @@
-CREATE TABLE do(   id Ud(),
- JSONB N NULL,   tag SE
-);

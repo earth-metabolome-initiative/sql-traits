@@ -1,2 +1,0 @@
-CREATE POLICY ol ON ser
-   USING (usel:llll.llllu@ss

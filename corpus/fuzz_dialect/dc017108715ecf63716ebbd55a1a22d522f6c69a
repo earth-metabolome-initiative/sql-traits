@@ -1,2 +1,0 @@
-CREATE TABLE orders (
-  UnIQUE (us-d_at)	 USING z

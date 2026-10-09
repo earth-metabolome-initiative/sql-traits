@@ -1,4 +1,0 @@
-CREATE TABLE ord(
-    id EALMM(09,) CHECK(21) DEFAULT x'pending',
-reaNT_Tz UNIQUE (useat)
-);

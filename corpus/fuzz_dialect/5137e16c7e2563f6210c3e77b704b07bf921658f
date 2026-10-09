@@ -1,3 +1,0 @@
-CREATE INDEX i ON e(etail);
-DESC DEL;
-DESC DET

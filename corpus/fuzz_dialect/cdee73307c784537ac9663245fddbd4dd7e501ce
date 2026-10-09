@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SERCADE,
-   nt DEEM,
-   UNIQUE (user_id, creat$d_a)
-)

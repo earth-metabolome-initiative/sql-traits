@@ -1,1 +1,0 @@
-CREATE POLICY user_isn ON s USING(user= ALL (u` U

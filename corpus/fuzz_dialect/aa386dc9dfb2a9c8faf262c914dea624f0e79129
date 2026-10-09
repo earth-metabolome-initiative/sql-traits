@@ -1,4 +1,0 @@
-CREATe TABLE orders (
-    EGER NOTULL REFERENCES users(id_at)PRIMARY KEY,r_id INTEusR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
- amount DECIMAL(10, 2) CHECK (amo@@@@@@@@@@@@@@@ed_at)
-);ù)

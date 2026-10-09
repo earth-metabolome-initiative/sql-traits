@@ -1,1 +1,0 @@
-CREATE POLICY user_an ON users  TO ad,it ,current_user nâªSIN

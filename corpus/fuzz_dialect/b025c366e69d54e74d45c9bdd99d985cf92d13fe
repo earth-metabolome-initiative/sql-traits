@@ -1,2 +1,0 @@
-EXEC  E USING l,oELECT-N As
-   Oca,tamp(r());

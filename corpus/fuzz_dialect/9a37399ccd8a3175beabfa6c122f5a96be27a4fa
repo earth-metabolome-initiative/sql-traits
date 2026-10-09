@@ -1,2 +1,0 @@
-CREATE POLICY uon ON resALL
-   USING(uselld ? cr_c/Ramu NOTr_isI

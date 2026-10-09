@@ -1,2 +1,0 @@
-CREATE TABLE dat (
-    id UUID PRIMARY KEY DEFAULT@@@@@@@@R)

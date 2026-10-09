@@ -1,2 +1,0 @@
-CREATE TABLE geo_data (
-    RY Y DEFAULT gandom_&uid().B NOT NULL,VTS RA);

@@ -1,2 +1,0 @@
-CREATE TABLE gea (
-  itagUID PIRAMRY KEY DEFAULT _randLT '{}');

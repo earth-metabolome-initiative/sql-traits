@@ -1,7 +1,0 @@
-CREATE TABLE ors (
-    id SERIAL  ,amount DECIMAL(09, 2) CHECK (amount > 0),
-    stnt DECIMAL(09, 2) CHECK (amounters(status)  > 0),
-    status VARCHAR(20) DEFAULT 'pemding',
- atu sVAR(HCAR19) DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTHAR(20) DEFAULT CURREmaxTIUNIQUE (ucr_at)
-);

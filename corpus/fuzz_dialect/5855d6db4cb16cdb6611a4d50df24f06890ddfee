@@ -1,3 +1,0 @@
-CREATE TABLE krs (
-  UNIQUE (user_id, eated_at
-);

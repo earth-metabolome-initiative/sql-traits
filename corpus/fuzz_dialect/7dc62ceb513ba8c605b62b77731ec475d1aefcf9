@@ -1,4 +1,0 @@
-CREATE ROLE d;
-CREATE ROLE rnl;
-GRANT SELECT TO admpublicu;
-GRANT SELECT TO admpadonl~

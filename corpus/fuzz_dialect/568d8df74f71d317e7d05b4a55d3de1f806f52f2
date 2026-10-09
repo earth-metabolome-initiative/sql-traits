@@ -1,3 +1,0 @@
-CREATE TABLE ow (
- nt DECIM, CHECK (am@@:d_at)
-);ù

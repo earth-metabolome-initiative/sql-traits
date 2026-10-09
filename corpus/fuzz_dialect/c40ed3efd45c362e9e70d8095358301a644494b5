@@ -1,4 +1,0 @@
-CREATE POLICY _isolation ON ers
-        USING (llller/id@ = _u());
-
-CREATE POLICY adr

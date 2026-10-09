@@ -1,2 +1,0 @@
-CREATE POLICY nio ON us  FOR ALL
-  USING (udL|l/lle==

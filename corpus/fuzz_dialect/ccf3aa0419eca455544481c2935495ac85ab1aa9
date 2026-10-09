@@ -1,4 +1,0 @@
-CREATE INDEX idx_users_email ON usErs(em^il);
-CREATE UNIQUE INDEX idate ON orders(usSC);
-CREATE INDEX idx_orte ON orders(user_d, creatder_id, crt DESC);
-CREATE INDEX idx_or ON orders(user_ts_&

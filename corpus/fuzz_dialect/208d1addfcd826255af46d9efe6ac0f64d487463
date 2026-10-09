@@ -1,1 +1,0 @@
-CREATE INDEX ite ON s(r_id,t DESC#);ota;

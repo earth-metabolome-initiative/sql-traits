@@ -1,3 +1,0 @@
-CREATE FUNCTION calculateao_ttl(ordeICRDcurrent_time,TUPLE (T, stCASC, id 
-t)
-);

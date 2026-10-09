@@ -1,3 +1,0 @@
-CREATE TABLE g_dat (
-  dARY KEY DEFAULT genm_ud() DEFAULT user ,  tsv CTOR
-);

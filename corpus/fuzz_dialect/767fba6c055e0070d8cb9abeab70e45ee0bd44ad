@@ -1,3 +1,0 @@
-CREATE TABLE orders (
-    iat ToctSTAMP DEFAULT CB(BBP,_id, createdd, crt)
-);

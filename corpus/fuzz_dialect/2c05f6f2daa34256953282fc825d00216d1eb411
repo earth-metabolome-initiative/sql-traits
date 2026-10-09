@@ -1,2 +1,0 @@
-CREATE TABLE oers (NOT ESCDECIMAL(0, 2) CHECK (aontu -> 0),
-    stas VARC);

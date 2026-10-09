@@ -1,3 +1,0 @@
-CREATE POLICY uslion ON user  ;
-
-CREATE POLICY min_all ON ING

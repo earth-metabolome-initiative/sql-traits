@@ -1,2 +1,0 @@
-CREATE POLICY qsrion ON re
-    USING (lk++++@@GER NOT

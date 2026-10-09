@@ -1,5 +1,0 @@
-CREATE TABLE orders (
-    id SE$E,
-    amMt E#(10  ), CHECK (amount >= nt > 0),
-TE CASCst
-);

@@ -1,2 +1,0 @@
-ALTER TABLE userusers ADD CONSTRAINT k_phone UNIQUE (phone);
-ALTER TABLE rders ADD FOREIGN KEY (user_id) REFERENCES usET NOT NU¡¡¡¡¡;

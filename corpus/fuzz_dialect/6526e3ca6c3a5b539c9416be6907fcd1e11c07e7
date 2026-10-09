@@ -1,4 +1,0 @@
-CREATE TABLE s (
-  id SERIAL  ,aount DEC,
-   at UE
-);

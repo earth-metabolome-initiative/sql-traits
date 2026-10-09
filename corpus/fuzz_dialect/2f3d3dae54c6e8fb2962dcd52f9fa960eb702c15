@@ -1,2 +1,0 @@
-CREATE POLICY seratslIon ON rLL
-   USING (u>>d>>2>>c

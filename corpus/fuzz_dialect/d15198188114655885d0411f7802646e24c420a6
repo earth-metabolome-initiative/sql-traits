@@ -1,2 +1,0 @@
-CREATE POLICY i ON r  USING (use(ALL
-ÿÿ

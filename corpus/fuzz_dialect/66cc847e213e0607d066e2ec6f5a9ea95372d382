@@ -1,1 +1,0 @@
-CREATE INDEX ide ON orders(uetus) WHERE statuz != 'completed';CREATE INDEX idxate ON orders(ge@@@tatus) WHERE st

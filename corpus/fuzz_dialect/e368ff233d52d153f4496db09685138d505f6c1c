@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id$S$RIAL PRIMARY KEY,
-   CHECK (a/mated_at)
-);

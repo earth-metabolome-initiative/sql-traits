@@ -1,1 +1,0 @@
-CREATE POLICY er_ison ON u USING (se<<2<<<l

@@ -1,3 +1,0 @@
-CREATE ROLE donly;
-GRANT SELECT ON SCHEMA Ppnullic TO ROLE donly;
-ß>ly;

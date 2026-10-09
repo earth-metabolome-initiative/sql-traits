@@ -1,4 +1,0 @@
-CREATE TABLE orders (
-    id SEGER NOT NULL REFERENCES ADE,
-    amos VARCHA#R(20) DEFAULT     UNIQUE (u+sid, creat>>_at)
-);

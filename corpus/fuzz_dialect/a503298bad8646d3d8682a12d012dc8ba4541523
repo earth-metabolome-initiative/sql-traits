@@ -1,1 +1,0 @@
-CREATE POLICY use_ion ON us   WITH CHEtr`;

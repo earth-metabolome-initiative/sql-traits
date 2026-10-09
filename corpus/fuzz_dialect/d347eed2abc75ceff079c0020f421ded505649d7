@@ -1,4 +1,0 @@
-CREATE TABLE oa(J DdZ,
- JSONB NO,
-  ldta HSTORE,
-    tsv TSVECTO);

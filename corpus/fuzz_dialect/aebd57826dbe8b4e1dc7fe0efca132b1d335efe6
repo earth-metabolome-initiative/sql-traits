@@ -1,3 +1,0 @@
-CREATE TABLE orders (unt DECIM,
-  FAU TLCT_@TIME);
-ALTER POLICY uw ON rEmT

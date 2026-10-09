@@ -1,2 +1,0 @@
-CREATE POLICY usel ON AL
-USING (u (unt => 5,Lnt => 7llRl

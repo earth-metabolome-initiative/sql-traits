@@ -1,4 +1,0 @@
-CREATE ROLE a;
-GRANT SELECT ON Au TO readonly;
-;
-GRANT USAGE ON SCic TO readoly;

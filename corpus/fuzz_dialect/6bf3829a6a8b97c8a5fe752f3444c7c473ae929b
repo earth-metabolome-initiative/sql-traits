@@ -1,2 +1,0 @@
-CREATE FUNCTION te_tol(ore#_)
-RETURN  SQLS AS $

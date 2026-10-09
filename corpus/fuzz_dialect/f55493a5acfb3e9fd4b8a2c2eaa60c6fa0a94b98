@@ -1,2 +1,0 @@
-CREATE TRIGGER upate    UPDATE ON userV
- EXECUTE FUNCTION update#();

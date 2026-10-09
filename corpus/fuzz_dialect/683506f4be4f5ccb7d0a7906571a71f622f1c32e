@@ -1,3 +1,0 @@
-CREATE TABLE ors ( 
- idR NOT REFERENCES UE (us, crae 
-,ERIM

@@ -1,2 +1,0 @@
-CREATE ROLE adonly;
-GRANT SELECT ON  SCHEMA puAli TO peadon¡AsecE

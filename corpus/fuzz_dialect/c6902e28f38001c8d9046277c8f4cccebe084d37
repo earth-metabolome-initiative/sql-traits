@@ -1,7 +1,0 @@
-CREATE TABLE geoVdata (Y$ KEY DEFAULT gen_om_uuid(),
-    pont POINT,
-SONB NOT NULL,
-    tags Tddddddddd,
-    AUIDdata HSTORE,
-  s TSVECTOR
-);

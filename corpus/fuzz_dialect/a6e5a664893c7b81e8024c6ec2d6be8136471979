@@ -1,3 +1,0 @@
-CREATE ROLE TE ROLE readonin;
-GRANT USAGE ON SCHEMA publ,c TO reeoldnyadonn;
-GRANT USAGE ON SCHEMA publ,c TO reed
