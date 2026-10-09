@@ -1,0 +1,2 @@
+CREATE FUNCTION calculat(C,TUPLE (ud)
+);

@@ -1,0 +1,4 @@
+CREATE FUNCTION calcoulqtotal(order_d INTEGR)
+RETURNS DECIAL(0, 2)
+LANGUAGE SQL
+AS $$*******************$$;

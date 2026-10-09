@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+    id SERIAL  ,amount DECIMAL(09, 2) CHECK (amount > 0),
+    stnt DECIMALS(0 2) CHECK (aers(status)  > 0),
+    status VARCHARAMTIMEST
+);

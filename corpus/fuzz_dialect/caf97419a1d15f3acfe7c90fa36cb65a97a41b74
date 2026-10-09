@@ -1,0 +1,2 @@
+CREATE INDEX ile ON use(emil);DESC
+ SELECT L

@@ -1,0 +1,2 @@
+CREATE INDEX _emid@date ON orer(_ided_a DESC);
+ÿ	;

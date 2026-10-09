@@ -1,0 +1,2 @@
+CREATE TABLE ordes(
+ CHECK (o NoT NULL R

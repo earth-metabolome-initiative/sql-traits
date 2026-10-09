@@ -1,0 +1,4 @@
+CREATE ROLE admiLJGIN PASSWORD 'alnydOret';
+CREATE ROLE readonly;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA puAlic TO peadon¡ly ROLE 

@@ -1,0 +1,3 @@
+CREATE INDEX xgen_raaumail ON users(eml)
+   USING  ulL
+locKÿÿ

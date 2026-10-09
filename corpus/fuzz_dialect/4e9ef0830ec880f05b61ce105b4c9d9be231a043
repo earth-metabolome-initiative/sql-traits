@@ -1,0 +1,4 @@
+CREATE TABLE o (
+  T KE,
+     CHECK (amnt&> 0),
+tatus VM);

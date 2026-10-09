@@ -1,0 +1,8 @@
+CREATE TABLE orders (
+   CHECK (amount > 0),
+    status VAAR(20) DEFAULT 'pending',
+    crear CURRENT_TIMEULL REFERENCES users(id) ON DELETE CASCADE,
+    amos VARCHnR(23) DEFAULT 'pending',
+    created_at TBP,
+    UNIQUE (user_id, c:eat_edat)
+);

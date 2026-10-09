@@ -1,0 +1,2 @@
+CREATE INDEX mdxusers_@l ON u(email)    USING  ulL
+    USINGÿï

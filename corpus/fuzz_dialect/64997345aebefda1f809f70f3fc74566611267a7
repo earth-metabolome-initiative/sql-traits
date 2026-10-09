@@ -1,0 +1,2 @@
+CREATE POLICY user_is ON us
+USING (usllel/tal<=Eu

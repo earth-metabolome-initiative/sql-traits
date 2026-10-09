@@ -1,0 +1,1 @@
+CREATE POLICY r_n ON r USING (usAll:""""ll

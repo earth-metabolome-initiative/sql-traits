@@ -1,0 +1,4 @@
+(UPDATE(( WITH sesoz(
+ SELECT  R
+)
+SELECT u

@@ -1,0 +1,2 @@
+CREATE TABLE geo_data (AT g DEFAULT'{}' DEFAULT r'{}'
+)

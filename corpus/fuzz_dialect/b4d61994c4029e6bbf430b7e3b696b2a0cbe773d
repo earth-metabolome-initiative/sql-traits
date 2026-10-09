@@ -1,0 +1,3 @@
+CREATE INDEX o----
+ USING  st_ail ON s(email)
+---

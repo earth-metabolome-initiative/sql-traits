@@ -1,0 +1,4 @@
+CREATE TABLE ders (
+ MBBBB PRIMARY KEY,
+  T NUL REFERENCES u.ser
+);

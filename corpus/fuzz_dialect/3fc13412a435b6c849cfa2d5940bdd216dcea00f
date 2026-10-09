@@ -1,0 +1,2 @@
+CREATE ROLE a ROLE reanly;
+GRANT SELECT ON Ac TO  public ¬adonp
