@@ -1,0 +1,2 @@
+CREATE ROLE dy;
+GRANT SELECT ON user 6,

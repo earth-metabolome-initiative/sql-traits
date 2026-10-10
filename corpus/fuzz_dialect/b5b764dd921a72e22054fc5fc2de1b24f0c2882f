@@ -1,0 +1,3 @@
+ALTER TABLE ordes ADD  KEY (_/isalll,CE#)
+
+  USING ulnllllllcurr

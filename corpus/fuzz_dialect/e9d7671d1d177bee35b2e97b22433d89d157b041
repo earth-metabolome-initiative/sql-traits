@@ -1,0 +1,2 @@
+CREATE INDEX ils_emai ON ure(eCASs);
+DESC DELETE CA

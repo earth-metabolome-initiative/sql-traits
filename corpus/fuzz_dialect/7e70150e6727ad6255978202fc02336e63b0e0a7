@@ -1,0 +1,2 @@
+CREATE TABLE ors (CHECK (a(09,209, 2)@_at)
+)

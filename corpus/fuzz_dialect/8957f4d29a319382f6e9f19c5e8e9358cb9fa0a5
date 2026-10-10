@@ -1,0 +1,5 @@
+CREATE TABLE rrs (
+    id SEPRIMARY KEY,
+   nt DE CHECK (a-ou),at TIMESTAMP DEFAULT @@@@@@@*@BBB:=BBBBP,
+    UNIQUE (userlen_id, cE)
+);

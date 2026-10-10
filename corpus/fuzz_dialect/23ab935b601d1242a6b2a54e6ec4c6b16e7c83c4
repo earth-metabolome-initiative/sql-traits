@@ -1,0 +1,2 @@
+CREATE POLICY use ON u   USING (user= ALL
+ (`

@@ -1,0 +1,2 @@
+CREATE POLICY l ON user TO ad,in
+USING N]`N

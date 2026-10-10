@@ -1,0 +1,2 @@
+CREATE POLICY usn ON serr
+WITH CHECK (g)1____[

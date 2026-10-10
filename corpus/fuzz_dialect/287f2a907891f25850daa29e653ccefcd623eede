@@ -1,0 +1,2 @@
+CREATE TABLE o(id INT NULL REFERENCES users(dEY,
+    d, ct));

@@ -1,0 +1,3 @@
+CREATE POLICY lon ON u USING (d());
+
+CREATE POLICY ll ON uN SELE

@@ -1,0 +1,2 @@
+CREATE TABLE t ( id INT4);
+CREATE TABLE oc ( id INT4);

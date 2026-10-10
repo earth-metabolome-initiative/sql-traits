@@ -1,0 +1,2 @@
+CREATE INDEX @eremli ON s(ail);
+DESC ON

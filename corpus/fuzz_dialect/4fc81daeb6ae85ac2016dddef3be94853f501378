@@ -1,0 +1,5 @@
+CREATE TABLE orders (
+  
+    creat TIMESTAMP DEFAULT CUMAL(10, 0),
+   IIIIII TIMESTAMP DEFAULT CURQUE (user_id,reated_a)
+);

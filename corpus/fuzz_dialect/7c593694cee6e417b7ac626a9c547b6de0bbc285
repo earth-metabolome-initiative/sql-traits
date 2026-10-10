@@ -1,0 +1,2 @@
+CREATE FUNCTION c(_ DEFAULT 'pending',
+  WR(20) DEFAULT 'pg',

@@ -1,0 +1,5 @@
+CREATE TABLE rders (
+    id Y,
+   nt DE CHECK (ano-u),
+    st VAAR(20) DEFAULT n'pendi'DEFAULT @}@@@@
+);

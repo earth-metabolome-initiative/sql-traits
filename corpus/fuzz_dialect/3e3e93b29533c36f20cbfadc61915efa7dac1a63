@@ -1,0 +1,3 @@
+CREATE FUNCTION calculateapo_ttl(ordeentme,TUPLE (T, stCASC, id 
+t)
+);
