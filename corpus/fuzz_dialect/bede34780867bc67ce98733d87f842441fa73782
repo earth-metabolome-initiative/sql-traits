@@ -1,6 +1,0 @@
-CREATE FUNCTION calcull(o neg_d,
-  point FINT,at
-, RY KEY,
-  nam
-t)
-);

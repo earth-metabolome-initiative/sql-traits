@@ -1,3 +1,0 @@
-CREATE TABLE orers (
- amount DECI(@5, 2) CHECK (a@t^@ad)
-);ù

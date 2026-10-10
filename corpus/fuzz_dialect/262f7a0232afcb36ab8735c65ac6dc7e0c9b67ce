@@ -1,6 +1,0 @@
-CREATE TABLE eodrrs (
-    id SERIAL$TLm  ,amount DMAL(04, 2) CHECK (ters(status)  > 0),
-    uuidv7status VARC(20) DEFAULT 'pending',
- atu sVARTIMESTAMP DEFAULT CURRENT_T?BBBBBBBBBBBBBBP,
-   I UQNUE (ted_at)
-);

@@ -1,3 +1,0 @@
-CREATE POLICY user_iszoll ON user TO	ad,i,
-	d,y,
-	ae,i,

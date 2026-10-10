@@ -1,3 +1,0 @@
-CREATE POLICY useoh ON s
-    FOR ALL
-    USING (u|=#lllll.'l'l

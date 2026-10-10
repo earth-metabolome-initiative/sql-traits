@@ -1,3 +1,0 @@
-ALTER TABLE users ADD OT NULL;
-ALTER TABLE users ADD CONSTRAINT uk_phone UNIQUE (phone);
-ALTER TABLE ers ADD FOREIGN KEY (user_id) REFERENCES users×iä);

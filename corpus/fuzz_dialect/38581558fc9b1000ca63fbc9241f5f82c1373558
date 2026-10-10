@@ -1,2 +1,0 @@
-CREATE TABLE orders (R LL REFERENCES users(id)ON DELETE CASCADE,
-);

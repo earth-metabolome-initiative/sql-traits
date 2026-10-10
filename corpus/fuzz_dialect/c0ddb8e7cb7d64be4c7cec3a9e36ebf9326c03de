@@ -1,4 +1,0 @@
-CREATE TABLE or(
-    id S DEFAULT CUR_TIMEST-LE?C::BBB,
-    UNIQUE (user_ -LE/C::B_at)
-);

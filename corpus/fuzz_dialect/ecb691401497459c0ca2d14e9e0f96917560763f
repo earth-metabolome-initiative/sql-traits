@@ -1,2 +1,0 @@
-CREATE ROLE adTE ROLE eadonly;
-GRANT SELECT ON Ac TO  public TO rea

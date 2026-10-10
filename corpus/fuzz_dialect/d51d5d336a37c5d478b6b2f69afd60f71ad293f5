@@ -1,2 +1,0 @@
-CREATE ROLE dl;
-GRANT SELECT ON user FO,RO,Rnl

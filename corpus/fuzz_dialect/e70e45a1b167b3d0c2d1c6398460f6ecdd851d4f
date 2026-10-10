@@ -1,1 +1,0 @@
-CREATE POLICY user_n ON r  USING (usdll:""""ll

@@ -1,2 +1,0 @@
-CREATE POLICY user_is ON us
-USING (usllel/t<=Eu

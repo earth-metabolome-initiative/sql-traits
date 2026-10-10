@@ -1,4 +1,0 @@
-CREATE TABLE o (
-  TIMAY KE,
-     CHECK (amnt&> 0),
-tatus VM);

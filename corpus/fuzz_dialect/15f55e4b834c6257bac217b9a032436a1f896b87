@@ -1,3 +1,0 @@
-CREATE TABLE ords (
-    id L(22, 2) CHECK (ant@> 0),
-   stnt D);

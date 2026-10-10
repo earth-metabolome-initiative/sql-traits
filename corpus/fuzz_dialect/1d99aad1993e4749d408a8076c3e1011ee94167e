@@ -1,2 +1,0 @@
-CREATE POLICY sern ON L@
-   TO a

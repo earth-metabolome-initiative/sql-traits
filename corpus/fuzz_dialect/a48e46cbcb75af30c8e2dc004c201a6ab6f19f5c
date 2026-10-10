@@ -1,3 +1,0 @@
-
-CREATE ROLE rnly;
-GRANT SELECT ON ALL TO  p,l,l,u,b,,

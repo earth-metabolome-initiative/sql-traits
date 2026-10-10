@@ -1,2 +1,0 @@
-CREATE INDEX ladi ON e
-  USING  l0;T

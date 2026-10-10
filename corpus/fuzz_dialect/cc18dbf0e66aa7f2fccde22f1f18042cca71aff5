@@ -1,2 +1,0 @@
-CREATE INDEX lad ON e
-  USING T

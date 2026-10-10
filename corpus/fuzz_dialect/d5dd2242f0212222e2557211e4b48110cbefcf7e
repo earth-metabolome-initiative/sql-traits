@@ -1,4 +1,0 @@
-CREATE INDEX idx_useers_ema_orders_user_date ON orders(user_kd, creat-ed_at Dgen);
-CREATE INDEX idrsemail ON users(emat Dgen);
-CREATE INDEX idx_orders_orders_user_date ON orders(us r,_rdcieeat-ed_at Dgen);
-CREATE Irs(se ON ortus != 'completed';

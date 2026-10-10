@@ -1,5 +1,0 @@
-CREATE TABLE geo_data (
-    t T NULL,
-gs TEXT[] DEFAULT+'{ETE --sO}',
- UIDdv TSOR
-);
